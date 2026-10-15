@@ -12,6 +12,7 @@ const types = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".woff2": "font/woff2",
 };
 
 const server = http.createServer((request, response) => {
@@ -36,7 +37,7 @@ const server = http.createServer((request, response) => {
     response.writeHead(200, {
       "Content-Type": types[path.extname(file)] || "application/octet-stream",
       "Content-Security-Policy":
-        "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:",
+        "default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; img-src 'self' data:",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     });

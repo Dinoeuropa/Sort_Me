@@ -3,50 +3,53 @@ import test from "node:test";
 import {
   MAX_LENGTH,
   MAX_VALUE,
-  parseArrayText,
+  nearlySortedArray,
   randomArray,
   reversedArray,
-  nearlySortedArray,
+  slopeArray,
 } from "../src/arrays.js";
 
-test("constants allow values and lengths up to 1000", () => {
-  assert.equal(MAX_VALUE, 1000);
-  assert.equal(MAX_LENGTH, 1000);
+function isUnitProgression(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  if (sorted[0] !== 1 || sorted[sorted.length - 1] !== values.length) return false;
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i] !== sorted[i - 1] + 1) return false;
+  }
+  return true;
+}
+
+test("a sort list stops at 250 values in a +1 progression", () => {
+  assert.equal(MAX_LENGTH, 250);
+  assert.equal(MAX_VALUE, 250);
+  assert.equal(slopeArray(250).at(-1), 250);
+  assert.throws(() => slopeArray(251), /250/);
 });
 
-test("parseArrayText accepts integers from 1 through 1000", () => {
-  assert.deepEqual(parseArrayText("1, 1000 42"), [1, 1000, 42]);
+test("the slope is the sequence 1, 2, 3 and so on", () => {
+  assert.deepEqual(slopeArray(1), [1]);
+  assert.deepEqual(slopeArray(5), [1, 2, 3, 4, 5]);
 });
 
-test("parseArrayText rejects values above 1000, below 1, and non-integers", () => {
-  assert.throws(() => parseArrayText("1001"), /1 and 1000/);
-  assert.throws(() => parseArrayText("0"), /1 and 1000/);
-  assert.throws(() => parseArrayText("-4"), /1 and 1000/);
-  assert.throws(() => parseArrayText("1.5"), /integer/);
-  assert.throws(() => parseArrayText("nope"), /integer/);
-  assert.throws(() => parseArrayText(""), /at least one/);
+test("every generated array sorts into a +1 progression", () => {
+  for (const length of [2, 5, 48, 250]) {
+    assert.equal(isUnitProgression(slopeArray(length)), true, `slope ${length}`);
+    assert.equal(isUnitProgression(reversedArray(length)), true, `reversed ${length}`);
+    assert.equal(isUnitProgression(randomArray(length, () => 0.3)), true, `random ${length}`);
+    assert.equal(isUnitProgression(nearlySortedArray(length, () => 0.2)), true, `nearly ${length}`);
+  }
 });
 
-test("parseArrayText rejects more than 1000 numbers", () => {
-  const text = Array.from({ length: 1001 }, () => "1").join(" ");
-  assert.throws(() => parseArrayText(text), /1000/);
+test("reversedArray is the slope running downward", () => {
+  assert.deepEqual(reversedArray(5), [5, 4, 3, 2, 1]);
 });
 
-test("randomArray stays inside the requested value cap", () => {
-  const values = randomArray(1000, 1000, () => 0.999999);
-  assert.equal(values.length, 1000);
-  assert.ok(values.every((value) => Number.isInteger(value) && value >= 1 && value <= 1000));
-  assert.ok(values.includes(1000));
+test("nearlySortedArray swaps two positions on the slope", () => {
+  const draws = [0, 0.9];
+  assert.deepEqual(nearlySortedArray(10, () => draws.shift()), [10, 2, 3, 4, 5, 6, 7, 8, 9, 1]);
 });
 
-test("reversedArray spreads from the cap down to 1", () => {
-  assert.deepEqual(reversedArray(5, 1000), [1000, 751, 501, 251, 1]);
-  assert.deepEqual(reversedArray(1000, 1000)[0], 1000);
-  assert.deepEqual(reversedArray(1000, 1000)[999], 1);
-});
-
-test("nearlySortedArray swaps a few positions in an ascending array", () => {
-  const draws = [0.0, 0.9];
-  const values = nearlySortedArray(10, 1000, () => draws.shift());
-  assert.deepEqual(values, [1000, 112, 223, 334, 445, 556, 667, 778, 889, 1]);
+test("randomArray shuffles the slope without repeating or skipping", () => {
+  const values = randomArray(8, () => 0);
+  assert.deepEqual(values.slice().sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.notDeepEqual(values, [1, 2, 3, 4, 5, 6, 7, 8]);
 });

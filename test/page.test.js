@@ -11,8 +11,14 @@ test("the page is a local document with selectable programs", () => {
   assert.doesNotMatch(page, /https?:\/\//);
   assert.match(page, /id="program"/);
   assert.match(page, /id="view"/);
-  assert.match(page, /max="1000"/);
+  assert.match(page, /id="compare"/);
+  assert.match(page, /id="size" type="range" min="1" max="250"/);
+  assert.doesNotMatch(page, /id="cap"/);
+  assert.doesNotMatch(page, /id="custom"/);
+  assert.doesNotMatch(page, /local-pill/);
   assert.match(page, /src="\.\/src\/app\.js"/);
+  assert.match(page, /vendor\/katex\/katex\.min\.css/);
+  assert.match(page, /font-src 'self'/);
 });
 
 test("the server binds only to localhost", () => {
