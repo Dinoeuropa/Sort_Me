@@ -1,30 +1,26 @@
-import {
-  MAX_LENGTH,
-  MAX_VALUE,
-  nearlySortedArray,
-  parseArrayText,
-  randomArray,
-  reversedArray,
-} from "./arrays.js";
+import katex from "../vendor/katex/katex.js";
+import { MAX_LENGTH, nearlySortedArray, randomArray, reversedArray } from "./arrays.js";
 import { createRun, PROGRAMS } from "./algorithms.js";
 import { comparisonLowerBound } from "./bounds.js";
+import { startComparison, stepLanes } from "./compare.js";
 import { draw, VIEWS } from "./views.js";
 
 const programSelect = document.querySelector("#program");
 const viewSelect = document.querySelector("#view");
 const sizeInput = document.querySelector("#size");
 const sizeOut = document.querySelector("#size-out");
-const capInput = document.querySelector("#cap");
-const capOut = document.querySelector("#cap-out");
 const speedInput = document.querySelector("#speed");
 const speedOut = document.querySelector("#speed-out");
+const complexityEl = document.querySelector("#complexity");
+const caseLabel = document.querySelector("#case-label");
+const boundFormula = document.querySelector("#bound-formula");
 const blurb = document.querySelector("#blurb");
 const viewBlurb = document.querySelector("#view-blurb");
 const toggleButton = document.querySelector("#toggle");
 const stepButton = document.querySelector("#step");
 const resetButton = document.querySelector("#reset");
-const customForm = document.querySelector("#custom-form");
-const customInput = document.querySelector("#custom");
+const compareButton = document.querySelector("#compare");
+const compareList = document.querySelector("#compare-list");
 const error = document.querySelector("#error");
 const canvas = document.querySelector("#canvas");
 const statusEl = document.querySelector("#status");
@@ -32,6 +28,7 @@ const comparisonsEl = document.querySelector("#comparisons");
 const boundEl = document.querySelector("#bound");
 const swapsEl = document.querySelector("#swaps");
 const writesEl = document.querySelector("#writes");
+const results = document.querySelector("#results");
 const meter = document.querySelector("#meter");
 const meterFill = document.querySelector("#meter-fill");
 const note = document.querySelector("#note");
@@ -47,22 +44,30 @@ const state = {
   preset: "random",
   programId: "merge",
   viewId: "bars",
-  maxValue: MAX_VALUE,
   original: [],
   generator: null,
   frame: null,
+  lanes: null,
   running: false,
   finished: false,
 };
 
 sizeInput.max = String(MAX_LENGTH);
-capInput.max = String(MAX_VALUE);
+sizeOut.max = String(MAX_LENGTH);
 
 for (const program of PROGRAMS) {
   const option = document.createElement("option");
   option.value = program.id;
-  option.textContent = `${program.name} · ${program.complexity}`;
+  option.textContent = program.name;
   programSelect.append(option);
+
+  const label = document.createElement("label");
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.value = program.id;
+  box.checked = program.id === "merge" || program.id === "quick";
+  label.append(box, document.createTextNode(program.name));
+  compareList.append(label);
 }
 programSelect.value = state.programId;
 
@@ -100,8 +105,16 @@ function idleFrame(array) {
   };
 }
 
+function programById(id) {
+  return PROGRAMS.find((program) => program.id === id);
+}
+
+function selectedCompareIds() {
+  return [...compareList.querySelectorAll("input:checked")].map((box) => box.value);
+}
+
 function paint() {
-  if (!state.frame) return;
+  if (!state.frame && !state.lanes) return;
   const rect = canvas.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const width = Math.max(1, Math.floor(rect.width));
@@ -113,11 +126,38 @@ function paint() {
     canvas.height = pixelHeight;
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  draw(state.viewId, ctx, state.frame, width, height);
+  if (state.lanes) drawLanes(width, height);
+  else draw(state.viewId, ctx, state.frame, width, height);
 }
 
-function currentProgram() {
-  return PROGRAMS.find((program) => program.id === state.programId);
+function drawLanes(width, height) {
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#17140f";
+  ctx.fillRect(0, 0, width, height);
+  const labelWidth = Math.min(132, Math.max(72, width * 0.18));
+  const laneHeight = height / state.lanes.length;
+  state.lanes.forEach((lane, index) => {
+    const y = index * laneHeight;
+    const frame = lane.frame ?? idleFrame(state.original);
+    frame.maxValue = scaleOf(frame.array);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(labelWidth, y, Math.max(1, width - labelWidth), laneHeight);
+    ctx.clip();
+    ctx.translate(labelWidth, y);
+    draw(state.viewId, ctx, frame, Math.max(1, width - labelWidth), laneHeight);
+    ctx.restore();
+    ctx.fillStyle = "#3d342b";
+    ctx.fillRect(labelWidth, y + laneHeight - 1, width - labelWidth, 1);
+  });
+  ctx.font = "13px Georgia, serif";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  state.lanes.forEach((lane, index) => {
+    const y = index * laneHeight + laneHeight / 2;
+    ctx.fillStyle = lane.finished ? "#79c2a8" : "#f6efe4";
+    ctx.fillText(programById(lane.id).name, 10, y);
+  });
 }
 
 function clampNumber(value, min, max) {
@@ -126,13 +166,64 @@ function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, number));
 }
 
+function renderMath(element, latex) {
+  if (element.dataset.latex === latex) return;
+  element.dataset.latex = latex;
+  katex.render(latex, element, { throwOnError: false, displayMode: false });
+}
+
+function renderResults() {
+  if (!state.lanes) {
+    results.hidden = true;
+    results.dataset.key = "";
+    results.replaceChildren();
+    return;
+  }
+  const key = state.lanes.map((lane) => lane.id).join(",");
+  if (results.dataset.key !== key) {
+    results.dataset.key = key;
+    results.hidden = false;
+    results.replaceChildren();
+    for (const lane of state.lanes) {
+      const program = programById(lane.id);
+      const item = document.createElement("li");
+      item.dataset.id = lane.id;
+      const title = document.createElement("span");
+      title.className = "result-name";
+      const name = document.createElement("strong");
+      name.textContent = program.name;
+      const math = document.createElement("span");
+      math.className = "math";
+      katex.render(program.latex, math, { throwOnError: false, displayMode: false });
+      title.append(name, math);
+      const detail = document.createElement("span");
+      detail.className = "detail";
+      item.append(title, detail);
+      results.append(item);
+    }
+  }
+  for (const lane of state.lanes) {
+    const frame = lane.frame ?? idleFrame(state.original);
+    const detail = results.querySelector(`li[data-id="${lane.id}"] .detail`);
+    const stateLabel = lane.finished ? "sorted" : "running";
+    detail.textContent = `${frame.comparisons.toLocaleString()} comparisons · ${frame.swaps.toLocaleString()} swaps · ${stateLabel}`;
+  }
+}
+
 function renderChrome() {
-  const program = currentProgram();
+  const program = programById(state.programId);
   const view = VIEWS.find((item) => item.id === state.viewId);
-  blurb.textContent = program.blurb;
+  blurb.textContent = state.lanes ? "Each lane sorts the same 1…n array." : program.blurb;
+  if (state.lanes) {
+    complexityEl.hidden = true;
+    caseLabel.textContent = "";
+  } else {
+    complexityEl.hidden = false;
+    renderMath(complexityEl, program.latex);
+    caseLabel.textContent = program.caseLabel;
+  }
   viewBlurb.textContent = view.blurb;
   sizeOut.value = sizeInput.value;
-  capOut.value = capInput.value;
   speedOut.textContent = `${stepsFor(speedInput.value)} / frame`;
 
   for (const [name, button] of Object.entries(presetButtons)) {
@@ -140,26 +231,41 @@ function renderChrome() {
   }
 
   if (state.running) toggleButton.textContent = "Pause";
-  else if (state.generator && !state.finished) toggleButton.textContent = "Resume";
+  else if ((state.generator || state.lanes) && !state.finished) toggleButton.textContent = "Resume";
   else toggleButton.textContent = "Sort";
 
-  if (state.running) statusEl.textContent = "Sorting";
-  else if (state.finished) statusEl.textContent = "Sorted";
-  else if (state.generator) statusEl.textContent = "Paused";
+  if (state.running) statusEl.textContent = state.lanes ? "Comparing" : "Sorting";
+  else if (state.finished) statusEl.textContent = state.lanes ? "Compared" : "Sorted";
+  else if (state.generator || state.lanes) statusEl.textContent = "Paused";
   else statusEl.textContent = "Ready";
 
   const bound = comparisonLowerBound(state.original.length);
-  const comparisons = state.frame.comparisons;
-  comparisonsEl.textContent = comparisons.toLocaleString();
   boundEl.textContent = bound.toLocaleString();
-  swapsEl.textContent = state.frame.swaps.toLocaleString();
-  writesEl.textContent = state.frame.writes.toLocaleString();
+  const frame = state.frame ?? idleFrame(state.original);
+  comparisonsEl.textContent = state.lanes ? "—" : frame.comparisons.toLocaleString();
+  swapsEl.textContent = state.lanes ? "—" : frame.swaps.toLocaleString();
+  writesEl.textContent = state.lanes ? "—" : frame.writes.toLocaleString();
+  renderResults();
+
+  if (state.lanes) {
+    const finishedComparisons = state.lanes
+      .filter((lane) => programById(lane.id).comparison && lane.finished)
+      .map((lane) => lane.frame?.comparisons ?? 0);
+    const busiest = finishedComparisons.length ? Math.max(...finishedComparisons) : 0;
+    const ratio = bound === 0 ? 0 : busiest / bound;
+    meter.classList.toggle("over", ratio > 1);
+    meterFill.style.width = `${Math.min(100, ratio * 100)}%`;
+    note.textContent = state.finished
+      ? "Same array in every lane. Fewer comparisons is closer to the lower bound."
+      : "The lanes share one array and the same step budget.";
+    return;
+  }
 
   if (!program.comparison) {
     meter.classList.remove("over");
     meterFill.style.width = "0%";
     note.textContent =
-      "This program does not compare values, so the ⌈log₂(n!)⌉ lower bound does not apply. The bound is still shown for reference.";
+      "This program does not compare values, so the lower bound does not apply. The bound is still shown for reference.";
     return;
   }
 
@@ -170,15 +276,15 @@ function renderChrome() {
     return;
   }
 
-  const ratio = comparisons / bound;
+  const ratio = frame.comparisons / bound;
   meter.classList.toggle("over", ratio > 1);
   meterFill.style.width = `${Math.min(100, ratio * 100)}%`;
   if (state.finished && ratio > 1) {
-    note.textContent = `${ratio.toFixed(1)}× the worst-case comparison lower bound ⌈log₂(n!)⌉.`;
+    note.textContent = `${ratio.toFixed(1)}× the worst-case lower bound.`;
   } else if (state.finished) {
     note.textContent = "Finished at or under the worst-case lower bound. Typical inputs often do.";
   } else {
-    note.textContent = "The meter fills as comparisons approach ⌈log₂(n!)⌉, the worst-case lower bound.";
+    note.textContent = "The meter fills as comparisons approach the worst-case lower bound.";
   }
 }
 
@@ -186,35 +292,34 @@ function stop() {
   state.running = false;
 }
 
+function clearRun() {
+  state.generator = null;
+  state.lanes = null;
+  state.finished = false;
+  state.running = false;
+}
+
 function useArray(values, preset) {
-  stop();
+  clearRun();
   state.preset = preset;
   state.original = values.slice();
-  state.generator = null;
-  state.finished = false;
   state.frame = idleFrame(state.original);
   error.textContent = "";
   paint();
   renderChrome();
 }
 
-function readSize() {
-  const length = Number(sizeInput.value);
-  const maxValue = Number(capInput.value);
-  state.maxValue = maxValue;
-  return { length, maxValue };
-}
-
 function applyPreset(preset) {
-  const { length, maxValue } = readSize();
+  const length = Number(sizeInput.value);
   let values;
-  if (preset === "reversed") values = reversedArray(length, maxValue);
-  else if (preset === "nearly") values = nearlySortedArray(length, maxValue);
-  else values = randomArray(length, maxValue);
+  if (preset === "reversed") values = reversedArray(length);
+  else if (preset === "nearly") values = nearlySortedArray(length);
+  else values = randomArray(length);
   useArray(values, preset);
 }
 
 function ensureRun() {
+  if (state.lanes) return;
   if (state.finished || !state.generator) {
     state.generator = createRun(state.programId, state.original);
     state.finished = false;
@@ -223,6 +328,16 @@ function ensureRun() {
 }
 
 function advance(count) {
+  if (state.lanes) {
+    const done = stepLanes(state.lanes, count);
+    if (done) {
+      state.finished = true;
+      state.running = false;
+    }
+    paint();
+    renderChrome();
+    return;
+  }
   ensureRun();
   for (let i = 0; i < count; i += 1) {
     const next = state.generator.next();
@@ -250,17 +365,31 @@ function toggle() {
     renderChrome();
     return;
   }
-  ensureRun();
+  if (!state.lanes) ensureRun();
   state.running = true;
   renderChrome();
   requestAnimationFrame(loop);
 }
 
-programSelect.addEventListener("change", () => {
-  state.programId = programSelect.value;
+function beginCompare() {
+  const ids = selectedCompareIds();
+  if (ids.length < 2) {
+    error.textContent = "Pick at least two sorting programs.";
+    return;
+  }
   stop();
   state.generator = null;
   state.finished = false;
+  state.lanes = startComparison(ids, state.original);
+  state.frame = null;
+  error.textContent = "";
+  paint();
+  renderChrome();
+}
+
+programSelect.addEventListener("change", () => {
+  state.programId = programSelect.value;
+  clearRun();
   state.frame = idleFrame(state.original);
   paint();
   renderChrome();
@@ -275,55 +404,24 @@ viewSelect.addEventListener("change", () => {
 sizeInput.addEventListener("input", () => {
   sizeOut.value = sizeInput.value;
 });
-capInput.addEventListener("input", () => {
-  capOut.value = capInput.value;
-});
 sizeOut.addEventListener("change", () => {
   sizeInput.value = String(clampNumber(sizeOut.value, 1, MAX_LENGTH));
   sizeInput.dispatchEvent(new Event("change"));
 });
-capOut.addEventListener("change", () => {
-  capInput.value = String(clampNumber(capOut.value, 1, MAX_VALUE));
-  capInput.dispatchEvent(new Event("change"));
-});
 speedInput.addEventListener("input", renderChrome);
-
-sizeInput.addEventListener("change", () => applyPreset(state.preset === "custom" ? "random" : state.preset));
-capInput.addEventListener("change", () => {
-  state.maxValue = Number(capInput.value);
-  if (state.preset === "custom") {
-    state.frame = idleFrame(state.original);
-    paint();
-    renderChrome();
-    return;
-  }
-  applyPreset(state.preset);
-});
+sizeInput.addEventListener("change", () => applyPreset(state.preset));
 
 presetButtons.random.addEventListener("click", () => applyPreset("random"));
 presetButtons.reversed.addEventListener("click", () => applyPreset("reversed"));
 presetButtons.nearly.addEventListener("click", () => applyPreset("nearly"));
 toggleButton.addEventListener("click", toggle);
+compareButton.addEventListener("click", beginCompare);
 stepButton.addEventListener("click", () => {
   stop();
   advance(1);
 });
 resetButton.addEventListener("click", () => {
   useArray(state.original, state.preset);
-});
-
-customForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  try {
-    const values = parseArrayText(customInput.value);
-    sizeInput.value = String(values.length);
-    const peak = values.reduce((max, value) => Math.max(max, value), 1);
-    if (peak > Number(capInput.value)) capInput.value = String(peak);
-    state.maxValue = Number(capInput.value);
-    useArray(values, "custom");
-  } catch (err) {
-    error.textContent = err.message;
-  }
 });
 
 window.addEventListener("keydown", (event) => {
@@ -340,4 +438,5 @@ window.addEventListener("keydown", (event) => {
 
 new ResizeObserver(() => paint()).observe(canvas.parentElement);
 
+renderMath(boundFormula, "\\lceil \\log_2(n!) \\rceil");
 applyPreset("random");

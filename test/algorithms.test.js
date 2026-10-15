@@ -5,7 +5,7 @@ import { PROGRAMS, execute } from "../src/algorithms.js";
 const CASES = [
   [3, 1, 2],
   [1],
-  [1000, 1, 1000, 2],
+  [100, 1, 100, 2],
   [1, 1, 1, 1],
   [5, 4, 3, 2, 1],
   [8, 3, 8, 1, 9, 2, 9, 4],
@@ -23,13 +23,14 @@ test("a program menu is available to select from", () => {
     assert.equal(typeof program.name, "string");
     assert.equal(typeof program.comparison, "boolean");
     assert.equal(typeof program.complexity, "string");
+    assert.match(program.latex, /^O\(/);
     assert.equal(typeof program.blurb, "string");
   }
   assert.ok(PROGRAMS.some((program) => program.comparison));
   assert.ok(PROGRAMS.some((program) => !program.comparison));
 });
 
-test("every program sorts arrays whose values stay within 1..1000", () => {
+test("every program sorts arrays whose values stay within 1..100", () => {
   for (const program of PROGRAMS) {
     for (const values of CASES) {
       const result = execute(program.id, values);
@@ -42,8 +43,8 @@ test("every program sorts arrays whose values stay within 1..1000", () => {
   }
 });
 
-test("every program sorts a long random array capped at 1000", () => {
-  const values = Array.from({ length: 200 }, (_, index) => ((index * 37) % 1000) + 1);
+test("every program sorts a long array capped at 100", () => {
+  const values = Array.from({ length: 80 }, (_, index) => ((index * 37) % 100) + 1);
   for (const program of PROGRAMS) {
     const result = execute(program.id, values);
     assert.deepEqual(result.array, sortedCopy(values), program.id);

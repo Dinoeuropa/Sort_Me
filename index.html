@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:"
+      content="default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; img-src 'self' data:"
     />
     <title>Sort Me — local lower-bound visualiser</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./vendor/katex/katex.min.css" />
   </head>
   <body>
     <div class="shell">
@@ -18,10 +19,9 @@
           <p class="eyebrow">Lower bound</p>
           <h1>Sort Me</h1>
           <p class="lede">
-            Watch a sorting program against the comparison lower bound. Values stay between 1 and 1000.
+            Every array is a shuffle of 1, 2, 3… and the length stops at 250. Once it is sorted, each step rises by 1.
             Space plays, and the right arrow steps.
           </p>
-          <p class="local-pill">Local only — nothing leaves this browser</p>
         </header>
 
         <div class="controls">
@@ -29,6 +29,10 @@
             Sorting program
             <select id="program"></select>
           </label>
+          <p class="formula-row">
+            <span id="complexity" class="formula"></span>
+            <span id="case-label" class="case-label"></span>
+          </p>
           <p id="blurb" class="blurb"></p>
 
           <label>
@@ -40,17 +44,9 @@
           <div class="field">
             <div class="slider-row">
               <label for="size">Array length</label>
-              <input id="size-out" type="number" min="1" max="1000" value="48" aria-label="Array length number" />
+              <input id="size-out" type="number" min="1" max="250" value="100" aria-label="Array length number" />
             </div>
-            <input id="size" type="range" min="1" max="1000" value="48" />
-          </div>
-
-          <div class="field">
-            <div class="slider-row">
-              <label for="cap">Value cap</label>
-              <input id="cap-out" type="number" min="1" max="1000" value="1000" aria-label="Value cap number" />
-            </div>
-            <input id="cap" type="range" min="1" max="1000" value="1000" />
+            <input id="size" type="range" min="1" max="250" value="100" />
           </div>
 
           <div class="field">
@@ -74,17 +70,14 @@
           </div>
         </div>
 
-        <form class="custom" id="custom-form">
-          <label>
-            Custom array
-            <textarea id="custom" placeholder="1, 1000, 42, 7" spellcheck="false"></textarea>
-          </label>
-          <p class="lede">Integers from 1 to 1000. Up to 1000 numbers, separated by spaces or commas.</p>
+        <fieldset class="compare">
+          <legend>Compare programs</legend>
+          <div id="compare-list" class="compare-list"></div>
           <div class="row">
-            <button type="submit" id="load">Use this array</button>
+            <button type="button" id="compare">Compare</button>
           </div>
           <p id="error" class="error" role="alert"></p>
-        </form>
+        </fieldset>
       </aside>
 
       <main class="stage">
@@ -105,6 +98,8 @@
           <div class="stat"><span>Swaps</span><strong id="swaps">0</strong></div>
           <div class="stat"><span>Writes</span><strong id="writes">0</strong></div>
         </div>
+        <ol id="results" class="results" hidden></ol>
+        <p id="bound-formula" class="bound-line"></p>
         <div id="meter" class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
         <p id="note" class="note"></p>
       </main>
