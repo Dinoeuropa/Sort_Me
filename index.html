@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:"
+    />
+    <title>Sort Me — local lower-bound visualiser</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="panel">
+        <header>
+          <p class="eyebrow">Lower bound</p>
+          <h1>Sort Me</h1>
+          <p class="lede">
+            Watch a sorting program against the comparison lower bound. Values stay between 1 and 1000.
+            Space plays, and the right arrow steps.
+          </p>
+          <p class="local-pill">Local only — nothing leaves this browser</p>
+        </header>
+
+        <div class="controls">
+          <label>
+            Sorting program
+            <select id="program"></select>
+          </label>
+          <p id="blurb" class="blurb"></p>
+
+          <label>
+            Visualization program
+            <select id="view"></select>
+          </label>
+          <p id="view-blurb" class="blurb"></p>
+
+          <div class="field">
+            <div class="slider-row">
+              <label for="size">Array length</label>
+              <input id="size-out" type="number" min="1" max="1000" value="48" aria-label="Array length number" />
+            </div>
+            <input id="size" type="range" min="1" max="1000" value="48" />
+          </div>
+
+          <div class="field">
+            <div class="slider-row">
+              <label for="cap">Value cap</label>
+              <input id="cap-out" type="number" min="1" max="1000" value="1000" aria-label="Value cap number" />
+            </div>
+            <input id="cap" type="range" min="1" max="1000" value="1000" />
+          </div>
+
+          <div class="field">
+            <div class="slider-row">
+              <label for="speed">Speed</label>
+              <output id="speed-out" for="speed">1 / frame</output>
+            </div>
+            <input id="speed" type="range" min="1" max="100" value="25" />
+          </div>
+
+          <div class="row" role="group" aria-label="Array presets">
+            <button type="button" id="preset-random" aria-pressed="true">Random</button>
+            <button type="button" id="preset-reversed" aria-pressed="false">Reversed</button>
+            <button type="button" id="preset-nearly" aria-pressed="false">Nearly sorted</button>
+          </div>
+
+          <div class="row">
+            <button type="button" id="toggle" class="primary">Sort</button>
+            <button type="button" id="step">Step</button>
+            <button type="button" id="reset">Reset</button>
+          </div>
+        </div>
+
+        <form class="custom" id="custom-form">
+          <label>
+            Custom array
+            <textarea id="custom" placeholder="1, 1000, 42, 7" spellcheck="false"></textarea>
+          </label>
+          <p class="lede">Integers from 1 to 1000. Up to 1000 numbers, separated by spaces or commas.</p>
+          <div class="row">
+            <button type="submit" id="load">Use this array</button>
+          </div>
+          <p id="error" class="error" role="alert"></p>
+        </form>
+      </aside>
+
+      <main class="stage">
+        <div class="canvas-frame">
+          <canvas id="canvas" width="900" height="520" aria-label="Sorting visualization"></canvas>
+        </div>
+        <ul class="legend">
+          <li><i class="swatch compare"></i> Compare or read</li>
+          <li><i class="swatch swap"></i> Swap</li>
+          <li><i class="swatch write"></i> Write</li>
+          <li><i class="swatch pivot"></i> Pivot</li>
+          <li><i class="swatch sorted"></i> Placed</li>
+        </ul>
+        <div class="readout" aria-live="polite">
+          <div class="stat"><span>Status</span><strong id="status">Ready</strong></div>
+          <div class="stat"><span>Comparisons</span><strong id="comparisons">0</strong></div>
+          <div class="stat"><span>Lower bound</span><strong id="bound">0</strong></div>
+          <div class="stat"><span>Swaps</span><strong id="swaps">0</strong></div>
+          <div class="stat"><span>Writes</span><strong id="writes">0</strong></div>
+        </div>
+        <div id="meter" class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
+        <p id="note" class="note"></p>
+      </main>
+    </div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
