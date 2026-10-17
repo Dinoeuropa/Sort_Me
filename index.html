@@ -93,14 +93,14 @@
           <li><i class="swatch pivot"></i> Pivot</li>
           <li><i class="swatch sorted"></i> Placed</li>
         </ul>
-        <div class="readout" aria-live="polite">
+        <div id="readout" class="readout" aria-live="polite">
           <div class="stat"><span>Status</span><strong id="status">Ready</strong></div>
           <div class="stat"><span>Comparisons</span><strong id="comparisons">0</strong></div>
           <div class="stat"><span>Lower bound</span><strong id="bound">0</strong></div>
           <div class="stat"><span>Swaps</span><strong id="swaps">0</strong></div>
           <div class="stat"><span>Writes</span><strong id="writes">0</strong></div>
         </div>
-        <ol id="results" class="results" hidden></ol>
+        <ol id="results" class="results" hidden aria-live="polite"></ol>
         <p id="bound-formula" class="bound-line"></p>
         <div id="meter" class="meter" aria-hidden="true"><span id="meter-fill"></span></div>
         <p id="note" class="note"></p>

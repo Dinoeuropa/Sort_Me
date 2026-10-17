@@ -20,7 +20,7 @@ Sorting programs: bubble, selection, insertion, gnome, shell, merge, timsort, qu
 
 Visualization programs: bars, dots, heat strip, scatter, radial, slope, and color wheel. The heat strip keeps a value color after a cell is placed, so counting sort and radix sort finish as a cyan-to-red gradient instead of a solid bar. The color wheel lays those hues around a circle.
 
-Check two to four programs and press Compare to run them in lanes. A fifth box stays disabled until you clear one.
+Check two to four programs and press Compare to run them in lanes. Each lane keeps its own status, counts, and lower-bound meter. A fifth box stays disabled until you clear one.
 
 Sound is off until you press Sound. Each compare, swap, or write plays a short sine tone whose pitch follows the value, in the manner of the sorting videos on YouTube. Press Sound again to switch it off. A finished run plays a short rising sweep.
 
