@@ -60,3 +60,39 @@ test("every visualization draws a 1000-scale frame without throwing", () => {
 test("unknown visualization ids are rejected", () => {
   assert.throws(() => draw("missing", mockContext(), frame, 10, 10), /unknown visualization/i);
 });
+
+test("a color wheel can show values as a circular gradient", () => {
+  assert.equal(
+    VIEWS.some((view) => view.id === "wheel"),
+    true,
+  );
+});
+
+test("heat strip keeps a value gradient after every cell is placed", () => {
+  const paints = [];
+  const ctx = mockContext();
+  ctx.fillRect = (x, y, w, h) => {
+    paints.push({ x, y, w, h, fill: ctx.fillStyle });
+  };
+  draw(
+    "heat",
+    ctx,
+    {
+      array: [1, 2, 3, 4],
+      maxValue: 4,
+      indices: [],
+      mark: "idle",
+      comparisons: 0,
+      writes: 4,
+      swaps: 0,
+      sorted: new Set([0, 1, 2, 3]),
+      pivot: -1,
+    },
+    200,
+    80,
+  );
+  const cells = paints.filter((paint) => paint.h > 10 && paint.w < 200);
+  assert.equal(cells.length, 4);
+  assert.equal(new Set(cells.map((paint) => paint.fill)).size, 4);
+  for (const paint of cells) assert.notEqual(paint.fill, "#79c2a8");
+});

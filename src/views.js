@@ -11,10 +11,11 @@ const GRID = "#3a332b";
 export const VIEWS = [
   { id: "bars", name: "Bars", blurb: "Height is the value.", draw: drawBars },
   { id: "dots", name: "Dots", blurb: "Each value is a point on a shared line.", draw: drawDots },
-  { id: "heat", name: "Heat strip", blurb: "Color carries the value from left to right.", draw: drawHeat },
+  { id: "heat", name: "Heat strip", blurb: "Color carries the value. A finished strip stays a gradient, even after a fast sort.", draw: drawHeat },
   { id: "scatter", name: "Scatter", blurb: "Index across, value upward.", draw: drawScatter },
   { id: "radial", name: "Radial", blurb: "Values radiate from the center.", draw: drawRadial },
   { id: "slope", name: "Slope", blurb: "A filled profile of the whole array.", draw: drawSlope },
+  { id: "wheel", name: "Color wheel", blurb: "Each value is a hue on a ring. Sorting winds them into one circular gradient.", draw: drawWheel },
 ];
 
 export function draw(viewId, ctx, frame, width, height) {
@@ -55,9 +56,14 @@ function colorFor(index, frame) {
 }
 
 function heatColor(value, maxValue) {
-  const t = (value - 1) / Math.max(1, maxValue - 1);
-  if (t < 0.5) return mix("#314056", "#e2b657", t / 0.5);
-  return mix("#e2b657", "#e36a4a", (t - 0.5) / 0.5);
+  const t = Math.min(1, Math.max(0, (value - 1) / Math.max(1, maxValue - 1)));
+  if (t < 0.5) return mix("#3ec6c6", "#efe07a", t / 0.5);
+  return mix("#efe07a", "#ef5d4a", (t - 0.5) / 0.5);
+}
+
+function hueFor(value, maxValue) {
+  const t = Math.min(1, Math.max(0, (value - 1) / Math.max(1, maxValue - 1)));
+  return Math.round(t * 320);
 }
 
 function mix(from, to, t) {
@@ -118,10 +124,44 @@ function drawHeat(ctx, frame, width, height) {
   const band = Math.min(height * 0.46, 168);
   const y = (height - band) / 2;
   const gap = n > 240 ? 0 : 1;
+  const max = maxOf(frame);
   for (let i = 0; i < n; i += 1) {
-    const highlighted = frame.indices.includes(i) || frame.sorted.has(i) || frame.pivot === i;
-    ctx.fillStyle = highlighted ? colorFor(i, frame) : heatColor(frame.array[i], maxOf(frame));
+    ctx.fillStyle = heatColor(frame.array[i], max);
     ctx.fillRect(i * cell, y, Math.max(0.4, cell - gap), band);
+  }
+  const cap = Math.max(3, band * 0.12);
+  for (const index of frame.indices) {
+    if (!Number.isInteger(index) || index < 0 || index >= n) continue;
+    ctx.fillStyle = colorFor(index, frame);
+    ctx.fillRect(index * cell, y, Math.max(0.4, cell - gap), cap);
+  }
+}
+
+function drawWheel(ctx, frame, width, height) {
+  prepare(ctx, width, height);
+  const n = frame.array.length;
+  if (!n) return;
+  const cx = width / 2;
+  const cy = height / 2;
+  const outer = Math.max(8, Math.min(width, height) * 0.42);
+  const inner = outer * 0.52;
+  const gap = n > 80 ? 0 : 0.01;
+  const max = maxOf(frame);
+  for (let i = 0; i < n; i += 1) {
+    const start = -Math.PI / 2 + (i / n) * Math.PI * 2 + gap;
+    const end = -Math.PI / 2 + ((i + 1) / n) * Math.PI * 2 - gap;
+    const sweep = Math.max(start + 0.001, end);
+    ctx.beginPath();
+    ctx.arc(cx, cy, outer, start, sweep);
+    ctx.arc(cx, cy, inner, sweep, start, true);
+    ctx.closePath();
+    ctx.fillStyle = `hsl(${hueFor(frame.array[i], max)} 72% 56%)`;
+    ctx.fill();
+    if (frame.indices.includes(i) || frame.pivot === i) {
+      ctx.lineWidth = Math.max(2, outer * 0.045);
+      ctx.strokeStyle = colorFor(i, frame);
+      ctx.stroke();
+    }
   }
 }
 

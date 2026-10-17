@@ -12,6 +12,7 @@ test("the page is a local document with selectable programs", () => {
   assert.match(page, /id="program"/);
   assert.match(page, /id="view"/);
   assert.match(page, /id="compare"/);
+  assert.match(page, /id="sound"/);
   assert.match(page, /id="size" type="range" min="1" max="250"/);
   assert.doesNotMatch(page, /id="cap"/);
   assert.doesNotMatch(page, /id="custom"/);
