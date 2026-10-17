@@ -18,3 +18,30 @@ export function comparisonLowerBound(n) {
   boundCache.set(n, bound);
   return bound;
 }
+
+export function boundMeter(comparisons, bound, { comparison = true, finished = false } = {}) {
+  if (!comparison) {
+    return {
+      width: 0,
+      over: false,
+      note: "This program does not compare values, so the lower bound does not apply. The bound is still shown for reference.",
+    };
+  }
+  if (bound === 0) {
+    return {
+      width: 0,
+      over: false,
+      note: "One value is already in order.",
+    };
+  }
+  const ratio = comparisons / bound;
+  const over = ratio > 1;
+  let note = "The meter fills as comparisons approach the worst-case lower bound.";
+  if (finished && over) note = `${ratio.toFixed(1)}× the worst-case lower bound.`;
+  else if (finished) note = "Finished at or under the worst-case lower bound. Typical inputs often do.";
+  return {
+    width: Math.min(100, ratio * 100),
+    over,
+    note,
+  };
+}

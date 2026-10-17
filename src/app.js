@@ -1,7 +1,7 @@
 import katex from "../vendor/katex/katex.js";
 import { MAX_LENGTH, nearlySortedArray, randomArray, reversedArray } from "./arrays.js";
 import { createRun, PROGRAMS } from "./algorithms.js";
-import { comparisonLowerBound } from "./bounds.js";
+import { boundMeter, comparisonLowerBound } from "./bounds.js";
 import { MAX_COMPARE, continueComparison, startComparison, stepLanes } from "./compare.js";
 import { createSpeaker } from "./sound.js";
 import { draw, VIEWS } from "./views.js";
@@ -31,6 +31,7 @@ const boundEl = document.querySelector("#bound");
 const swapsEl = document.querySelector("#swaps");
 const writesEl = document.querySelector("#writes");
 const results = document.querySelector("#results");
+const readout = document.querySelector("#readout");
 const meter = document.querySelector("#meter");
 const meterFill = document.querySelector("#meter-fill");
 const note = document.querySelector("#note");
@@ -176,6 +177,23 @@ function renderMath(element, latex) {
   katex.render(latex, element, { throwOnError: false, displayMode: false });
 }
 
+function laneStatus(lane) {
+  if (lane.finished) return "Sorted";
+  if (state.running) return "Sorting";
+  return "Paused";
+}
+
+function statBox(label, className) {
+  const box = document.createElement("div");
+  box.className = "stat";
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  const value = document.createElement("strong");
+  value.className = className;
+  box.append(caption, value);
+  return box;
+}
+
 function renderResults() {
   if (!state.lanes) {
     results.hidden = true;
@@ -192,6 +210,7 @@ function renderResults() {
       const program = programById(lane.id);
       const item = document.createElement("li");
       item.dataset.id = lane.id;
+      item.className = "lane-card";
       const title = document.createElement("span");
       title.className = "result-name";
       const name = document.createElement("strong");
@@ -200,17 +219,45 @@ function renderResults() {
       math.className = "math";
       katex.render(program.latex, math, { throwOnError: false, displayMode: false });
       title.append(name, math);
-      const detail = document.createElement("span");
-      detail.className = "detail";
-      item.append(title, detail);
+      const row = document.createElement("div");
+      row.className = "readout";
+      row.append(
+        statBox("Status", "lane-status"),
+        statBox("Comparisons", "lane-comparisons"),
+        statBox("Lower bound", "lane-bound"),
+        statBox("Swaps", "lane-swaps"),
+        statBox("Writes", "lane-writes"),
+      );
+      const formula = document.createElement("p");
+      formula.className = "bound-line";
+      const bar = document.createElement("div");
+      bar.className = "meter";
+      bar.append(document.createElement("span"));
+      const caption = document.createElement("p");
+      caption.className = "note";
+      item.append(title, row, formula, bar, caption);
       results.append(item);
     }
   }
+  const bound = comparisonLowerBound(state.original.length);
   for (const lane of state.lanes) {
+    const program = programById(lane.id);
     const frame = lane.frame ?? idleFrame(state.original);
-    const detail = results.querySelector(`li[data-id="${lane.id}"] .detail`);
-    const stateLabel = lane.finished ? "sorted" : "running";
-    detail.textContent = `${frame.comparisons.toLocaleString()} comparisons · ${frame.swaps.toLocaleString()} swaps · ${stateLabel}`;
+    const card = results.querySelector(`li[data-id="${lane.id}"]`);
+    card.querySelector(".lane-status").textContent = laneStatus(lane);
+    card.querySelector(".lane-comparisons").textContent = frame.comparisons.toLocaleString();
+    card.querySelector(".lane-bound").textContent = bound.toLocaleString();
+    card.querySelector(".lane-swaps").textContent = frame.swaps.toLocaleString();
+    card.querySelector(".lane-writes").textContent = frame.writes.toLocaleString();
+    renderMath(card.querySelector(".bound-line"), "\\lceil \\log_2(n!) \\rceil");
+    const meterState = boundMeter(frame.comparisons, bound, {
+      comparison: program.comparison,
+      finished: lane.finished,
+    });
+    const bar = card.querySelector(".meter");
+    bar.classList.toggle("over", meterState.over);
+    bar.firstElementChild.style.width = `${meterState.width}%`;
+    card.querySelector(".note").textContent = meterState.note;
   }
 }
 
@@ -243,53 +290,28 @@ function renderChrome() {
   else if (state.generator || state.lanes) statusEl.textContent = "Paused";
   else statusEl.textContent = "Ready";
 
+  const comparing = Boolean(state.lanes);
+  readout.hidden = comparing;
+  boundFormula.hidden = comparing;
+  meter.hidden = comparing;
+  note.hidden = comparing;
+
   const bound = comparisonLowerBound(state.original.length);
   boundEl.textContent = bound.toLocaleString();
   const frame = state.frame ?? idleFrame(state.original);
-  comparisonsEl.textContent = state.lanes ? "—" : frame.comparisons.toLocaleString();
-  swapsEl.textContent = state.lanes ? "—" : frame.swaps.toLocaleString();
-  writesEl.textContent = state.lanes ? "—" : frame.writes.toLocaleString();
+  comparisonsEl.textContent = comparing ? "—" : frame.comparisons.toLocaleString();
+  swapsEl.textContent = comparing ? "—" : frame.swaps.toLocaleString();
+  writesEl.textContent = comparing ? "—" : frame.writes.toLocaleString();
   renderResults();
+  if (comparing) return;
 
-  if (state.lanes) {
-    const finishedComparisons = state.lanes
-      .filter((lane) => programById(lane.id).comparison && lane.finished)
-      .map((lane) => lane.frame?.comparisons ?? 0);
-    const busiest = finishedComparisons.length ? Math.max(...finishedComparisons) : 0;
-    const ratio = bound === 0 ? 0 : busiest / bound;
-    meter.classList.toggle("over", ratio > 1);
-    meterFill.style.width = `${Math.min(100, ratio * 100)}%`;
-    note.textContent = state.finished
-      ? "Same array in every lane. Fewer comparisons is closer to the lower bound."
-      : "The lanes share one array and the same step budget.";
-    return;
-  }
-
-  if (!program.comparison) {
-    meter.classList.remove("over");
-    meterFill.style.width = "0%";
-    note.textContent =
-      "This program does not compare values, so the lower bound does not apply. The bound is still shown for reference.";
-    return;
-  }
-
-  if (bound === 0) {
-    meter.classList.remove("over");
-    meterFill.style.width = "0%";
-    note.textContent = "One value is already in order.";
-    return;
-  }
-
-  const ratio = frame.comparisons / bound;
-  meter.classList.toggle("over", ratio > 1);
-  meterFill.style.width = `${Math.min(100, ratio * 100)}%`;
-  if (state.finished && ratio > 1) {
-    note.textContent = `${ratio.toFixed(1)}× the worst-case lower bound.`;
-  } else if (state.finished) {
-    note.textContent = "Finished at or under the worst-case lower bound. Typical inputs often do.";
-  } else {
-    note.textContent = "The meter fills as comparisons approach the worst-case lower bound.";
-  }
+  const meterState = boundMeter(frame.comparisons, bound, {
+    comparison: program.comparison,
+    finished: state.finished,
+  });
+  meter.classList.toggle("over", meterState.over);
+  meterFill.style.width = `${meterState.width}%`;
+  note.textContent = meterState.note;
 }
 
 function stop() {
