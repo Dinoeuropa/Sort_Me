@@ -365,6 +365,282 @@ function* radixPass(array, exp, stats, sorted) {
   }
 }
 
+function* ordered(array, stats, sorted) {
+  for (let i = 1; i < array.length; i += 1) {
+    stats.comparisons += 1;
+    yield frame(array, [i - 1, i], "compare", stats, sorted);
+    if (array[i - 1] > array[i]) return false;
+  }
+  return true;
+}
+
+function* bogo(source, rng = Math.random) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  const random = typeof rng === "function" ? rng : Math.random;
+  while (!(yield* ordered(array, stats, sorted))) {
+    for (let i = array.length - 1; i > 0; i -= 1) {
+      const j = Math.min(i, Math.max(0, Math.floor(random() * (i + 1))));
+      if (j === i) continue;
+      swap(array, i, j, stats);
+      yield frame(array, [i, j], "swap", stats, sorted);
+    }
+  }
+  yield* markAll(array, stats, sorted);
+}
+
+function* gnome(source) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  let index = 0;
+  while (index < array.length) {
+    if (index === 0) {
+      index += 1;
+      continue;
+    }
+    stats.comparisons += 1;
+    yield frame(array, [index - 1, index], "compare", stats, sorted);
+    if (array[index] >= array[index - 1]) index += 1;
+    else {
+      swap(array, index, index - 1, stats);
+      yield frame(array, [index, index - 1], "swap", stats, sorted);
+      index -= 1;
+    }
+  }
+  yield* markAll(array, stats, sorted);
+}
+
+function* comb(source) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  const n = array.length;
+  let gap = n;
+  let swapped = true;
+  while (gap > 1 || swapped) {
+    gap = Math.floor(gap / 1.3);
+    if (gap < 1) gap = 1;
+    swapped = false;
+    for (let i = 0; i + gap < n; i += 1) {
+      stats.comparisons += 1;
+      yield frame(array, [i, i + gap], "compare", stats, sorted);
+      if (array[i] > array[i + gap]) {
+        swap(array, i, i + gap, stats);
+        swapped = true;
+        yield frame(array, [i, i + gap], "swap", stats, sorted);
+      }
+    }
+  }
+  yield* markAll(array, stats, sorted);
+}
+
+function minRunLength(n) {
+  let extra = 0;
+  let size = n;
+  while (size >= 32) {
+    extra |= size & 1;
+    size >>= 1;
+  }
+  return size + extra;
+}
+
+function* insertSpan(array, lo, hi, stats, sorted) {
+  for (let i = lo + 1; i < hi; i += 1) {
+    const key = array[i];
+    let j = i - 1;
+    while (j >= lo) {
+      stats.comparisons += 1;
+      yield frame(array, [j, j + 1], "compare", stats, sorted);
+      if (array[j] <= key) break;
+      array[j + 1] = array[j];
+      stats.writes += 1;
+      yield frame(array, [j, j + 1], "swap", stats, sorted);
+      j -= 1;
+    }
+    array[j + 1] = key;
+    stats.writes += 1;
+    yield frame(array, [j + 1], "write", stats, sorted);
+  }
+}
+
+function* naturalRunEnd(array, start, stats, sorted) {
+  const n = array.length;
+  if (start >= n - 1) return Math.min(n, start + 1);
+  let end = start + 1;
+  stats.comparisons += 1;
+  yield frame(array, [start, end], "compare", stats, sorted);
+  if (array[end] < array[start]) {
+    while (end < n - 1) {
+      stats.comparisons += 1;
+      yield frame(array, [end, end + 1], "compare", stats, sorted);
+      if (array[end + 1] < array[end]) end += 1;
+      else break;
+    }
+    let left = start;
+    let right = end;
+    while (left < right) {
+      swap(array, left, right, stats);
+      yield frame(array, [left, right], "swap", stats, sorted);
+      left += 1;
+      right -= 1;
+    }
+    return end + 1;
+  }
+  while (end < n - 1) {
+    stats.comparisons += 1;
+    yield frame(array, [end, end + 1], "compare", stats, sorted);
+    if (array[end] <= array[end + 1]) end += 1;
+    else break;
+  }
+  return end + 1;
+}
+
+function* mergeStackAt(array, stack, index, stats, sorted) {
+  const left = stack[index];
+  const right = stack[index + 1];
+  const lo = left.start;
+  const mid = right.start;
+  const hi = right.start + right.length;
+  yield* mergeHalves(array, lo, mid, hi, stats, sorted);
+  stack.splice(index, 2, { start: lo, length: hi - lo });
+}
+
+function* collapse(array, stack, stats, sorted, force) {
+  while (stack.length > 1) {
+    const count = stack.length;
+    const top = stack[count - 1].length;
+    const middle = stack[count - 2].length;
+    const below = count > 2 ? stack[count - 3].length : Infinity;
+    let at = -1;
+    if (below <= top + middle) at = below < top ? count - 3 : count - 2;
+    else if (middle <= top) at = count - 2;
+    else if (force) at = count - 2;
+    else break;
+    yield* mergeStackAt(array, stack, at, stats, sorted);
+  }
+}
+
+function* tim(source) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  const n = array.length;
+  if (n < 2) {
+    yield* markAll(array, stats, sorted);
+    return;
+  }
+  const minimum = minRunLength(n);
+  const stack = [];
+  let start = 0;
+  while (start < n) {
+    let end = yield* naturalRunEnd(array, start, stats, sorted);
+    if (end <= start) end = Math.min(n, start + 1);
+    const limit = Math.min(n, start + minimum);
+    if (end < limit) {
+      yield* insertSpan(array, start, limit, stats, sorted);
+      end = limit;
+    }
+    stack.push({ start, length: end - start });
+    start = end;
+    yield* collapse(array, stack, stats, sorted, false);
+  }
+  yield* collapse(array, stack, stats, sorted, true);
+  yield* markAll(array, stats, sorted);
+}
+
+function* partition(array, lo, hi, stats, sorted) {
+  const pivot = hi;
+  let store = lo;
+  for (let i = lo; i < hi; i += 1) {
+    stats.comparisons += 1;
+    yield frame(array, [i, pivot], "compare", stats, sorted, pivot);
+    if (array[i] < array[pivot]) {
+      if (i !== store) {
+        swap(array, i, store, stats);
+        yield frame(array, [i, store], "swap", stats, sorted, pivot);
+      }
+      store += 1;
+    }
+  }
+  if (store !== hi) {
+    swap(array, store, hi, stats);
+    yield frame(array, [store, hi], "swap", stats, sorted, store);
+  }
+  sorted.add(store);
+  yield frame(array, [store], "sorted", stats, sorted);
+  return store;
+}
+
+function* siftSpan(array, base, start, heapSize, stats, sorted) {
+  let i = start;
+  while (true) {
+    let largest = i;
+    const left = 2 * i + 1;
+    const right = left + 1;
+    if (left < heapSize) {
+      stats.comparisons += 1;
+      yield frame(array, [base + left, base + largest], "compare", stats, sorted);
+      if (array[base + left] > array[base + largest]) largest = left;
+    }
+    if (right < heapSize) {
+      stats.comparisons += 1;
+      yield frame(array, [base + right, base + largest], "compare", stats, sorted);
+      if (array[base + right] > array[base + largest]) largest = right;
+    }
+    if (largest === i) return;
+    swap(array, base + i, base + largest, stats);
+    yield frame(array, [base + i, base + largest], "swap", stats, sorted);
+    i = largest;
+  }
+}
+
+function* heapSpan(array, lo, hi, stats, sorted) {
+  const n = hi - lo + 1;
+  for (let i = Math.floor(n / 2) - 1; i >= 0; i -= 1) {
+    yield* siftSpan(array, lo, i, n, stats, sorted);
+  }
+  for (let end = n - 1; end > 0; end -= 1) {
+    swap(array, lo, lo + end, stats);
+    sorted.add(lo + end);
+    yield frame(array, [lo, lo + end], "swap", stats, sorted);
+    yield* siftSpan(array, lo, 0, end, stats, sorted);
+  }
+  if (n > 0) {
+    sorted.add(lo);
+    yield frame(array, [lo], "sorted", stats, sorted);
+  }
+}
+
+function* introRange(array, lo, hi, depth, stats, sorted) {
+  while (lo <= hi) {
+    if (hi - lo + 1 <= 16) {
+      yield* insertSpan(array, lo, hi + 1, stats, sorted);
+      for (let i = lo; i <= hi; i += 1) sorted.add(i);
+      yield frame(array, [lo], "sorted", stats, sorted);
+      return;
+    }
+    if (depth <= 0) {
+      yield* heapSpan(array, lo, hi, stats, sorted);
+      return;
+    }
+    const pivot = yield* partition(array, lo, hi, stats, sorted);
+    depth -= 1;
+    yield* introRange(array, pivot + 1, hi, depth, stats, sorted);
+    hi = pivot - 1;
+  }
+}
+
+function* intro(source) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  const depth = 2 * Math.floor(Math.log2(Math.max(1, array.length)));
+  yield* introRange(array, 0, array.length - 1, depth, stats, sorted);
+  yield* markAll(array, stats, sorted);
+}
+
 const BUILDERS = {
   bubble,
   selection,
@@ -374,8 +650,13 @@ const BUILDERS = {
   quick,
   heap,
   cocktail,
+  comb,
+  gnome,
+  tim,
+  intro,
   counting,
   radix,
+  bogo,
 };
 
 export const PROGRAMS = [
@@ -469,16 +750,62 @@ export const PROGRAMS = [
     caseLabel: "",
     blurb: "Sorts by decimal digit, from the ones place through the thousands.",
   },
+  {
+    id: "comb",
+    name: "Comb sort",
+    comparison: true,
+    complexity: "O(n^2)",
+    latex: "O(n^{2})",
+    caseLabel: "",
+    blurb: "Bubble sort whose gap shrinks by 1.3 until it is comparing neighbours.",
+  },
+  {
+    id: "gnome",
+    name: "Gnome sort",
+    comparison: true,
+    complexity: "O(n^2)",
+    latex: "O(n^{2})",
+    caseLabel: "",
+    blurb: "Steps forward through order and backtracks one place after every swap.",
+  },
+  {
+    id: "tim",
+    name: "Timsort",
+    comparison: true,
+    complexity: "O(n log n)",
+    latex: "O(n\\log n)",
+    caseLabel: "",
+    blurb: "Finds natural runs, extends the short ones, then merges them.",
+  },
+  {
+    id: "intro",
+    name: "Introsort",
+    comparison: true,
+    complexity: "O(n log n)",
+    latex: "O(n\\log n)",
+    caseLabel: "",
+    blurb: "Quicksort that switches to heapsort when the recursion gets deep, and insertion sort on small ranges.",
+  },
+  {
+    id: "bogo",
+    name: "Bogo sort",
+    comparison: true,
+    bounded: false,
+    complexity: "O(n·n!)",
+    latex: "O(n \\cdot n!)",
+    caseLabel: "expected",
+    blurb: "Shuffles the whole list until it happens to be sorted. Long lists may never finish.",
+  },
 ];
 
-export function createRun(id, values) {
+export function createRun(id, values, rng = Math.random) {
   const build = BUILDERS[id];
   if (!build) throw new Error(`Unknown program: ${id}`);
-  return build(copyValidated(values));
+  return build(copyValidated(values), rng);
 }
 
-export function execute(id, values) {
-  const run = createRun(id, values);
+export function execute(id, values, rng) {
+  const run = createRun(id, values, rng);
   const limit = values.length * values.length * 12 + values.length * 80 + 100;
   let last;
   let steps = 0;

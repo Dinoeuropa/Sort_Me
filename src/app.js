@@ -2,7 +2,8 @@ import katex from "../vendor/katex/katex.js";
 import { MAX_LENGTH, nearlySortedArray, randomArray, reversedArray } from "./arrays.js";
 import { createRun, PROGRAMS } from "./algorithms.js";
 import { comparisonLowerBound } from "./bounds.js";
-import { startComparison, stepLanes } from "./compare.js";
+import { MAX_COMPARE, continueComparison, startComparison, stepLanes } from "./compare.js";
+import { createSpeaker } from "./sound.js";
 import { draw, VIEWS } from "./views.js";
 
 const programSelect = document.querySelector("#program");
@@ -21,6 +22,7 @@ const stepButton = document.querySelector("#step");
 const resetButton = document.querySelector("#reset");
 const compareButton = document.querySelector("#compare");
 const compareList = document.querySelector("#compare-list");
+const soundButton = document.querySelector("#sound");
 const error = document.querySelector("#error");
 const canvas = document.querySelector("#canvas");
 const statusEl = document.querySelector("#status");
@@ -39,6 +41,8 @@ const presetButtons = {
 };
 
 const ctx = canvas.getContext("2d");
+const speaker = createSpeaker();
+let loopId = 0;
 
 const state = {
   preset: "random",
@@ -290,6 +294,7 @@ function renderChrome() {
 
 function stop() {
   state.running = false;
+  loopId += 1;
 }
 
 function clearRun() {
@@ -297,15 +302,27 @@ function clearRun() {
   state.lanes = null;
   state.finished = false;
   state.running = false;
+  loopId += 1;
 }
 
 function useArray(values, preset) {
+  const compareIds = state.lanes ? state.lanes.map((lane) => lane.id) : null;
+  const wasRunning = state.running;
   clearRun();
   state.preset = preset;
   state.original = values.slice();
-  state.frame = idleFrame(state.original);
   error.textContent = "";
+  if (compareIds && compareIds.length >= 2 && compareIds.length <= MAX_COMPARE) {
+    state.lanes = continueComparison(
+      compareIds.map((id) => ({ id })),
+      state.original,
+    );
+    state.frame = null;
+  } else {
+    state.frame = idleFrame(state.original);
+  }
   paint();
+  if (state.lanes && wasRunning) startLoop();
   renderChrome();
 }
 
@@ -327,12 +344,33 @@ function ensureRun() {
   }
 }
 
+function hear(frame, limit) {
+  if (!frame) return;
+  speaker.play(frame, limit);
+}
+
+function settled(frame) {
+  if (!frame) return frame;
+  return { ...frame, indices: [], mark: "sorted", pivot: -1 };
+}
+
 function advance(count) {
+  const wasFinished = state.finished;
   if (state.lanes) {
     const done = stepLanes(state.lanes, count);
     if (done) {
       state.finished = true;
       state.running = false;
+    }
+    if (!wasFinished) {
+      for (const lane of state.lanes) hear(lane.frame, 1);
+      if (state.finished) {
+        const finished = state.lanes.find((lane) => lane.frame);
+        if (finished) speaker.playSweep(finished.frame.array, scaleOf(finished.frame.array));
+      }
+    }
+    for (const lane of state.lanes) {
+      if (lane.finished) lane.frame = settled(lane.frame);
     }
     paint();
     renderChrome();
@@ -349,14 +387,23 @@ function advance(count) {
     state.frame = next.value;
     state.frame.maxValue = scaleOf(state.frame.array);
   }
+  if (state.finished && !wasFinished) {
+    speaker.playSweep(state.frame.array, state.frame.maxValue);
+    state.frame = settled(state.frame);
+  } else hear(state.frame, 2);
   paint();
   renderChrome();
 }
 
-function loop() {
-  if (!state.running) return;
-  advance(stepsFor(speedInput.value));
-  if (state.running) requestAnimationFrame(loop);
+function startLoop() {
+  const id = ++loopId;
+  state.running = true;
+  const tick = () => {
+    if (!state.running || id !== loopId) return;
+    advance(stepsFor(speedInput.value));
+    if (state.running && id === loopId) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 function toggle() {
@@ -366,15 +413,31 @@ function toggle() {
     return;
   }
   if (!state.lanes) ensureRun();
-  state.running = true;
+  startLoop();
   renderChrome();
-  requestAnimationFrame(loop);
+}
+
+function syncCompareBoxes() {
+  const boxes = [...compareList.querySelectorAll("input")];
+  const checked = boxes.filter((box) => box.checked);
+  if (checked.length > MAX_COMPARE) {
+    checked.slice(MAX_COMPARE).forEach((box) => {
+      box.checked = false;
+    });
+    error.textContent = "Compare at most four sorting programs.";
+  }
+  const full = boxes.filter((box) => box.checked).length >= MAX_COMPARE;
+  for (const box of boxes) box.disabled = full && !box.checked;
 }
 
 function beginCompare() {
   const ids = selectedCompareIds();
   if (ids.length < 2) {
     error.textContent = "Pick at least two sorting programs.";
+    return;
+  }
+  if (ids.length > MAX_COMPARE) {
+    error.textContent = "Compare at most four sorting programs.";
     return;
   }
   stop();
@@ -416,6 +479,13 @@ presetButtons.reversed.addEventListener("click", () => applyPreset("reversed"));
 presetButtons.nearly.addEventListener("click", () => applyPreset("nearly"));
 toggleButton.addEventListener("click", toggle);
 compareButton.addEventListener("click", beginCompare);
+compareList.addEventListener("change", syncCompareBoxes);
+soundButton.addEventListener("click", () => {
+  const on = soundButton.getAttribute("aria-pressed") !== "true";
+  soundButton.setAttribute("aria-pressed", String(on));
+  soundButton.textContent = on ? "Sound on" : "Sound";
+  speaker.setEnabled(on);
+});
 stepButton.addEventListener("click", () => {
   stop();
   advance(1);
