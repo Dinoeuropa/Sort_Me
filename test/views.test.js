@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { VIEWS, draw } from "../src/views.js";
+import { VIEWS, draw, quadrantFrame, usesQuadrants } from "../src/views.js";
 
 function mockContext() {
   return {
@@ -59,6 +59,21 @@ test("every visualization draws a 1000-scale frame without throwing", () => {
 
 test("unknown visualization ids are rejected", () => {
   assert.throws(() => draw("missing", mockContext(), frame, 10, 10), /unknown visualization/i);
+});
+
+test("radial and color wheel comparisons split the canvas into quarters", () => {
+  assert.equal(usesQuadrants("radial"), true);
+  assert.equal(usesQuadrants("wheel"), true);
+  for (const id of ["bars", "dots", "heat", "scatter", "slope"]) {
+    assert.equal(usesQuadrants(id), false, id);
+  }
+  const cells = [0, 1, 2, 3].map((index) => quadrantFrame(index, 800, 600));
+  assert.deepEqual(cells[0], { x: 0, y: 0, width: 400, height: 300 });
+  assert.deepEqual(cells[1], { x: 400, y: 0, width: 400, height: 300 });
+  assert.deepEqual(cells[2], { x: 0, y: 300, width: 400, height: 300 });
+  assert.deepEqual(cells[3], { x: 400, y: 300, width: 400, height: 300 });
+  const area = cells.reduce((sum, cell) => sum + cell.width * cell.height, 0);
+  assert.equal(area, 800 * 600);
 });
 
 test("a color wheel can show values as a circular gradient", () => {

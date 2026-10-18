@@ -66,7 +66,6 @@
           <div class="row">
             <button type="button" id="toggle" class="primary">Sort</button>
             <button type="button" id="step">Step</button>
-            <button type="button" id="reset">Reset</button>
             <button type="button" id="sound" aria-pressed="false">Sound</button>
           </div>
         </div>
@@ -86,6 +85,13 @@
         <div class="canvas-frame">
           <canvas id="canvas" width="900" height="520" aria-label="Sorting visualization"></canvas>
         </div>
+        <aside id="viz-dock" class="viz-dock" hidden>
+          <label>
+            Speed
+            <input id="dock-speed" type="range" min="1" max="100" value="25" aria-label="Frame speed" />
+          </label>
+          <button type="button" id="dock-toggle">Pause</button>
+        </aside>
         <ul class="legend">
           <li><i class="swatch compare"></i> Compare or read</li>
           <li><i class="swatch swap"></i> Swap</li>

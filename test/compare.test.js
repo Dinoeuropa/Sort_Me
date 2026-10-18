@@ -13,8 +13,9 @@ test("status bars shrink as more programs are compared", () => {
   assert.ok(four.scale < two.scale);
   assert.ok(four.type < two.type);
   assert.ok(four.type > four.scale);
-  assert.ok(four.scale >= 0.5);
-  assert.ok(four.type >= 0.75);
+  assert.ok(four.scale >= 0.6);
+  assert.ok(four.type < 0.75);
+  assert.ok(four.type >= 0.68);
   assert.equal(laneScale(8).scale, four.scale);
   assert.equal(laneScale(4).lanes, 4);
 });

@@ -13,10 +13,23 @@ export const VIEWS = [
   { id: "dots", name: "Dots", blurb: "Each value is a point on a shared line.", draw: drawDots },
   { id: "heat", name: "Heat strip", blurb: "Color carries the value. A finished strip stays a gradient, even after a fast sort.", draw: drawHeat },
   { id: "scatter", name: "Scatter", blurb: "Index across, value upward.", draw: drawScatter },
-  { id: "radial", name: "Radial", blurb: "Values radiate from the center.", draw: drawRadial },
+  { id: "radial", name: "Radial", blurb: "Values radiate from the center.", layout: "quadrants", draw: drawRadial },
   { id: "slope", name: "Slope", blurb: "A filled profile of the whole array.", draw: drawSlope },
-  { id: "wheel", name: "Color wheel", blurb: "Each value is a hue on a ring. Sorting winds them into one circular gradient.", draw: drawWheel },
+  { id: "wheel", name: "Color wheel", blurb: "Each value is a hue on a ring. Sorting winds them into one circular gradient.", layout: "quadrants", draw: drawWheel },
 ];
+
+export function usesQuadrants(viewId) {
+  return VIEWS.find((view) => view.id === viewId)?.layout === "quadrants";
+}
+
+/** Compare cell for a quadrant view. Index 0 is the top-left quarter. */
+export function quadrantFrame(index, width, height) {
+  const cellWidth = width / 2;
+  const cellHeight = height / 2;
+  const col = index % 2;
+  const row = Math.floor(index / 2);
+  return { x: col * cellWidth, y: row * cellHeight, width: cellWidth, height: cellHeight };
+}
 
 export function draw(viewId, ctx, frame, width, height) {
   const view = VIEWS.find((item) => item.id === viewId);

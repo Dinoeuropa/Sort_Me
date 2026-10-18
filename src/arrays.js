@@ -31,6 +31,39 @@ export function randomArray(length, rng = Math.random) {
   return values;
 }
 
+export function isSorted(values) {
+  if (!Array.isArray(values) || values.length === 0) return false;
+  for (let i = 0; i < values.length; i += 1) {
+    if (values[i] !== i + 1) return false;
+  }
+  return true;
+}
+
+/** Fisher–Yates swaps, one frame per exchange, for the prelude before a fresh sort. */
+export function* shuffleSteps(values, rng = Math.random) {
+  const array = values.slice();
+  let swaps = 0;
+  for (let i = array.length - 1; i > 0; i -= 1) {
+    const j = Math.min(i, Math.max(0, Math.floor(rng() * (i + 1))));
+    if (j === i) continue;
+    const tmp = array[i];
+    array[i] = array[j];
+    array[j] = tmp;
+    swaps += 1;
+    yield {
+      array: array.slice(),
+      indices: [j, i],
+      mark: "swap",
+      comparisons: 0,
+      writes: swaps * 2,
+      swaps,
+      sorted: new Set(),
+      pivot: -1,
+      maxValue: array.length,
+    };
+  }
+}
+
 export function reversedArray(length) {
   return slopeArray(length).reverse();
 }

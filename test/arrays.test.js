@@ -3,9 +3,11 @@ import test from "node:test";
 import {
   MAX_LENGTH,
   MAX_VALUE,
+  isSorted,
   nearlySortedArray,
   randomArray,
   reversedArray,
+  shuffleSteps,
   slopeArray,
 } from "../src/arrays.js";
 
@@ -28,6 +30,19 @@ test("a sort list stops at 250 values in a +1 progression", () => {
 test("the slope is the sequence 1, 2, 3 and so on", () => {
   assert.deepEqual(slopeArray(1), [1]);
   assert.deepEqual(slopeArray(5), [1, 2, 3, 4, 5]);
+  assert.equal(isSorted(slopeArray(5)), true);
+  assert.equal(isSorted(reversedArray(5)), false);
+});
+
+test("shuffling a sorted list is a permutation shown as swaps", () => {
+  const frames = [...shuffleSteps(slopeArray(6), () => 0)];
+  assert.ok(frames.length > 0);
+  for (const frame of frames) {
+    assert.equal(frame.mark, "swap");
+    assert.equal(isUnitProgression(frame.array), true);
+    assert.equal(frame.comparisons, 0);
+  }
+  assert.equal(isSorted(frames.at(-1).array), false);
 });
 
 test("every generated array sorts into a +1 progression", () => {

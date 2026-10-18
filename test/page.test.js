@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 
 const page = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const server = fs.readFileSync(new URL("../scripts/serve.mjs", import.meta.url), "utf8");
 
 test("the page is a local document with selectable programs", () => {
@@ -20,6 +21,14 @@ test("the page is a local document with selectable programs", () => {
   assert.match(page, /src="\.\/src\/app\.js"/);
   assert.match(page, /vendor\/katex\/katex\.min\.css/);
   assert.match(page, /font-src 'self'/);
+});
+
+test("mobile keeps the chart under the settings and offers a viz rail", () => {
+  assert.doesNotMatch(page, /id="reset"/);
+  assert.match(page, /id="viz-dock"/);
+  assert.match(page, /id="dock-speed"/);
+  assert.match(page, /id="dock-toggle"/);
+  assert.doesNotMatch(css, /order:\s*-1/);
 });
 
 test("the server binds only to localhost", () => {
