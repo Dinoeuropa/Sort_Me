@@ -164,7 +164,7 @@ function drawLaneLabel(name, x, y, finished) {
 
 function drawQuadrants(width, height) {
   state.lanes.forEach((lane, index) => {
-    const cell = quadrantFrame(index, width, height);
+    const cell = quadrantFrame(index, width, height, state.lanes.length);
     const frame = laneFrame(lane);
     ctx.save();
     ctx.beginPath();
@@ -180,8 +180,10 @@ function drawQuadrants(width, height) {
   ctx.beginPath();
   ctx.moveTo(width / 2, 0);
   ctx.lineTo(width / 2, height);
-  ctx.moveTo(0, height / 2);
-  ctx.lineTo(width, height / 2);
+  if (state.lanes.length !== 2) {
+    ctx.moveTo(0, height / 2);
+    ctx.lineTo(width, height / 2);
+  }
   ctx.stroke();
 }
 

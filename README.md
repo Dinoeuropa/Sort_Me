@@ -22,7 +22,7 @@ Visualization programs: bars, dots, heat strip, scatter, radial, slope, and colo
 
 Check two to four programs and press Compare, then press Sort. Compare leaves the button on Sort. Resume appears only after Pause. Each lane keeps its own status, counts, and lower-bound meter. Those bars shrink as more programs are compared, and the type shrinks with them so the labels stay inside the cards. A fifth box stays disabled until you clear one.
 
-Radial and color wheel comparisons use the four quarters of the canvas. The other views stay in rows. On a narrow screen the settings sit above the chart. Sort and Resume scroll the chart into view and open a small speed and pause rail beside it.
+Radial and color wheel comparisons split two programs across the canvas and use quarters for three or four. The other views stay in rows. On a narrow screen the settings sit above the chart. Sort and Resume scroll the chart into view and open a small speed and pause rail beside it.
 
 Pressing Sort on a list that is already in order plays a shuffle, then runs the sort. That replaces a separate reset.
 
