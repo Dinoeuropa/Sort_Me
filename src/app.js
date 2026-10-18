@@ -2,7 +2,7 @@ import katex from "../vendor/katex/katex.js";
 import { MAX_LENGTH, nearlySortedArray, randomArray, reversedArray } from "./arrays.js";
 import { createRun, PROGRAMS } from "./algorithms.js";
 import { boundMeter, comparisonLowerBound } from "./bounds.js";
-import { MAX_COMPARE, continueComparison, startComparison, stepLanes } from "./compare.js";
+import { MAX_COMPARE, continueComparison, laneScale, startComparison, stepLanes } from "./compare.js";
 import { createSpeaker } from "./sound.js";
 import { draw, VIEWS } from "./views.js";
 
@@ -31,6 +31,7 @@ const boundEl = document.querySelector("#bound");
 const swapsEl = document.querySelector("#swaps");
 const writesEl = document.querySelector("#writes");
 const results = document.querySelector("#results");
+const stage = document.querySelector(".stage");
 const readout = document.querySelector("#readout");
 const meter = document.querySelector("#meter");
 const meterFill = document.querySelector("#meter-fill");
@@ -198,9 +199,14 @@ function renderResults() {
   if (!state.lanes) {
     results.hidden = true;
     results.dataset.key = "";
+    stage.style.removeProperty("--lane-scale");
+    stage.style.removeProperty("--lane-type");
     results.replaceChildren();
     return;
   }
+  const { scale, type } = laneScale(state.lanes.length);
+  stage.style.setProperty("--lane-scale", String(scale));
+  stage.style.setProperty("--lane-type", String(type));
   const key = state.lanes.map((lane) => lane.id).join(",");
   if (results.dataset.key !== key) {
     results.dataset.key = key;
@@ -218,7 +224,9 @@ function renderResults() {
       const math = document.createElement("span");
       math.className = "math";
       katex.render(program.latex, math, { throwOnError: false, displayMode: false });
-      title.append(name, math);
+      const formula = document.createElement("span");
+      formula.className = "bound-line";
+      title.append(name, math, formula);
       const row = document.createElement("div");
       row.className = "readout";
       row.append(
@@ -228,14 +236,15 @@ function renderResults() {
         statBox("Swaps", "lane-swaps"),
         statBox("Writes", "lane-writes"),
       );
-      const formula = document.createElement("p");
-      formula.className = "bound-line";
+      const meterRow = document.createElement("div");
+      meterRow.className = "lane-meter";
       const bar = document.createElement("div");
       bar.className = "meter";
       bar.append(document.createElement("span"));
       const caption = document.createElement("p");
       caption.className = "note";
-      item.append(title, row, formula, bar, caption);
+      meterRow.append(bar, caption);
+      item.append(title, row, meterRow);
       results.append(item);
     }
   }

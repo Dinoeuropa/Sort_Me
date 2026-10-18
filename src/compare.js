@@ -2,6 +2,13 @@ import { createRun } from "./algorithms.js";
 
 export const MAX_COMPARE = 4;
 
+export function laneScale(count) {
+  const lanes = Math.min(MAX_COMPARE, Math.max(1, Math.floor(Number(count)) || 1));
+  const scale = Number((1 - (lanes - 1) * 0.16).toFixed(2));
+  const type = Number((1 - (lanes - 1) * 0.08).toFixed(2));
+  return { lanes, scale, type };
+}
+
 export function startComparison(ids, values) {
   if (!Array.isArray(ids)) throw new Error("Pick at least two sorting programs.");
   const unique = [...new Set(ids)];

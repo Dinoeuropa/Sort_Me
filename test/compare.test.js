@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { slopeArray } from "../src/arrays.js";
-import { continueComparison, startComparison, stepLanes } from "../src/compare.js";
+import { continueComparison, laneScale, startComparison, stepLanes } from "../src/compare.js";
+
+test("status bars shrink as more programs are compared", () => {
+  const one = laneScale(1);
+  const two = laneScale(2);
+  const four = laneScale(4);
+  assert.equal(one.scale, 1);
+  assert.equal(one.type, 1);
+  assert.ok(two.scale < one.scale);
+  assert.ok(four.scale < two.scale);
+  assert.ok(four.type < two.type);
+  assert.ok(four.type > four.scale);
+  assert.ok(four.scale >= 0.5);
+  assert.ok(four.type >= 0.75);
+  assert.equal(laneScale(8).scale, four.scale);
+  assert.equal(laneScale(4).lanes, 4);
+});
 
 test("compare needs two different sorting programs", () => {
   assert.throws(() => startComparison(["merge"], [1, 2, 3]), /at least two/i);
