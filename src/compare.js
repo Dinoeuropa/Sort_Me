@@ -4,8 +4,8 @@ export const MAX_COMPARE = 4;
 
 export function laneScale(count) {
   const lanes = Math.min(MAX_COMPARE, Math.max(1, Math.floor(Number(count)) || 1));
-  const scale = Number((1 - (lanes - 1) * 0.12).toFixed(2));
-  const type = Number((1 - (lanes - 1) * 0.1).toFixed(2));
+  const scale = Number((1 - (lanes - 1) * 0.24).toFixed(2));
+  const type = Number((1 - (lanes - 1) * 0.18).toFixed(2));
   return { lanes, scale, type };
 }
 
