@@ -22,8 +22,16 @@ export function usesQuadrants(viewId) {
   return VIEWS.find((view) => view.id === viewId)?.layout === "quadrants";
 }
 
-/** Compare cell for a quadrant view. Index 0 is the top-left quarter. */
-export function quadrantFrame(index, width, height) {
+/**
+ * Compare cell for a radial or color-wheel view.
+ * Two programs split the canvas into left and right halves.
+ * Three or four use quarters, index 0 at the top-left.
+ */
+export function quadrantFrame(index, width, height, count = 4) {
+  if (count === 2) {
+    const cellWidth = width / 2;
+    return { x: index * cellWidth, y: 0, width: cellWidth, height };
+  }
   const cellWidth = width / 2;
   const cellHeight = height / 2;
   const col = index % 2;
