@@ -76,6 +76,14 @@ test("radial and color wheel comparisons split the canvas into quarters", () => 
   assert.equal(area, 800 * 600);
 });
 
+test("two radial or wheel comparisons split the canvas in half", () => {
+  const left = quadrantFrame(0, 800, 600, 2);
+  const right = quadrantFrame(1, 800, 600, 2);
+  assert.deepEqual(left, { x: 0, y: 0, width: 400, height: 600 });
+  assert.deepEqual(right, { x: 400, y: 0, width: 400, height: 600 });
+  assert.equal(left.width * left.height + right.width * right.height, 800 * 600);
+});
+
 test("a color wheel can show values as a circular gradient", () => {
   assert.equal(
     VIEWS.some((view) => view.id === "wheel"),
