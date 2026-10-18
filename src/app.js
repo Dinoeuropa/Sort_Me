@@ -1,10 +1,11 @@
 import katex from "../vendor/katex/katex.js";
-import { MAX_LENGTH, nearlySortedArray, randomArray, reversedArray } from "./arrays.js";
+import { MAX_LENGTH, isSorted, nearlySortedArray, randomArray, reversedArray, shuffleSteps } from "./arrays.js";
 import { createRun, PROGRAMS } from "./algorithms.js";
 import { boundMeter, comparisonLowerBound } from "./bounds.js";
 import { MAX_COMPARE, continueComparison, laneScale, startComparison, stepLanes } from "./compare.js";
+import { runControlLabel } from "./session.js";
 import { createSpeaker } from "./sound.js";
-import { draw, VIEWS } from "./views.js";
+import { draw, quadrantFrame, usesQuadrants, VIEWS } from "./views.js";
 
 const programSelect = document.querySelector("#program");
 const viewSelect = document.querySelector("#view");
@@ -19,8 +20,10 @@ const blurb = document.querySelector("#blurb");
 const viewBlurb = document.querySelector("#view-blurb");
 const toggleButton = document.querySelector("#toggle");
 const stepButton = document.querySelector("#step");
-const resetButton = document.querySelector("#reset");
 const compareButton = document.querySelector("#compare");
+const dock = document.querySelector("#viz-dock");
+const dockSpeed = document.querySelector("#dock-speed");
+const dockToggle = document.querySelector("#dock-toggle");
 const compareList = document.querySelector("#compare-list");
 const soundButton = document.querySelector("#sound");
 const error = document.querySelector("#error");
@@ -55,7 +58,13 @@ const state = {
   frame: null,
   lanes: null,
   running: false,
+  paused: false,
   finished: false,
+  shuffler: null,
+  shuffleEnding: false,
+  shuffleResult: null,
+  pendingCompare: null,
+  dock: false,
 };
 
 sizeInput.max = String(MAX_LENGTH);
@@ -136,16 +145,59 @@ function paint() {
   else draw(state.viewId, ctx, state.frame, width, height);
 }
 
+function laneFrame(lane) {
+  const frame = lane.frame ?? idleFrame(state.original);
+  frame.maxValue = scaleOf(frame.array);
+  return frame;
+}
+
+function drawLaneLabel(name, x, y, finished) {
+  ctx.font = "15px Georgia, serif";
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  const width = ctx.measureText(name).width;
+  ctx.fillStyle = "rgba(23, 20, 15, 0.88)";
+  ctx.fillRect(x - 6, y - 4, width + 12, 24);
+  ctx.fillStyle = finished ? "#79c2a8" : "#f6efe4";
+  ctx.fillText(name, x, y);
+}
+
+function drawQuadrants(width, height) {
+  state.lanes.forEach((lane, index) => {
+    const cell = quadrantFrame(index, width, height);
+    const frame = laneFrame(lane);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cell.x, cell.y, cell.width, cell.height);
+    ctx.clip();
+    ctx.translate(cell.x, cell.y);
+    draw(state.viewId, ctx, frame, cell.width, cell.height);
+    ctx.restore();
+    drawLaneLabel(programById(lane.id).name, cell.x + 14, cell.y + 12, lane.finished);
+  });
+  ctx.strokeStyle = "#3d342b";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(width / 2, 0);
+  ctx.lineTo(width / 2, height);
+  ctx.moveTo(0, height / 2);
+  ctx.lineTo(width, height / 2);
+  ctx.stroke();
+}
+
 function drawLanes(width, height) {
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#17140f";
   ctx.fillRect(0, 0, width, height);
+  if (usesQuadrants(state.viewId)) {
+    drawQuadrants(width, height);
+    return;
+  }
   const labelWidth = Math.min(132, Math.max(72, width * 0.18));
   const laneHeight = height / state.lanes.length;
   state.lanes.forEach((lane, index) => {
     const y = index * laneHeight;
-    const frame = lane.frame ?? idleFrame(state.original);
-    frame.maxValue = scaleOf(frame.array);
+    const frame = laneFrame(lane);
     ctx.save();
     ctx.beginPath();
     ctx.rect(labelWidth, y, Math.max(1, width - labelWidth), laneHeight);
@@ -179,9 +231,11 @@ function renderMath(element, latex) {
 }
 
 function laneStatus(lane) {
+  if (state.shuffler && state.running) return "Shuffling";
   if (lane.finished) return "Sorted";
   if (state.running) return "Sorting";
-  return "Paused";
+  if (state.paused) return "Paused";
+  return "Ready";
 }
 
 function statBox(label, className) {
@@ -290,13 +344,16 @@ function renderChrome() {
     button.setAttribute("aria-pressed", String(state.preset === name));
   }
 
-  if (state.running) toggleButton.textContent = "Pause";
-  else if ((state.generator || state.lanes) && !state.finished) toggleButton.textContent = "Resume";
-  else toggleButton.textContent = "Sort";
+  const control = runControlLabel(state);
+  toggleButton.textContent = control;
+  dockToggle.textContent = control;
+  dock.hidden = !state.dock;
+  dockSpeed.value = speedInput.value;
 
-  if (state.running) statusEl.textContent = state.lanes ? "Comparing" : "Sorting";
+  if (state.shuffler && state.running) statusEl.textContent = "Shuffling";
+  else if (state.running) statusEl.textContent = state.lanes ? "Comparing" : "Sorting";
   else if (state.finished) statusEl.textContent = state.lanes ? "Compared" : "Sorted";
-  else if (state.generator || state.lanes) statusEl.textContent = "Paused";
+  else if (state.paused) statusEl.textContent = "Paused";
   else statusEl.textContent = "Ready";
 
   const comparing = Boolean(state.lanes);
@@ -333,7 +390,68 @@ function clearRun() {
   state.lanes = null;
   state.finished = false;
   state.running = false;
+  state.paused = false;
+  state.shuffler = null;
+  state.shuffleEnding = false;
+  state.shuffleResult = null;
+  state.pendingCompare = null;
+  state.dock = false;
   loopId += 1;
+}
+
+function shownValues() {
+  if (state.lanes) {
+    const lane = state.lanes.find((item) => item.frame?.array);
+    if (lane) return lane.frame.array;
+  }
+  if (state.frame?.array) return state.frame.array;
+  return state.original;
+}
+
+function revealVisualization() {
+  if (!window.matchMedia("(max-width: 900px)").matches) return;
+  document.querySelector(".canvas-frame")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function shufflePace(length) {
+  return Math.max(1, Math.ceil(Math.max(1, length - 1) / 28));
+}
+
+function showShuffle(frame) {
+  if (state.lanes) {
+    for (const lane of state.lanes) lane.frame = frame;
+  } else {
+    state.frame = frame;
+  }
+}
+
+function beginReshuffle() {
+  const values = shownValues().slice();
+  state.pendingCompare = state.lanes ? state.lanes.map((lane) => lane.id) : null;
+  state.generator = null;
+  state.finished = false;
+  state.shuffler = shuffleSteps(values);
+  if (state.lanes) {
+    for (const lane of state.lanes) lane.finished = false;
+  }
+  startLoop();
+}
+
+function finishReshuffle(values) {
+  const nextValues = isSorted(values) ? randomArray(values.length) : values.slice();
+  const ids = state.pendingCompare;
+  state.shuffler = null;
+  state.pendingCompare = null;
+  state.original = nextValues;
+  state.finished = false;
+  if (ids && ids.length >= 2) {
+    state.lanes = startComparison(ids, nextValues);
+    state.frame = null;
+    return;
+  }
+  state.lanes = null;
+  state.generator = createRun(state.programId, nextValues);
+  state.frame = idleFrame(nextValues);
 }
 
 function useArray(values, preset) {
@@ -386,12 +504,43 @@ function settled(frame) {
 }
 
 function advance(count) {
+  if (state.shuffler) {
+    const pace = shufflePace(shownValues().length);
+    let last = null;
+    let done = false;
+    for (let i = 0; i < pace; i += 1) {
+      const next = state.shuffler.next();
+      if (next.done) {
+        done = true;
+        break;
+      }
+      last = next.value;
+    }
+    if (last) {
+      showShuffle(last);
+      hear(last, 1);
+    }
+    if (done) {
+      state.shuffleResult = (last ? last.array : shownValues()).slice();
+      state.shuffler = null;
+      state.shuffleEnding = true;
+    }
+    paint();
+    renderChrome();
+    return;
+  }
+  if (state.shuffleEnding) {
+    finishReshuffle(state.shuffleResult ?? shownValues());
+    state.shuffleEnding = false;
+    state.shuffleResult = null;
+  }
   const wasFinished = state.finished;
   if (state.lanes) {
     const done = stepLanes(state.lanes, count);
     if (done) {
       state.finished = true;
       state.running = false;
+      state.paused = false;
     }
     if (!wasFinished) {
       for (const lane of state.lanes) hear(lane.frame, 1);
@@ -413,6 +562,7 @@ function advance(count) {
     if (next.done) {
       state.finished = true;
       state.running = false;
+      state.paused = false;
       break;
     }
     state.frame = next.value;
@@ -440,11 +590,19 @@ function startLoop() {
 function toggle() {
   if (state.running) {
     stop();
+    state.paused = true;
     renderChrome();
     return;
   }
-  if (!state.lanes) ensureRun();
-  startLoop();
+  state.paused = false;
+  state.dock = true;
+  revealVisualization();
+  if (state.shuffler || state.shuffleEnding) startLoop();
+  else if (isSorted(shownValues()) && shownValues().length > 1) beginReshuffle();
+  else {
+    if (!state.lanes) ensureRun();
+    startLoop();
+  }
   renderChrome();
 }
 
@@ -472,6 +630,11 @@ function beginCompare() {
     return;
   }
   stop();
+  state.paused = false;
+  state.shuffler = null;
+  state.shuffleEnding = false;
+  state.shuffleResult = null;
+  state.pendingCompare = null;
   state.generator = null;
   state.finished = false;
   state.lanes = startComparison(ids, state.original);
@@ -502,7 +665,15 @@ sizeOut.addEventListener("change", () => {
   sizeInput.value = String(clampNumber(sizeOut.value, 1, MAX_LENGTH));
   sizeInput.dispatchEvent(new Event("change"));
 });
-speedInput.addEventListener("input", renderChrome);
+speedInput.addEventListener("input", () => {
+  dockSpeed.value = speedInput.value;
+  renderChrome();
+});
+dockSpeed.addEventListener("input", () => {
+  speedInput.value = dockSpeed.value;
+  renderChrome();
+});
+dockToggle.addEventListener("click", toggle);
 sizeInput.addEventListener("change", () => applyPreset(state.preset));
 
 presetButtons.random.addEventListener("click", () => applyPreset("random"));
@@ -520,9 +691,6 @@ soundButton.addEventListener("click", () => {
 stepButton.addEventListener("click", () => {
   stop();
   advance(1);
-});
-resetButton.addEventListener("click", () => {
-  useArray(state.original, state.preset);
 });
 
 window.addEventListener("keydown", (event) => {
