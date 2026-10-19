@@ -79,7 +79,7 @@ test("every compared program sorts the same +1 progression", () => {
 
 test("compared programs keep the slope progression at length 100", () => {
   const values = slopeArray(100).reverse();
-  const lanes = startComparison(["heap", "radix"], values);
+  const lanes = startComparison(["heap", "radix-lsd"], values);
   let guard = 0;
   while (!stepLanes(lanes, 200)) {
     guard += 1;

@@ -16,9 +16,9 @@ Open `http://127.0.0.1:4173` for sorting. Fractals are at `http://127.0.0.1:4173
 
 ## Sorting
 
-Sorting programs: bubble, selection, insertion, gnome, shell, merge, timsort, quick, introsort, heap, cocktail, comb, counting, radix, and bogo. Their big-O formulas are set in LaTeX with a copy of KaTeX kept in this repository. Bogo sort shuffles until the list is ordered, so a long list may never finish.
+Sorting programs: bubble, selection, insertion, gnome, shell, merge, timsort, quick, introsort, std::sort, std::stable_sort, heap, bitonic, cocktail, comb, counting, radix LSD, radix MSD, and bogo. std::sort and std::stable_sort follow the GCC routines: introsort with a final insertion pass, and a stable merge of chunks of 7. Their big-O formulas are set in LaTeX with a copy of KaTeX kept in this repository. Bogo sort shuffles until the list is ordered, so a long list may never finish.
 
-Visualization programs: bars, dots, heat strip, scatter, radial, slope, and color wheel. The heat strip keeps a value color after a cell is placed, so counting sort and radix sort finish as a cyan-to-red gradient instead of a solid bar. The color wheel lays those hues around a circle.
+Visualization programs: bars, dots, heat strip, scatter, radial, slope, and color wheel. The heat strip keeps a value color after a cell is placed, so counting sort and the radix sorts finish as a cyan-to-red gradient instead of a solid bar. The color wheel lays those hues around a circle.
 
 Check two to four programs and press Compare, then press Sort. Compare leaves the button on Sort. Resume appears only after Pause. Each lane keeps its own status, counts, and lower-bound meter. Each status card shrinks as more programs are compared: the card, the type, and the meter get smaller together so the chart keeps the room. A fifth box stays disabled until you clear one.
 
@@ -28,7 +28,7 @@ Pressing Sort on a list that is already in order plays a shuffle, then runs the 
 
 Sound is off until you press Sound. Each compare, swap, or write plays a short sine tone whose pitch follows the value, in the manner of the sorting videos on YouTube. Press Sound again to switch it off. A finished run plays a short rising sweep.
 
-Counting sort and radix sort do not compare elements, so the lower-bound meter does not apply to them.
+Counting sort, radix LSD, and radix MSD do not compare elements, so the lower-bound meter does not apply to them.
 
 ## Fractals
 
