@@ -34,6 +34,21 @@ function practicalPrograms() {
   return PROGRAMS.filter((program) => program.bounded !== false);
 }
 
+test("radix is split into LSD and MSD, with bitonic sort and the GCC library sorts", () => {
+  const byId = new Map(PROGRAMS.map((program) => [program.id, program]));
+  assert.equal(byId.has("radix"), false);
+  assert.equal(byId.get("radix-lsd").comparison, false);
+  assert.match(byId.get("radix-lsd").name, /LSD/);
+  assert.equal(byId.get("radix-msd").comparison, false);
+  assert.match(byId.get("radix-msd").name, /MSD/);
+  assert.equal(byId.get("std-sort").name, "std::sort");
+  assert.equal(byId.get("std-sort").comparison, true);
+  assert.equal(byId.get("bitonic").name, "Bitonic sort");
+  assert.equal(byId.get("bitonic").comparison, true);
+  assert.match(byId.get("stable-sort").name, /stable_sort/);
+  assert.equal(byId.get("stable-sort").comparison, true);
+});
+
 test("bogo, timsort, introsort, comb, and gnome are selectable", () => {
   const ids = new Set(PROGRAMS.map((program) => program.id));
   for (const id of ["bogo", "tim", "intro", "comb", "gnome"]) {

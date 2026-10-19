@@ -327,7 +327,7 @@ function* counting(source) {
   }
 }
 
-function* radix(source) {
+function* radixLsd(source) {
   const array = source;
   const stats = freshStats();
   const sorted = new Set();
@@ -339,6 +339,62 @@ function* radix(source) {
     if (Math.floor(max / exp) > 0) sorted.clear();
   }
   yield* markAll(array, stats, sorted);
+}
+
+function* radixMsd(source) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  const max = array.reduce((peak, value) => Math.max(peak, value), 0);
+  let exp = 1;
+  while (Math.floor(max / (exp * 10)) > 0) exp *= 10;
+  yield* msdPass(array, 0, array.length, exp, stats, sorted);
+  yield* markAll(array, stats, sorted);
+}
+
+function* msdPass(array, start, end, exp, stats, sorted) {
+  if (end <= start) return;
+  if (end - start === 1 || exp < 1) {
+    sorted.add(start);
+    yield frame(array, [start], "sorted", stats, sorted);
+    return;
+  }
+  const n = end - start;
+  const digits = new Array(n);
+  const tally = new Array(10).fill(0);
+  for (let i = 0; i < n; i += 1) {
+    digits[i] = Math.floor(array[start + i] / exp) % 10;
+    tally[digits[i]] += 1;
+    yield frame(array, [start + i], "read", stats, sorted);
+  }
+  const bucket = new Array(10);
+  bucket[0] = 0;
+  for (let digit = 1; digit < 10; digit += 1) bucket[digit] = bucket[digit - 1] + tally[digit - 1];
+  const origin = bucket.slice();
+  const out = new Array(n);
+  for (let i = 0; i < n; i += 1) {
+    const place = bucket[digits[i]];
+    bucket[digits[i]] = place + 1;
+    out[place] = array[start + i];
+  }
+  for (let i = 0; i < n; i += 1) {
+    array[start + i] = out[i];
+    stats.writes += 1;
+    yield frame(array, [start + i], "write", stats, sorted);
+  }
+  const next = Math.floor(exp / 10);
+  for (let digit = 0; digit < 10; digit += 1) {
+    const from = start + origin[digit];
+    const to = start + (digit === 9 ? n : origin[digit + 1]);
+    if (to - from <= 1) {
+      if (to > from) {
+        sorted.add(from);
+        yield frame(array, [from], "sorted", stats, sorted);
+      }
+    } else {
+      yield* msdPass(array, from, to, next, stats, sorted);
+    }
+  }
 }
 
 function* radixPass(array, exp, stats, sorted) {
@@ -641,6 +697,157 @@ function* intro(source) {
   yield* markAll(array, stats, sorted);
 }
 
+const GCC_INSERT_LIMIT = 16;
+const GCC_STABLE_CHUNK = 7;
+
+function* lessThan(array, i, j, stats, sorted) {
+  stats.comparisons += 1;
+  yield frame(array, [i, j], "compare", stats, sorted);
+  return array[i] < array[j];
+}
+
+function* moveMedianToFirst(array, first, last, stats, sorted) {
+  const a = first + 1;
+  const b = first + ((last - first) >> 1);
+  const c = last - 1;
+  let choice = a;
+  if (yield* lessThan(array, a, b, stats, sorted)) {
+    if (yield* lessThan(array, b, c, stats, sorted)) choice = b;
+    else choice = (yield* lessThan(array, a, c, stats, sorted)) ? c : a;
+  } else if (yield* lessThan(array, a, c, stats, sorted)) choice = a;
+  else choice = (yield* lessThan(array, b, c, stats, sorted)) ? c : b;
+  if (choice !== first) {
+    swap(array, first, choice, stats);
+    yield frame(array, [first, choice], "swap", stats, sorted);
+  }
+}
+
+function* gccPartition(array, first, last, stats, sorted) {
+  yield* moveMedianToFirst(array, first, last, stats, sorted);
+  const pivot = first;
+  let left = first + 1;
+  let right = last - 1;
+  while (true) {
+    while (left <= right) {
+      stats.comparisons += 1;
+      yield frame(array, [left, pivot], "compare", stats, sorted, pivot);
+      if (!(array[left] < array[pivot])) break;
+      left += 1;
+    }
+    while (left <= right) {
+      stats.comparisons += 1;
+      yield frame(array, [right, pivot], "compare", stats, sorted, pivot);
+      if (!(array[pivot] < array[right])) break;
+      right -= 1;
+    }
+    if (left >= right) return left;
+    swap(array, left, right, stats);
+    yield frame(array, [left, right], "swap", stats, sorted, pivot);
+    left += 1;
+    right -= 1;
+  }
+}
+
+function* stdHeap(array, lo, hi, stats, sorted) {
+  const n = hi - lo + 1;
+  for (let i = Math.floor(n / 2) - 1; i >= 0; i -= 1) {
+    yield* siftSpan(array, lo, i, n, stats, sorted);
+  }
+  for (let end = n - 1; end > 0; end -= 1) {
+    swap(array, lo, lo + end, stats);
+    yield frame(array, [lo, lo + end], "swap", stats, sorted);
+    yield* siftSpan(array, lo, 0, end, stats, sorted);
+  }
+}
+
+function* stdIntroLoop(array, first, last, depth, stats, sorted) {
+  while (last - first > GCC_INSERT_LIMIT) {
+    if (depth === 0) {
+      yield* stdHeap(array, first, last - 1, stats, sorted);
+      return;
+    }
+    depth -= 1;
+    const cut = yield* gccPartition(array, first, last, stats, sorted);
+    if (cut <= first || cut >= last) {
+      yield* stdHeap(array, first, last - 1, stats, sorted);
+      return;
+    }
+    yield* stdIntroLoop(array, cut, last, depth, stats, sorted);
+    last = cut;
+  }
+}
+
+function* stdSort(source) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  const n = array.length;
+  if (n > GCC_INSERT_LIMIT) {
+    const depth = 2 * Math.floor(Math.log2(n));
+    yield* stdIntroLoop(array, 0, n, depth, stats, sorted);
+  }
+  yield* insertSpan(array, 0, n, stats, sorted);
+  yield* markAll(array, stats, sorted);
+}
+
+function* stableSort(source) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  yield* gccStable(array, 0, array.length, stats, sorted);
+  yield* markAll(array, stats, sorted);
+}
+
+function* gccStable(array, lo, hi, stats, sorted) {
+  const length = hi - lo;
+  if (length <= GCC_STABLE_CHUNK) {
+    yield* insertSpan(array, lo, hi, stats, sorted);
+    return;
+  }
+  const mid = lo + (length >> 1);
+  yield* gccStable(array, lo, mid, stats, sorted);
+  yield* gccStable(array, mid, hi, stats, sorted);
+  yield* mergeHalves(array, lo, mid, hi, stats, sorted);
+}
+
+function bitonicSpan(count) {
+  let step = 1;
+  while (step * 2 < count) step *= 2;
+  return step;
+}
+
+function* bitonic(source) {
+  const array = source;
+  const stats = freshStats();
+  const sorted = new Set();
+  yield* bitonicRange(array, 0, array.length, true, stats, sorted);
+  yield* markAll(array, stats, sorted);
+}
+
+function* bitonicRange(array, low, count, up, stats, sorted) {
+  if (count <= 1) return;
+  const half = Math.floor(count / 2);
+  yield* bitonicRange(array, low, half, !up, stats, sorted);
+  yield* bitonicRange(array, low + half, count - half, up, stats, sorted);
+  yield* bitonicMerge(array, low, count, up, stats, sorted);
+}
+
+function* bitonicMerge(array, low, count, up, stats, sorted) {
+  if (count <= 1) return;
+  const step = bitonicSpan(count);
+  for (let i = low; i < low + count - step; i += 1) {
+    stats.comparisons += 1;
+    yield frame(array, [i, i + step], "compare", stats, sorted);
+    const outOfOrder = up ? array[i] > array[i + step] : array[i] < array[i + step];
+    if (outOfOrder) {
+      swap(array, i, i + step, stats);
+      yield frame(array, [i, i + step], "swap", stats, sorted);
+    }
+  }
+  yield* bitonicMerge(array, low, step, up, stats, sorted);
+  yield* bitonicMerge(array, low + step, count - step, up, stats, sorted);
+}
+
 const BUILDERS = {
   bubble,
   selection,
@@ -654,8 +861,12 @@ const BUILDERS = {
   gnome,
   tim,
   intro,
+  "std-sort": stdSort,
+  "stable-sort": stableSort,
+  bitonic,
   counting,
-  radix,
+  "radix-lsd": radixLsd,
+  "radix-msd": radixMsd,
   bogo,
 };
 
@@ -724,6 +935,15 @@ export const PROGRAMS = [
     blurb: "Builds a max-heap, then moves the largest value to the end.",
   },
   {
+    id: "bitonic",
+    name: "Bitonic sort",
+    comparison: true,
+    complexity: "O(n log^2 n)",
+    latex: "O(n\\log^{2} n)",
+    caseLabel: "",
+    blurb: "Makes bitonic sequences, then compare-exchanges them into order. Any length works.",
+  },
+  {
     id: "cocktail",
     name: "Cocktail sort",
     comparison: true,
@@ -742,13 +962,22 @@ export const PROGRAMS = [
     blurb: "Tallies each value, then writes the 1…n progression back in order.",
   },
   {
-    id: "radix",
-    name: "Radix sort",
+    id: "radix-lsd",
+    name: "Radix sort LSD",
     comparison: false,
     complexity: "O(d n)",
     latex: "O(dn)",
     caseLabel: "",
-    blurb: "Sorts by decimal digit, from the ones place through the thousands.",
+    blurb: "Sorts by decimal digit, starting at the ones place and moving toward the highest place.",
+  },
+  {
+    id: "radix-msd",
+    name: "Radix sort MSD",
+    comparison: false,
+    complexity: "O(d n)",
+    latex: "O(dn)",
+    caseLabel: "",
+    blurb: "Sorts by decimal digit, starting at the highest place and splitting each bucket.",
   },
   {
     id: "comb",
@@ -785,6 +1014,24 @@ export const PROGRAMS = [
     latex: "O(n\\log n)",
     caseLabel: "",
     blurb: "Quicksort that switches to heapsort when the recursion gets deep, and insertion sort on small ranges.",
+  },
+  {
+    id: "std-sort",
+    name: "std::sort",
+    comparison: true,
+    complexity: "O(n log n)",
+    latex: "O(n\\log n)",
+    caseLabel: "",
+    blurb: "GCC std::sort. Introsort down to runs of 16, then one insertion sort over the whole list.",
+  },
+  {
+    id: "stable-sort",
+    name: "std::stable_sort",
+    comparison: true,
+    complexity: "O(n log n)",
+    latex: "O(n\\log n)",
+    caseLabel: "",
+    blurb: "GCC std::stable_sort. Insertion sort on chunks of 7, then a stable merge through a buffer.",
   },
   {
     id: "bogo",
