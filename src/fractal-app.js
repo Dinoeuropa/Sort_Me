@@ -1,7 +1,9 @@
 import katex from "../vendor/katex/katex.js";
 import { FRACTALS, buildGeometry, escapeBand, fractalById, iterateIfs, presetById } from "./fractals.js";
+import { unitsPerFrame } from "./fractal-pace.js";
 import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, paintEscape } from "./palettes.js";
 import { runControlLabel } from "./session.js";
+import { createSpeaker } from "./sound.js";
 
 const fractalSelect = document.querySelector("#fractal");
 const paletteSelect = document.querySelector("#palette");
@@ -16,6 +18,7 @@ const paletteBlurb = document.querySelector("#palette-blurb");
 const presets = document.querySelector("#presets");
 const toggleButton = document.querySelector("#toggle");
 const stepButton = document.querySelector("#step");
+const soundButton = document.querySelector("#sound");
 const dock = document.querySelector("#viz-dock");
 const dockSpeed = document.querySelector("#dock-speed");
 const dockToggle = document.querySelector("#dock-toggle");
@@ -34,6 +37,9 @@ const legend = [
 ];
 
 const ctx = canvas.getContext("2d");
+const speaker = createSpeaker();
+const PAPER = "#100e0c";
+const SCAN = "#e2b657";
 const KIND = { escape: "Escape", curve: "Curve", gasket: "Gasket", ifs: "Iterated" };
 let loopId = 0;
 
@@ -46,8 +52,11 @@ const state = {
   finished: false,
   dock: false,
   samples: 0,
-  level: 0,
-  hold: 0,
+  revealed: 0,
+  inked: 0,
+  inkKey: "",
+  total: 0,
+  sweepPlayed: false,
   nextRow: 0,
   raster: null,
   iterations: null,
@@ -56,7 +65,6 @@ const state = {
   vertices: null,
   frameBounds: null,
   points: null,
-  filled: 0,
   cursor: null,
 };
 
@@ -87,26 +95,6 @@ function currentPreset() {
 function depthValue() {
   const fractal = currentFractal();
   return clampNumber(depthInput.value, fractal.minDepth, fractal.maxDepth);
-}
-
-function bandRows(speed, height) {
-  const t = clampUnit(speed);
-  return Math.max(1, Math.round(1 + (height - 1) * t * t));
-}
-
-function pointBatch(speed, step) {
-  if (step) return 160;
-  const t = clampUnit(speed);
-  return Math.max(40, Math.round(40 * 200 ** t));
-}
-
-function framesPerLevel(speed) {
-  const t = clampUnit(speed);
-  return Math.max(1, Math.round(16 ** (1 - t)));
-}
-
-function clampUnit(speed) {
-  return Math.min(1, Math.max(0, (Number(speed) - 1) / 99));
 }
 
 function clampNumber(value, min, max) {
@@ -183,8 +171,7 @@ function renderChrome() {
   });
   syncDepthControls();
   const depth = depthValue();
-  const shown = fractal.kind === "escape" ? depth : Math.max(fractal.minDepth, state.level);
-  depthStat.textContent = `${shown.toLocaleString()} / ${depth.toLocaleString()}`;
+  depthStat.textContent = depth.toLocaleString();
   samplesEl.textContent = state.samples.toLocaleString();
   kindEl.textContent = KIND[fractal.kind];
   presetStat.textContent = preset.name;
@@ -208,12 +195,17 @@ function renderChrome() {
 function paceLabel(fractal) {
   const speed = speedInput.value;
   if (fractal.kind === "escape") {
-    const rows = state.raster ? bandRows(speed, state.raster.height) : bandRows(speed, 8);
-    return `${rows.toLocaleString()} rows / frame`;
+    const rows = unitsPerFrame(speed, state.raster?.height || 480, false);
+    return perFrame(rows, "row", "rows");
   }
-  if (fractal.kind === "ifs") return `${pointBatch(speed, false).toLocaleString()} pts / frame`;
-  const frames = framesPerLevel(speed);
-  return frames === 1 ? "1 level / frame" : `1 level / ${frames} frames`;
+  const units = unitsPerFrame(speed, state.total || depthValue(), false);
+  if (fractal.kind === "ifs") return perFrame(units, "pt", "pts");
+  if (fractal.kind === "gasket") return perFrame(units, "triangle", "triangles");
+  return perFrame(units, "segment", "segments");
+}
+
+function perFrame(count, singular, plural) {
+  return `${count.toLocaleString()} ${count === 1 ? singular : plural} / frame`;
 }
 
 function stop() {
@@ -223,11 +215,14 @@ function stop() {
 
 function resetProgress() {
   const fractal = currentFractal();
+  const depth = depthValue();
   state.finished = false;
   state.paused = false;
   state.samples = 0;
-  state.level = fractal.minDepth - 1;
-  state.hold = 0;
+  state.revealed = 0;
+  state.inked = 0;
+  state.inkKey = "";
+  state.sweepPlayed = false;
   state.nextRow = 0;
   state.iterations = null;
   state.basins = null;
@@ -235,14 +230,26 @@ function resetProgress() {
   state.vertices = null;
   state.frameBounds = null;
   state.points = null;
-  state.filled = 0;
+  state.total = 0;
   state.cursor = { x: 0, y: 0, seed: 1 };
   state.raster = null;
   error.textContent = "";
-  if (fractal.frame === "final") {
-    const depth = depthValue();
-    state.frameBounds = boundsOf(pathsOf(buildGeometry(state.fractalId, state.presetId, depth)));
+  if (fractal.kind === "curve" || fractal.kind === "gasket") {
+    const geometry = buildGeometry(state.fractalId, state.presetId, depth);
+    if (geometry.mode === "triangles") {
+      state.vertices = geometry.vertices;
+      state.total = geometry.vertices.length / 6;
+    } else {
+      state.paths = geometry.paths;
+      state.total = segmentCount(geometry.paths);
+    }
+    state.frameBounds = boundsOf(pathsOf(geometry));
+  } else if (fractal.kind === "ifs") {
+    state.total = depth;
+    state.points = new Float64Array(depth * 2);
+    state.frameBounds = currentPreset().bounds;
   }
+  clearPaper();
 }
 
 function pathsOf(geometry) {
@@ -266,58 +273,120 @@ function ensureEscape() {
   state.basins = new Int8Array(raster.width * raster.height);
   state.basins.fill(-1);
   state.nextRow = 0;
+  state.revealed = 0;
   state.samples = 0;
   state.finished = false;
+  state.sweepPlayed = false;
+}
+
+function prepareVectorCanvas(box) {
+  canvas.classList.remove("pixelated");
+  const pixelWidth = Math.max(1, Math.floor(box.width * box.dpr));
+  const pixelHeight = Math.max(1, Math.floor(box.height * box.dpr));
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  ctx.setTransform(box.dpr, 0, 0, box.dpr, 0, 0);
+}
+
+function clearPaper() {
+  const box = viewBox();
+  prepareVectorCanvas(box);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  state.inked = 0;
+  state.inkKey = "";
 }
 
 function paint() {
   const fractal = currentFractal();
   const box = viewBox();
   if (fractal.kind === "escape") {
-    if (!state.raster || !state.iterations) return;
-    canvas.classList.add("pixelated");
-    if (canvas.width !== state.raster.width || canvas.height !== state.raster.height) {
-      canvas.width = state.raster.width;
-      canvas.height = state.raster.height;
-    }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const pixels = paintEscape(
-      state.paletteId,
-      state.iterations,
-      state.basins,
-      state.raster.width,
-      state.raster.height,
-      depthValue(),
-      state.nextRow,
-    );
-    ctx.putImageData(new ImageData(pixels, state.raster.width, state.raster.height), 0, 0);
+    paintRaster();
     return;
   }
-  canvas.classList.remove("pixelated");
-  const pixelWidth = Math.floor(box.width * box.dpr);
-  const pixelHeight = Math.floor(box.height * box.dpr);
-  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-    canvas.width = pixelWidth;
-    canvas.height = pixelHeight;
+  prepareVectorCanvas(box);
+  const key = `${box.width}x${box.height}x${box.dpr}:${state.paletteId}`;
+  if (key !== state.inkKey) {
+    state.inkKey = key;
+    state.inked = 0;
   }
-  ctx.setTransform(box.dpr, 0, 0, box.dpr, 0, 0);
   if (fractal.kind === "ifs") {
-    const count = state.filled * 2;
-    drawPoints(
-      state.paletteId,
-      ctx,
-      state.points ? state.points.subarray(0, count) : new Float64Array(),
-      currentPreset().bounds,
-      box.width,
-      box.height,
-    );
+    paintPoints(box);
     return;
   }
-  if (fractal.kind === "gasket" && state.vertices) {
-    drawTriangles(state.paletteId, ctx, state.vertices, box.width, box.height, state.frameBounds);
+  if (fractal.kind === "gasket") {
+    paintTriangles(box);
     return;
   }
-  if (state.paths) drawPaths(state.paletteId, ctx, state.paths, box.width, box.height, state.frameBounds);
+  paintSegments(box);
+}
+
+function paintRaster() {
+  if (!state.raster || !state.iterations) return;
+  canvas.classList.add("pixelated");
+  if (canvas.width !== state.raster.width || canvas.height !== state.raster.height) {
+    canvas.width = state.raster.width;
+    canvas.height = state.raster.height;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const pixels = paintEscape(
+    state.paletteId,
+    state.iterations,
+    state.basins,
+    state.raster.width,
+    state.raster.height,
+    depthValue(),
+    state.nextRow,
+  );
+  ctx.putImageData(new ImageData(pixels, state.raster.width, state.raster.height), 0, 0);
+  if (state.nextRow > 0 && state.nextRow < state.raster.height) {
+    ctx.beginPath();
+    ctx.strokeStyle = SCAN;
+    ctx.lineWidth = 2;
+    ctx.moveTo(0, state.nextRow + 0.5);
+    ctx.lineTo(state.raster.width, state.nextRow + 0.5);
+    ctx.stroke();
+  }
+}
+
+function paintSegments(box) {
+  if (!state.paths || state.revealed <= 0) return;
+  const done = state.finished || state.revealed >= state.total;
+  drawPaths(state.paletteId, ctx, state.paths, box.width, box.height, state.frameBounds, {
+    from: 0,
+    until: state.revealed,
+    clear: true,
+    total: state.total,
+    tip: !done,
+  });
+  state.inked = state.revealed;
+}
+
+function paintTriangles(box) {
+  if (!state.vertices || state.revealed <= 0) return;
+  drawTriangles(state.paletteId, ctx, state.vertices, box.width, box.height, state.frameBounds, {
+    from: 0,
+    until: state.revealed,
+    clear: true,
+    total: state.total,
+  });
+  state.inked = state.revealed;
+}
+
+function paintPoints(box) {
+  if (!state.points || state.revealed <= 0) return;
+  if (state.inked === state.revealed) return;
+  const slice = state.points.subarray(state.inked * 2, state.revealed * 2);
+  drawPoints(state.paletteId, ctx, slice, state.frameBounds, box.width, box.height, {
+    clear: state.inked === 0,
+    total: state.total,
+  });
+  state.inked = state.revealed;
 }
 
 function advance(step) {
@@ -336,7 +405,7 @@ function advance(step) {
 
 function advanceEscape(step) {
   ensureEscape();
-  const rows = step ? 1 : bandRows(speedInput.value, state.raster.height);
+  const rows = unitsPerFrame(speedInput.value, state.raster.height, step);
   const count = Math.min(rows, state.raster.height - state.nextRow);
   if (count <= 0) {
     finish();
@@ -353,63 +422,96 @@ function advanceEscape(step) {
   );
   state.iterations.set(band.iterations, state.nextRow * state.raster.width);
   state.basins.set(band.basins, state.nextRow * state.raster.width);
+  speaker.playNotes(bandSamples(band, state.raster.width, count), depthValue(), 2);
   state.nextRow += count;
+  state.revealed = state.nextRow;
   state.samples = state.nextRow * state.raster.width;
   if (state.nextRow >= state.raster.height) finish();
 }
 
 function advanceIfs(step) {
-  const target = depthValue();
-  if (!state.points || state.points.length < target * 2) state.points = new Float64Array(target * 2);
-  const room = target - state.filled;
+  const room = state.total - state.revealed;
   if (room <= 0) {
     finish();
     return;
   }
-  const batch = Math.min(room, pointBatch(speedInput.value, step));
+  const batch = Math.min(room, unitsPerFrame(speedInput.value, state.total, step));
   const next = iterateIfs(state.fractalId, state.presetId, state.cursor, batch);
-  state.points.set(next.points, state.filled * 2);
+  state.points.set(next.points, state.revealed * 2);
   state.cursor = next.cursor;
-  state.filled += batch;
-  state.samples = state.filled;
-  state.level = state.filled;
-  if (state.filled >= target) finish();
+  const lastY = next.points[(batch - 1) * 2 + 1];
+  speaker.playNotes([pitchFromY(lastY, state.frameBounds)], 100, 1);
+  state.revealed += batch;
+  state.samples = state.revealed;
+  if (state.revealed >= state.total) finish();
 }
 
 function advanceCurve(step) {
-  const fractal = currentFractal();
-  const target = depthValue();
-  if (!step && state.hold > 0) {
-    state.hold -= 1;
-    return;
-  }
-  if (state.level >= target) {
+  if (state.total <= 0 || state.revealed >= state.total) {
     finish();
     return;
   }
-  state.level += 1;
-  state.hold = step ? 0 : Math.max(0, framesPerLevel(speedInput.value) - 1);
-  const geometry = buildGeometry(state.fractalId, state.presetId, state.level);
-  if (geometry.mode === "triangles") {
-    state.vertices = geometry.vertices;
-    state.paths = null;
-    state.samples = geometry.vertices.length / 6;
-  } else {
-    state.paths = geometry.paths;
-    state.vertices = null;
-    state.samples = geometry.paths.reduce((sum, path) => sum + path.length / 2, 0);
-  }
-  if (!state.frameBounds || fractal.frame === "level") {
-    state.frameBounds = boundsOf(pathsOf(geometry));
-  }
-  if (state.level >= target) finish();
+  const batch = unitsPerFrame(speedInput.value, state.total, step);
+  const next = Math.min(state.total, state.revealed + batch);
+  const fractal = currentFractal();
+  const y = fractal.kind === "gasket"
+    ? triangleCentroidY(state.vertices, next - 1)
+    : pointAtSegmentEnd(state.paths, next - 1)?.y;
+  if (Number.isFinite(y)) speaker.playNotes([pitchFromY(y, state.frameBounds)], 100, 1);
+  state.revealed = next;
+  state.samples = next;
+  if (state.revealed >= state.total) finish();
 }
 
 function finish() {
+  const first = !state.finished;
   state.finished = true;
   state.running = false;
   state.paused = false;
-  state.hold = 0;
+  if (first && !state.sweepPlayed) {
+    state.sweepPlayed = true;
+    const ramp = [];
+    for (let i = 1; i <= 16; i += 1) ramp.push(i);
+    speaker.playSweep(ramp, 16);
+  }
+}
+
+function segmentCount(paths) {
+  let total = 0;
+  for (const path of paths) total += Math.max(0, path.length / 2 - 1);
+  return total;
+}
+
+function pointAtSegmentEnd(paths, segmentIndex) {
+  let index = 0;
+  for (const path of paths) {
+    const segments = Math.max(0, path.length / 2 - 1);
+    if (segmentIndex < index + segments) {
+      const local = segmentIndex - index;
+      return { x: path[(local + 1) * 2], y: path[(local + 1) * 2 + 1] };
+    }
+    index += segments;
+  }
+  return null;
+}
+
+function triangleCentroidY(vertices, index) {
+  const offset = index * 6;
+  return (vertices[offset + 1] + vertices[offset + 3] + vertices[offset + 5]) / 3;
+}
+
+function pitchFromY(y, bounds) {
+  if (!bounds || !Number.isFinite(y)) return 1;
+  const span = Math.max(1e-9, bounds.maxY - bounds.minY);
+  const t = Math.min(1, Math.max(0, (y - bounds.minY) / span));
+  return 1 + Math.round(t * 99);
+}
+
+function bandSamples(band, width, rows) {
+  const mid = Math.floor(width / 2);
+  const values = [band.iterations[mid]];
+  if (rows > 1) values.push(band.iterations[(rows - 1) * width + mid]);
+  return values;
 }
 
 function startLoop() {
@@ -498,6 +600,12 @@ presets.addEventListener("click", (event) => {
   restart();
 });
 toggleButton.addEventListener("click", toggle);
+soundButton.addEventListener("click", () => {
+  const on = soundButton.getAttribute("aria-pressed") !== "true";
+  soundButton.setAttribute("aria-pressed", String(on));
+  soundButton.textContent = on ? "Sound on" : "Sound";
+  speaker.setEnabled(on);
+});
 stepButton.addEventListener("click", () => {
   const wasRunning = state.running;
   stop();

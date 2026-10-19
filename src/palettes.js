@@ -120,35 +120,55 @@ export function boundsOf(paths) {
   return { minX, maxX, minY, maxY };
 }
 
-export function drawPaths(paletteId, ctx, paths, width, height, bounds) {
+export function drawPaths(paletteId, ctx, paths, width, height, bounds, range) {
+  const start = range?.from ?? 0;
+  const stop = range?.until ?? Infinity;
+  const clear = range?.clear !== undefined ? range.clear : start === 0;
   const map = fitTransform(bounds || boundsOf(paths), width, height, 18);
-  fillPaper(ctx, width, height);
+  if (clear) fillPaper(ctx, width, height);
   let index = 0;
   let total = 0;
   for (const path of paths) total += Math.max(0, path.length / 2 - 1);
-  const max = Math.max(1, total);
+  const max = Math.max(1, range?.total ?? total);
   const widthPx = Math.max(1.25, Math.min(width, height) * 0.007);
+  let tip = null;
   for (const path of paths) {
     const count = path.length / 2;
     for (let i = 0; i < count - 1; i += 1) {
       const from = map(path[i * 2], path[i * 2 + 1]);
       const to = map(path[i * 2 + 2], path[i * 2 + 3]);
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-      ctx.strokeStyle = rgb(colorSample(paletteId, index + 1, max, -1));
-      ctx.lineWidth = widthPx;
-      ctx.stroke();
+      if (index >= start && index < stop) {
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.strokeStyle = rgb(colorSample(paletteId, index + 1, max, -1));
+        ctx.lineWidth = widthPx;
+        ctx.stroke();
+        tip = to;
+      }
       index += 1;
+      if (index >= stop) break;
     }
+    if (index >= stop) break;
+  }
+  if (range?.tip && tip) {
+    ctx.beginPath();
+    ctx.fillStyle = "#e2b657";
+    ctx.arc(tip.x, tip.y, Math.max(2.4, widthPx * 1.8), 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
-export function drawTriangles(paletteId, ctx, vertices, width, height, bounds) {
+export function drawTriangles(paletteId, ctx, vertices, width, height, bounds, range) {
+  const start = range?.from ?? 0;
+  const stop = range?.until ?? Infinity;
+  const clear = range?.clear !== undefined ? range.clear : start === 0;
   const map = fitTransform(bounds || boundsOf([vertices]), width, height, 18);
-  fillPaper(ctx, width, height);
-  const triangles = vertices.length / 6;
-  for (let i = 0; i < triangles; i += 1) {
+  if (clear) fillPaper(ctx, width, height);
+  const available = vertices.length / 6;
+  const triangles = range?.total ?? available;
+  const last = Math.min(available, stop);
+  for (let i = start; i < last; i += 1) {
     const offset = i * 6;
     const a = map(vertices[offset], vertices[offset + 1]);
     const b = map(vertices[offset + 2], vertices[offset + 3]);
@@ -163,11 +183,13 @@ export function drawTriangles(paletteId, ctx, vertices, width, height, bounds) {
   }
 }
 
-export function drawPoints(paletteId, ctx, points, bounds, width, height) {
+export function drawPoints(paletteId, ctx, points, bounds, width, height, range) {
   const map = fitTransform(bounds, width, height, 18);
-  fillPaper(ctx, width, height);
+  const clear = range?.clear !== undefined ? range.clear : true;
+  if (clear) fillPaper(ctx, width, height);
   const count = points.length / 2;
-  const size = count > 12000 ? 1 : 1.6;
+  const planned = range?.total ?? count;
+  const size = planned > 12000 ? 1 : 1.6;
   const span = Math.max(1e-9, bounds.maxY - bounds.minY);
   for (let i = 0; i < count; i += 1) {
     const y = points[i * 2 + 1];

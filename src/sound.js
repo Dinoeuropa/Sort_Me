@@ -65,6 +65,21 @@ export function createSpeaker({ createContext } = {}) {
       notes.forEach((frequency, index) => strike(ctx, frequency, index * 0.018));
       return notes;
     },
+    playNotes(values, maxValue, limit = 2) {
+      if (!enabled || !values?.length) return [];
+      const notes = [];
+      const cap = Math.max(1, limit);
+      const step = Math.max(1, Math.ceil(values.length / cap));
+      const peak = Math.max(2, Number(maxValue) || 2);
+      for (let i = 0; i < values.length && notes.length < cap; i += step) {
+        const value = Number(values[i]);
+        if (!Number.isFinite(value)) continue;
+        notes.push(frequencyFor(Math.max(1, value), peak));
+      }
+      const ctx = ensure();
+      notes.forEach((frequency, index) => strike(ctx, frequency, index * 0.018));
+      return notes;
+    },
     playSweep(values, maxValue) {
       if (!enabled || !values?.length) return 0;
       const ctx = ensure();

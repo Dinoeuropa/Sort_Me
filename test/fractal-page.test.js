@@ -31,6 +31,7 @@ test("the fractal page mirrors the sorting controls", () => {
   assert.match(fractals, /id="presets"/);
   assert.match(fractals, /id="toggle"/);
   assert.match(fractals, /id="step"/);
+  assert.match(fractals, /id="sound"/);
   assert.match(fractals, /id="canvas"/);
   assert.match(fractals, /aria-label="Fractal visualization"/);
   assert.match(fractals, /id="viz-dock"/);

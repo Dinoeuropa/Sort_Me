@@ -77,6 +77,22 @@ test("fit keeps the bounds centered inside the padded canvas", () => {
   assert.ok(corner.y <= 90 + 1e-6);
 });
 
+test("a curve can grow without clearing what is already drawn", () => {
+  const curve = buildGeometry("koch", "curve", 1);
+  const ctx = mockContext();
+  let clears = 0;
+  ctx.fillRect = () => {
+    clears += 1;
+    ctx.fills += 1;
+  };
+  drawPaths("classic", ctx, curve.paths, 180, 120, undefined, { from: 0, until: 1 });
+  const cleared = clears;
+  const strokes = ctx.strokes;
+  drawPaths("classic", ctx, curve.paths, 180, 120, undefined, { from: 1, until: 4, clear: false });
+  assert.equal(clears, cleared);
+  assert.ok(ctx.strokes > strokes);
+});
+
 test("every coloring can draw a curve, a gasket, and a point cloud", () => {
   const curve = buildGeometry("koch", "curve", 1);
   const gasket = buildGeometry("sierpinski", "upright", 1);

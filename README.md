@@ -36,7 +36,7 @@ Fractals: Mandelbrot, Julia, burning ship, Newton, Koch snowflake, dragon curve,
 
 Colorings: classic, heat, ocean, ink, and color wheel. Heat uses the cyan-to-red ramp from the sorting heat strip.
 
-Each fractal has three presets. Iterations, depth, or point count is the depth slider, and it stops at a cap small enough to draw in the page. Press Draw to watch the picture resolve. Draw on a finished picture plays it again. Resume appears only after Pause. Step advances one row, one level, or a small batch of points. On a narrow screen the settings sit above the chart, and Draw scrolls the chart into view beside a speed and pause rail.
+Each fractal has three presets. Iterations, depth, or point count is the depth slider, and it stops at a cap small enough to draw in the page. Press Draw and the picture is traced: a scan line for an escape-time set, a pen along a curve, triangles filling a gasket, or points landing on a fern. Even full speed takes more than one frame. Draw on a finished picture plays it again. Resume appears only after Pause. Step advances a short piece of that drawing. Sound is off until you press Sound. The pitch follows the part being drawn, and a finished picture plays a short rising sweep. On a narrow screen the settings sit above the chart, and Draw scrolls the chart into view beside a speed and pause rail.
 
 ## Checks
 
