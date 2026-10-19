@@ -1,10 +1,10 @@
 # Sort Me
 
-A local sorting visualiser. Pick a sorting program and a visualization program, then watch the run against the comparison lower bound ⌈log₂(n!)⌉.
+A local visualiser with two pages. Sorting watches a program run against the comparison lower bound ⌈log₂(n!)⌉. Fractals watches an escape-time set, a curve, a gasket, or an iterated function system resolve under a coloring you pick.
 
 Every generated array is a permutation of **1, 2, 3, …, n**. Length stops at **250**, so a finished chart always rises by 1 from one position to the next. Compare runs two to four programs on that same array. Changing the length or a preset rebuilds the array and keeps the comparison running.
 
-The page does not call a server, load a font, or send the array anywhere. The included server only binds to `127.0.0.1`.
+Neither page calls a server, loads a font, or sends the picture anywhere. The included server only binds to `127.0.0.1`.
 
 ## Run locally
 
@@ -12,9 +12,9 @@ The page does not call a server, load a font, or send the array anywhere. The in
 npm start
 ```
 
-Open `http://127.0.0.1:4173`.
+Open `http://127.0.0.1:4173` for sorting. Fractals are at `http://127.0.0.1:4173/fractals.html`. The brass links at the top of either page switch between them.
 
-## What you can select
+## Sorting
 
 Sorting programs: bubble, selection, insertion, gnome, shell, merge, timsort, quick, introsort, heap, cocktail, comb, counting, radix, and bogo. Their big-O formulas are set in LaTeX with a copy of KaTeX kept in this repository. Bogo sort shuffles until the list is ordered, so a long list may never finish.
 
@@ -29,6 +29,14 @@ Pressing Sort on a list that is already in order plays a shuffle, then runs the 
 Sound is off until you press Sound. Each compare, swap, or write plays a short sine tone whose pitch follows the value, in the manner of the sorting videos on YouTube. Press Sound again to switch it off. A finished run plays a short rising sweep.
 
 Counting sort and radix sort do not compare elements, so the lower-bound meter does not apply to them.
+
+## Fractals
+
+Fractals: Mandelbrot, Julia, burning ship, Newton, Koch snowflake, dragon curve, Sierpinski gasket, Hilbert curve, and Barnsley fern. Their formulas are set in LaTeX with the same local KaTeX copy.
+
+Colorings: classic, heat, ocean, ink, and color wheel. Heat uses the cyan-to-red ramp from the sorting heat strip.
+
+Each fractal has three presets. Iterations, depth, or point count is the depth slider, and it stops at a cap small enough to draw in the page. Press Draw to watch the picture resolve. Draw on a finished picture plays it again. Resume appears only after Pause. Step advances one row, one level, or a small batch of points. On a narrow screen the settings sit above the chart, and Draw scrolls the chart into view beside a speed and pause rail.
 
 ## Checks
 
