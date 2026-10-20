@@ -65,6 +65,12 @@ test("paint writes one opaque pixel per sample", () => {
   const center = band.iterations[4] >= 12;
   assert.equal(center, true);
   assert.deepEqual([pixels[16], pixels[17], pixels[18]], colorSample("heat", 12, 12, -1));
+  const early = band.iterations[0];
+  assert.ok(early < 12);
+  const hidden = paintEscape("heat", band.iterations, band.basins, 3, 3, 12, 3, early - 1);
+  assert.deepEqual([hidden[0], hidden[1], hidden[2]], colorSample("heat", 12, 12, -1));
+  const shown = paintEscape("heat", band.iterations, band.basins, 3, 3, 12, 3, early);
+  assert.deepEqual([shown[0], shown[1], shown[2]], colorSample("heat", early, 12, -1));
 });
 
 test("fit keeps the bounds centered inside the padded canvas", () => {
