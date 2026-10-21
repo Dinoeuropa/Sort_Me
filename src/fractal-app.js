@@ -174,7 +174,8 @@ function renderChrome() {
   });
   syncDepthControls();
   const depth = depthValue();
-  const generation = state.stages ? fractal.minDepth + state.stage : depth;
+  const drawing = state.running || state.paused || state.finished;
+  const generation = state.stages && drawing ? fractal.minDepth + state.stage : depth;
   depthStat.textContent = generation.toLocaleString();
   samplesEl.textContent = state.samples.toLocaleString();
   kindEl.textContent = KIND[fractal.kind];
@@ -619,6 +620,14 @@ function revealVisualization() {
   document.querySelector(".canvas-frame")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function arm() {
+  stop();
+  state.dock = false;
+  state.paused = false;
+  resetProgress();
+  renderChrome();
+}
+
 function restart() {
   stop();
   state.paused = false;
@@ -638,7 +647,7 @@ fractalSelect.addEventListener("change", () => {
   depthInput.value = String(fractal.defaultDepth);
   depthOut.value = depthInput.value;
   renderPresets();
-  restart();
+  arm();
 });
 
 paletteSelect.addEventListener("change", () => {
@@ -654,9 +663,9 @@ depthInput.addEventListener("input", () => {
 depthOut.addEventListener("change", () => {
   const fractal = currentFractal();
   depthInput.value = String(clampNumber(depthOut.value, fractal.minDepth, fractal.maxDepth));
-  restart();
+  arm();
 });
-depthInput.addEventListener("change", () => restart());
+depthInput.addEventListener("change", () => arm());
 speedInput.addEventListener("input", () => {
   dockSpeed.value = speedInput.value;
   renderChrome();
@@ -670,7 +679,7 @@ presets.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   state.presetId = button.dataset.preset;
-  restart();
+  arm();
 });
 toggleButton.addEventListener("click", toggle);
 soundButton.addEventListener("click", () => {
@@ -711,9 +720,9 @@ new ResizeObserver(() => {
     paint();
     return;
   }
-  if (state.finished || state.running || state.paused) restart();
+  if (state.running) restart();
 }).observe(canvas.parentElement);
 
 renderPresets();
 depthInput.value = String(currentFractal().defaultDepth);
-restart();
+arm();
