@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   FRACTALS,
   buildGeometry,
+  constructionOrder,
   escapeBand,
   escapeValue,
   fractalById,
@@ -110,6 +111,19 @@ test("escape rasters reject non-escape fractals and empty bands", () => {
   assert.equal(band.iterations.length, 0);
 });
 
+test("each fractal is produced in the order of its definition", () => {
+  assert.equal(constructionOrder("mandelbrot"), "iterations");
+  assert.equal(constructionOrder("julia"), "iterations");
+  assert.equal(constructionOrder("burning"), "iterations");
+  assert.equal(constructionOrder("newton"), "iterations");
+  assert.equal(constructionOrder("koch"), "generations");
+  assert.equal(constructionOrder("sierpinski"), "generations");
+  assert.equal(constructionOrder("dragon"), "path");
+  assert.equal(constructionOrder("hilbert"), "path");
+  assert.equal(constructionOrder("fern"), "chaos");
+  assert.equal(escapeValue("mandelbrot", {}, 1, 0, 20).iteration, 3);
+});
+
 test("koch geometry grows by four and stays equilateral", () => {
   const snow = buildGeometry("koch", "snowflake", 0);
   const next = buildGeometry("koch", "snowflake", 1);
@@ -130,6 +144,9 @@ test("koch geometry grows by four and stays equilateral", () => {
   const baseBox = bounds(snow.paths[0]);
   const grownBox = bounds(next.paths[0]);
   assert.ok(grownBox.minY < baseBox.minY - 0.05);
+  const curveOnce = pairs(buildGeometry("koch", "curve", 1).paths[0]);
+  assert.ok(Math.abs(curveOnce[2][1] - Math.sqrt(3) / 6) < 1e-6);
+  assert.ok(curveOnce[1][1] === 0 && curveOnce[3][1] === 0);
 });
 
 test("the dragon curve turns a right angle and doubles", () => {
@@ -143,6 +160,14 @@ test("the dragon curve turns a right angle and doubles", () => {
   const a = [corner[1][0] - corner[0][0], corner[1][1] - corner[0][1]];
   const b = [corner[2][0] - corner[1][0], corner[2][1] - corner[1][1]];
   assert.ok(Math.abs(a[0] * b[0] + a[1] * b[1]) < 1e-9);
+  assert.ok(a[0] * b[1] - a[1] * b[0] > 0);
+  const early = pairs(second.paths[0]);
+  const later = pairs(third.paths[0]);
+  for (let i = 0; i < early.length; i += 1) {
+    assert.equal(later[i][0], early[i][0]);
+    assert.equal(later[i][1], early[i][1]);
+  }
+  assert.equal(turnsOf(later), "LLRLLRR");
   const twin = buildGeometry("dragon", "twin", 2);
   assert.equal(twin.paths.length, 2);
 });
@@ -158,9 +183,15 @@ test("sierpinski keeps three similar triangles and drops the middle", () => {
   for (let i = 0; i < once.vertices.length; i += 6) {
     assert.equal(contains(once.vertices.slice(i, i + 6), hole), false);
   }
+  const centers = centroids(once.vertices);
+  assert.ok(Math.min(...centers.map((point) => point[0])) < 0.4);
+  assert.ok(Math.max(...centers.map((point) => point[0])) > 0.6);
+  assert.equal(buildGeometry("sierpinski", "upright", 3).vertices.length / 6, 27);
 });
 
 test("hilbert visits every cell of its grid without a diagonal jump", () => {
+  const order1 = pairs(buildGeometry("hilbert", "hilbert", 1).paths[0]);
+  assert.deepEqual(order1, [[0, 0], [0, 1], [1, 1], [1, 0]]);
   const curve = buildGeometry("hilbert", "hilbert", 2);
   const points = pairs(curve.paths[0]);
   assert.equal(points.length, 16);
@@ -185,6 +216,15 @@ test("hilbert visits every cell of its grid without a diagonal jump", () => {
 
 test("fern points stay inside the preset bounds and repeat for a seed", () => {
   const preset = presetById("fern", "classic");
+  assert.deepEqual(
+    preset.maps.map((map) => [map.a, map.b, map.c, map.d, map.e, map.f, map.p]),
+    [
+      [0, 0, 0, 0.16, 0, 0, 0.01],
+      [0.85, 0.04, -0.04, 0.85, 0, 1.6, 0.85],
+      [0.2, -0.26, 0.23, 0.22, 0, 1.6, 0.07],
+      [-0.15, 0.28, 0.26, 0.24, 0, 0.44, 0.07],
+    ],
+  );
   const first = iterateIfs("fern", "classic", { x: 0, y: 0, seed: 7 }, 400);
   const again = iterateIfs("fern", "classic", { x: 0, y: 0, seed: 7 }, 400);
   assert.deepEqual(first.points, again.points);
@@ -217,6 +257,25 @@ function bounds(flat) {
 function spread(points, axis) {
   const values = points.map((point) => point[axis]);
   return Math.max(...values) - Math.min(...values);
+}
+
+function turnsOf(points) {
+  let turns = "";
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const cross =
+      (points[i][0] - points[i - 1][0]) * (points[i + 1][1] - points[i][1]) -
+      (points[i][1] - points[i - 1][1]) * (points[i + 1][0] - points[i][0]);
+    turns += cross > 0 ? "L" : "R";
+  }
+  return turns;
+}
+
+function centroids(flat) {
+  const points = [];
+  for (let i = 0; i < flat.length; i += 6) {
+    points.push([(flat[i] + flat[i + 2] + flat[i + 4]) / 3, (flat[i + 1] + flat[i + 3] + flat[i + 5]) / 3]);
+  }
+  return points;
 }
 
 function pairs(flat) {

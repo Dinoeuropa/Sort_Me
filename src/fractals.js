@@ -279,6 +279,15 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
   return { iterations, basins };
 }
 
+/** How the picture is produced: iterations, generations, a path, or the chaos game. */
+export function constructionOrder(fractalId) {
+  const fractal = fractalById(fractalId);
+  if (fractal.kind === "escape") return "iterations";
+  if (fractal.kind === "ifs") return "chaos";
+  if (fractal.id === "koch" || fractal.id === "sierpinski") return "generations";
+  return "path";
+}
+
 export function buildGeometry(fractalId, presetId, depth) {
   const fractal = fractalById(fractalId);
   const preset = presetById(fractalId, presetId);
@@ -415,7 +424,8 @@ function nearestBasin(x, y) {
 function kochPoints(depth, mode) {
   const height = Math.sqrt(3) / 2;
   let pts = mode === "curve" ? [[0, 0], [1, 0]] : [[0, 0], [1, 0], [0.5, height], [0, 0]];
-  const sign = mode === "inward" ? 1 : -1;
+  // Left of travel is +1. The snowflake is counterclockwise, so outward is −1.
+  const sign = mode === "snowflake" ? -1 : 1;
   for (let level = 0; level < depth; level += 1) {
     const next = [pts[0]];
     for (let i = 0; i < pts.length - 1; i += 1) {
@@ -460,8 +470,9 @@ function dragonPath(depth, turn) {
     for (let i = pts.length - 4; i >= 0; i -= 2) {
       const dx = pts[i] - endX;
       const dy = pts[i + 1] - endY;
-      if (turn >= 0) extra.push(endX - dy, endY + dx);
-      else extra.push(endX + dy, endY - dx);
+      // A positive turn is the Heighway fold: the new copy sits left of the path.
+      if (turn >= 0) extra.push(endX + dy, endY - dx);
+      else extra.push(endX - dy, endY + dx);
     }
     pts = pts.concat(extra);
   }

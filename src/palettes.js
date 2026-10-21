@@ -58,7 +58,16 @@ export function colorSample(paletteId, iteration, maxIter, basin = -1) {
   return palette.paint(iter, max);
 }
 
-export function paintEscape(paletteId, iterations, basins, width, height, shownIter, rowLimit = height) {
+export function paintEscape(
+  paletteId,
+  iterations,
+  basins,
+  width,
+  height,
+  shownIter,
+  rowLimit = height,
+  revealIter = null,
+) {
   paletteById(paletteId);
   const data = new Uint8ClampedArray(width * height * 4);
   const limit = Math.max(0, Math.min(height, rowLimit));
@@ -70,9 +79,15 @@ export function paintEscape(paletteId, iterations, basins, width, height, shownI
       if (y < limit) {
         const iteration = iterations[index];
         const basin = basins ? basins[index] : -1;
-        const shown = iteration > shownIter ? shownIter : iteration;
-        const shownBasin = iteration > shownIter ? -1 : basin;
-        rgb = colorSample(paletteId, shown, shownIter, shownBasin);
+        if (revealIter != null && iteration > revealIter) {
+          rgb = INSIDE;
+        } else if (revealIter != null) {
+          rgb = colorSample(paletteId, iteration, shownIter, basin);
+        } else {
+          const shown = iteration > shownIter ? shownIter : iteration;
+          const shownBasin = iteration > shownIter ? -1 : basin;
+          rgb = colorSample(paletteId, shown, shownIter, shownBasin);
+        }
       }
       data[offset] = rgb[0];
       data[offset + 1] = rgb[1];
@@ -129,7 +144,7 @@ export function drawPaths(paletteId, ctx, paths, width, height, bounds, range) {
   let index = 0;
   let total = 0;
   for (const path of paths) total += Math.max(0, path.length / 2 - 1);
-  const max = Math.max(1, range?.total ?? total);
+  const max = Math.max(2, (range?.total ?? total) + 1);
   const widthPx = Math.max(1.25, Math.min(width, height) * 0.007);
   let tip = null;
   for (const path of paths) {
@@ -178,7 +193,7 @@ export function drawTriangles(paletteId, ctx, vertices, width, height, bounds, r
     ctx.lineTo(b.x, b.y);
     ctx.lineTo(c.x, c.y);
     ctx.closePath();
-    ctx.fillStyle = rgb(colorSample(paletteId, i + 1, Math.max(1, triangles), -1));
+    ctx.fillStyle = rgb(colorSample(paletteId, i + 1, Math.max(2, triangles + 1), -1));
     ctx.fill();
   }
 }

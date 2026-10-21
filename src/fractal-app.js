@@ -1,6 +1,6 @@
 import katex from "../vendor/katex/katex.js";
-import { FRACTALS, buildGeometry, escapeBand, fractalById, iterateIfs, presetById } from "./fractals.js";
-import { unitsPerFrame } from "./fractal-pace.js";
+import { FRACTALS, buildGeometry, constructionOrder, escapeBand, fractalById, iterateIfs, presetById } from "./fractals.js";
+import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, paintEscape } from "./palettes.js";
 import { runControlLabel } from "./session.js";
 import { createSpeaker } from "./sound.js";
@@ -39,7 +39,6 @@ const legend = [
 const ctx = canvas.getContext("2d");
 const speaker = createSpeaker();
 const PAPER = "#100e0c";
-const SCAN = "#e2b657";
 const KIND = { escape: "Escape", curve: "Curve", gasket: "Gasket", ifs: "Iterated" };
 let loopId = 0;
 
@@ -66,6 +65,10 @@ const state = {
   frameBounds: null,
   points: null,
   cursor: null,
+  stages: null,
+  stage: 0,
+  stageTick: 0,
+  revealIter: 0,
 };
 
 for (const fractal of FRACTALS) {
@@ -171,7 +174,8 @@ function renderChrome() {
   });
   syncDepthControls();
   const depth = depthValue();
-  depthStat.textContent = depth.toLocaleString();
+  const generation = state.stages ? fractal.minDepth + state.stage : depth;
+  depthStat.textContent = generation.toLocaleString();
   samplesEl.textContent = state.samples.toLocaleString();
   kindEl.textContent = KIND[fractal.kind];
   presetStat.textContent = preset.name;
@@ -195,13 +199,23 @@ function renderChrome() {
 function paceLabel(fractal) {
   const speed = speedInput.value;
   if (fractal.kind === "escape") {
-    const rows = unitsPerFrame(speed, state.raster?.height || 480, false);
-    return perFrame(rows, "row", "rows");
+    return perFrame(unitsPerFrame(speed, depthValue(), false), "iteration", "iterations");
+  }
+  if (state.stages) {
+    const budget = generationBudget(false);
+    const batch = Math.max(1, Math.ceil((state.total || 1) / budget));
+    if (fractal.kind === "gasket") return perFrame(batch, "triangle", "triangles");
+    return perFrame(batch, "segment", "segments");
   }
   const units = unitsPerFrame(speed, state.total || depthValue(), false);
   if (fractal.kind === "ifs") return perFrame(units, "pt", "pts");
   if (fractal.kind === "gasket") return perFrame(units, "triangle", "triangles");
   return perFrame(units, "segment", "segments");
+}
+
+function generationBudget() {
+  const stages = Math.max(1, state.stages?.length || 1);
+  return Math.max(4, Math.round(framesFor(speedInput.value) / stages));
 }
 
 function perFrame(count, singular, plural) {
@@ -233,8 +247,20 @@ function resetProgress() {
   state.total = 0;
   state.cursor = { x: 0, y: 0, seed: 1 };
   state.raster = null;
+  state.stages = null;
+  state.stage = 0;
+  state.stageTick = 0;
+  state.revealIter = 0;
   error.textContent = "";
-  if (fractal.kind === "curve" || fractal.kind === "gasket") {
+  if (constructionOrder(state.fractalId) === "generations") {
+    const stages = [];
+    for (let level = fractal.minDepth; level <= depth; level += 1) {
+      stages.push(buildGeometry(state.fractalId, state.presetId, level));
+    }
+    state.stages = stages;
+    state.frameBounds = boundsOf(pathsOf(stages[stages.length - 1]));
+    showStage(0);
+  } else if (fractal.kind === "curve" || fractal.kind === "gasket") {
     const geometry = buildGeometry(state.fractalId, state.presetId, depth);
     if (geometry.mode === "triangles") {
       state.vertices = geometry.vertices;
@@ -274,6 +300,7 @@ function ensureEscape() {
   state.basins.fill(-1);
   state.nextRow = 0;
   state.revealed = 0;
+  state.revealIter = 0;
   state.samples = 0;
   state.finished = false;
   state.sweepPlayed = false;
@@ -328,6 +355,7 @@ function paint() {
 
 function paintRaster() {
   if (!state.raster || !state.iterations) return;
+  if (state.nextRow < state.raster.height || state.revealIter <= 0) return;
   canvas.classList.add("pixelated");
   if (canvas.width !== state.raster.width || canvas.height !== state.raster.height) {
     canvas.width = state.raster.width;
@@ -341,17 +369,10 @@ function paintRaster() {
     state.raster.width,
     state.raster.height,
     depthValue(),
-    state.nextRow,
+    state.raster.height,
+    state.revealIter,
   );
   ctx.putImageData(new ImageData(pixels, state.raster.width, state.raster.height), 0, 0);
-  if (state.nextRow > 0 && state.nextRow < state.raster.height) {
-    ctx.beginPath();
-    ctx.strokeStyle = SCAN;
-    ctx.lineWidth = 2;
-    ctx.moveTo(0, state.nextRow + 0.5);
-    ctx.lineTo(state.raster.width, state.nextRow + 0.5);
-    ctx.stroke();
-  }
 }
 
 function paintSegments(box) {
@@ -405,28 +426,33 @@ function advance(step) {
 
 function advanceEscape(step) {
   ensureEscape();
-  const rows = unitsPerFrame(speedInput.value, state.raster.height, step);
-  const count = Math.min(rows, state.raster.height - state.nextRow);
-  if (count <= 0) {
+  if (state.nextRow < state.raster.height) {
+    const rows = Math.max(1, Math.ceil(state.raster.height / 6));
+    const count = Math.min(rows, state.raster.height - state.nextRow);
+    const band = escapeBand(
+      state.fractalId,
+      currentPreset(),
+      state.raster.width,
+      state.raster.height,
+      depthValue(),
+      state.nextRow,
+      count,
+    );
+    state.iterations.set(band.iterations, state.nextRow * state.raster.width);
+    state.basins.set(band.basins, state.nextRow * state.raster.width);
+    state.nextRow += count;
+    return;
+  }
+  const cap = depthValue();
+  if (state.revealIter >= cap) {
     finish();
     return;
   }
-  const band = escapeBand(
-    state.fractalId,
-    currentPreset(),
-    state.raster.width,
-    state.raster.height,
-    depthValue(),
-    state.nextRow,
-    count,
-  );
-  state.iterations.set(band.iterations, state.nextRow * state.raster.width);
-  state.basins.set(band.basins, state.nextRow * state.raster.width);
-  speaker.playNotes(bandSamples(band, state.raster.width, count), depthValue(), 2);
-  state.nextRow += count;
-  state.revealed = state.nextRow;
-  state.samples = state.nextRow * state.raster.width;
-  if (state.nextRow >= state.raster.height) finish();
+  const batch = unitsPerFrame(speedInput.value, cap, step);
+  state.revealIter = Math.min(cap, state.revealIter + batch);
+  speaker.playNotes([state.revealIter], cap, 1);
+  state.samples = visibleSamples(cap);
+  if (state.revealIter >= cap) finish();
 }
 
 function advanceIfs(step) {
@@ -447,6 +473,10 @@ function advanceIfs(step) {
 }
 
 function advanceCurve(step) {
+  if (state.stages) {
+    advanceGeneration(step);
+    return;
+  }
   if (state.total <= 0 || state.revealed >= state.total) {
     finish();
     return;
@@ -461,6 +491,55 @@ function advanceCurve(step) {
   state.revealed = next;
   state.samples = next;
   if (state.revealed >= state.total) finish();
+}
+
+function advanceGeneration(step) {
+  const budget = generationBudget();
+  if (state.stageTick >= budget && state.revealed >= state.total) {
+    if (state.stage + 1 >= state.stages.length) {
+      finish();
+      return;
+    }
+    showStage(state.stage + 1);
+  }
+  const jump = step ? Math.max(1, Math.ceil(budget / 4)) : 1;
+  state.stageTick = Math.min(budget, state.stageTick + jump);
+  const shown = Math.min(state.total, Math.max(1, Math.ceil((state.total * state.stageTick) / budget)));
+  const fractal = currentFractal();
+  const y = fractal.kind === "gasket"
+    ? triangleCentroidY(state.vertices, shown - 1)
+    : pointAtSegmentEnd(state.paths, shown - 1)?.y;
+  if (Number.isFinite(y)) speaker.playNotes([pitchFromY(y, state.frameBounds)], 100, 1);
+  state.revealed = shown;
+  state.samples = shown;
+  if (state.stage + 1 >= state.stages.length && state.stageTick >= budget) finish();
+}
+
+function showStage(index) {
+  const geometry = state.stages[index];
+  state.stage = index;
+  state.stageTick = 0;
+  state.revealed = 0;
+  state.inked = 0;
+  state.inkKey = "";
+  if (geometry.mode === "triangles") {
+    state.vertices = geometry.vertices;
+    state.paths = null;
+    state.total = geometry.vertices.length / 6;
+  } else {
+    state.paths = geometry.paths;
+    state.vertices = null;
+    state.total = segmentCount(geometry.paths);
+  }
+}
+
+function visibleSamples(cap) {
+  if (state.revealIter >= cap) return state.iterations.length;
+  let count = 0;
+  for (let i = 0; i < state.iterations.length; i += 1) {
+    if (state.iterations[i] <= state.revealIter) count += 1;
+  }
+  return count;
 }
 
 function finish() {
@@ -507,12 +586,6 @@ function pitchFromY(y, bounds) {
   return 1 + Math.round(t * 99);
 }
 
-function bandSamples(band, width, rows) {
-  const mid = Math.floor(width / 2);
-  const values = [band.iterations[mid]];
-  if (rows > 1) values.push(band.iterations[(rows - 1) * width + mid]);
-  return values;
-}
 
 function startLoop() {
   const id = ++loopId;
