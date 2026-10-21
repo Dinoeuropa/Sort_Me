@@ -40,6 +40,65 @@ export function recursionLevel(fractalId, baseDepth, magnification, minDepth, ma
   return Math.min(maxDepth, Math.max(minDepth, baseDepth + extra));
 }
 
+const WHEEL_GAIN = 0.0012;
+const WHEEL_CLAMP = 180;
+
+/** Pixel, line, and page wheel deltas become one modest zoom factor. */
+export function wheelZoomFactor(deltaY, deltaMode = 0) {
+  const dy = Number(deltaY);
+  if (!Number.isFinite(dy) || dy === 0) return 1;
+  const mode = deltaMode | 0;
+  const pixels = mode === 1 ? dy * 32 : mode === 2 ? dy * 800 : dy;
+  const clamped = Math.max(-WHEEL_CLAMP, Math.min(WHEEL_CLAMP, pixels));
+  return Math.exp(-clamped * WHEEL_GAIN);
+}
+
+/** Spend a fraction of a pending zoom. One frame stays inside a fractal level. */
+export function easeFactor(pending, rate = 0.28) {
+  const safe = Number.isFinite(pending) && pending > 0 ? pending : 1;
+  if (Math.abs(Math.log(safe)) < 0.004) return { applied: safe, rest: 1 };
+  let applied = Math.exp(Math.log(safe) * rate);
+  const cap = 1.12;
+  if (applied > cap) applied = cap;
+  else if (applied < 1 / cap) applied = 1 / cap;
+  if ((safe > 1 && applied > safe) || (safe < 1 && applied < safe)) applied = safe;
+  return { applied, rest: safe / applied };
+}
+
+/**
+ * Where a finished escape plate should be drawn so its world window matches `view`.
+ * `plate` carries the window it was sampled in, plus that sample's pixel size.
+ */
+export function escapeBlitRect(plate, view, width, height) {
+  const plateW = Math.max(1, plate.width || width);
+  const plateH = Math.max(1, plate.height || height);
+  const spanY = plate.scale;
+  const spanX = spanY * (plateW / plateH);
+  const left = plate.centerX - spanX / 2;
+  const right = plate.centerX + spanX / 2;
+  const topY = plate.centerY + (plate.flipY ? -spanY / 2 : spanY / 2);
+  const botY = plate.centerY + (plate.flipY ? spanY / 2 : -spanY / 2);
+  const topLeft = worldToPixel(view, width, height, left, topY);
+  const bottomRight = worldToPixel(view, width, height, right, botY);
+  return {
+    x: topLeft.x,
+    y: topLeft.y,
+    w: bottomRight.x - topLeft.x,
+    h: bottomRight.y - topLeft.y,
+  };
+}
+
+/** Fractional progress toward the next generation, so a level change is a fade. */
+export function levelBlend(fractalId, magnification) {
+  const ratio = RATIOS[fractalId];
+  if (!ratio || !(magnification > 0)) return { extra: 0, fade: 0 };
+  const t = Math.log(Math.max(1, magnification)) / Math.log(ratio);
+  if (!Number.isFinite(t) || t <= 0) return { extra: 0, fade: 0 };
+  const extra = Math.floor(t + 1e-9);
+  const fade = Math.min(1, Math.max(0, t - extra));
+  return { extra, fade: fade < 1e-9 ? 0 : fade };
+}
+
 export function pointBudget(baseCount, magnification, maxCount) {
   const scaled = Math.round(baseCount * Math.min(6, Math.max(1, magnification)));
   return Math.min(maxCount, Math.max(baseCount, scaled));
@@ -114,6 +173,16 @@ export function mapPointsInto(points, native, home) {
     out[i + 1] = oy + (points[i + 1] - native.minY) * scale;
   }
   return out;
+}
+
+function worldToPixel(view, width, height, wx, wy) {
+  const spanY = view.scale;
+  const spanX = spanY * (width / Math.max(1, height));
+  const ny = (wy - view.centerY) / spanY;
+  return {
+    x: ((wx - view.centerX) / spanX + 0.5) * width,
+    y: view.flipY ? (ny + 0.5) * height : (0.5 - ny) * height,
+  };
 }
 
 function appliedFactor(magnification, factor) {

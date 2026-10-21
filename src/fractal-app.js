@@ -3,14 +3,18 @@ import { FRACTALS, buildGeometry, constructionOrder, escapeBand, fractalById, it
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
   boundsMagnification,
+  easeFactor,
+  escapeBlitRect,
   escapeMagnification,
   escapeWindow,
   iterationCap,
+  levelBlend,
   mapPointsInto,
   panBounds,
   panEscape,
   pointBudget,
   recursionLevel,
+  wheelZoomFactor,
   zoomBounds,
   zoomEscape,
 } from "./fractal-view.js";
@@ -91,7 +95,12 @@ const state = {
   exploreToken: 0,
   exploring: false,
   shownCap: 0,
+  plate: null,
+  detailView: null,
 };
+
+const glide = { factor: 1, px: 0, py: 0, panX: 0, panY: 0, raf: 0, movedAt: 0 };
+const levelCache = new Map();
 
 for (const fractal of FRACTALS) {
   const option = document.createElement("option");
@@ -237,7 +246,7 @@ function renderChrome() {
     button.disabled = !canZoom;
   }
   canvas.classList.toggle("exploring", canZoom);
-  canvas.classList.toggle("pixelated", fractal.kind === "escape");
+  canvas.classList.toggle("pixelated", fractal.kind === "escape" && !plateIsScaled());
 }
 
 function paceLabel(fractal) {
@@ -274,6 +283,10 @@ function stop() {
 function resetProgress() {
   const fractal = currentFractal();
   const depth = depthValue();
+  cancelGlide();
+  state.plate = null;
+  state.detailView = null;
+  levelCache.clear();
   state.finished = false;
   state.paused = false;
   state.samples = 0;
@@ -386,6 +399,11 @@ function paint() {
     paintRaster();
     return;
   }
+  if (canExplore()) {
+    if (fractal.kind === "ifs") paintExploredPoints(box);
+    else paintBlended(box);
+    return;
+  }
   prepareVectorCanvas(box);
   const key = `${box.width}x${box.height}x${box.dpr}:${state.paletteId}`;
   if (key !== state.inkKey) {
@@ -404,6 +422,10 @@ function paint() {
 }
 
 function paintRaster() {
+  if (state.plate && plateIsScaled()) {
+    blitPlate();
+    return;
+  }
   if (!state.raster || !state.iterations) return;
   const complete = state.nextRow >= state.raster.height;
   if (!complete && !state.exploring) return;
@@ -601,6 +623,7 @@ function finish() {
   state.running = false;
   state.paused = false;
   if (!state.home) captureHome();
+  snapshotEscapePlate();
   if (first && !state.sweepPlayed) {
     state.sweepPlayed = true;
     const ramp = [];
@@ -733,75 +756,254 @@ function localPoint(event) {
 }
 
 function applyZoom(px, py, factor) {
-  if (!canExplore()) return;
-  const box = viewBox();
-  const fractal = currentFractal();
-  if (fractal.kind === "escape") {
-    state.view = zoomEscape(state.view, factor, px, py, box.width, box.height, state.home.scale);
-    scheduleEscape();
-    return;
-  }
-  state.view = zoomBounds(state.view, factor, px, py, box.width, box.height, state.home);
-  redrawExplored();
+  glide.factor = 1;
+  shiftView(px, py, factor, 0, 0);
 }
 
 function applyPan(dx, dy) {
-  if (!canExplore() || (dx === 0 && dy === 0)) return;
-  const box = viewBox();
-  const fractal = currentFractal();
-  if (fractal.kind === "escape") {
-    state.view = panEscape(state.view, dx, dy, box.width, box.height);
-    scheduleEscape();
-    return;
-  }
-  state.view = panBounds(state.view, dx, dy, box.width, box.height);
-  redrawExplored();
+  if (dx === 0 && dy === 0) return;
+  glide.panX = 0;
+  glide.panY = 0;
+  shiftView(0, 0, 1, dx, dy);
 }
 
 function resetExplore() {
   if (!state.home) return;
+  cancelGlide();
   state.view = { ...state.home };
-  if (currentFractal().kind === "escape") scheduleEscape();
-  else redrawExplored();
+  state.frameBounds = { ...state.view };
+  paint();
+  renderChrome();
+  requestDetail(true);
 }
 
-function redrawExplored() {
+function queueZoom(px, py, factor) {
+  if (!canExplore() || !Number.isFinite(factor) || factor <= 0) return;
+  glide.factor *= factor;
+  glide.px = px;
+  glide.py = py;
+  glide.movedAt = performance.now();
+  startGlide();
+}
+
+function shiftView(px, py, factor, dx, dy) {
+  if (!canExplore()) return;
   const fractal = currentFractal();
-  const level = exploredLevel();
-  state.exploring = false;
-  state.exploreToken += 1;
-  if (fractal.kind === "ifs") {
-    if (!state.points || state.points.length / 2 < level) {
-      const next = iterateIfs(state.fractalId, state.presetId, { x: 0, y: 0, seed: 1 }, level);
-      state.points = next.points;
+  if (fractal.kind === "escape") snapshotEscapePlate();
+  const box = viewBox();
+  if (fractal.kind === "escape") {
+    if (factor !== 1) {
+      state.view = zoomEscape(state.view, factor, px, py, box.width, box.height, state.home.scale);
     }
-    state.total = state.points.length / 2;
-    state.revealed = state.total;
-    state.samples = state.total;
+    if (dx || dy) state.view = panEscape(state.view, dx, dy, box.width, box.height);
   } else {
-    let geometry = buildGeometry(state.fractalId, state.presetId, level);
-    if (fractal.id === "dragon" || fractal.id === "hilbert") {
-      geometry = placeGeometry(geometry, state.home);
+    if (factor !== 1) {
+      state.view = zoomBounds(state.view, factor, px, py, box.width, box.height, state.home);
     }
-    if (geometry.mode === "triangles") {
-      state.vertices = geometry.vertices;
-      state.paths = null;
-      state.total = geometry.vertices.length / 6;
-    } else {
-      state.paths = geometry.paths;
-      state.vertices = null;
-      state.total = segmentCount(geometry.paths);
-    }
-    state.stages = null;
-    state.revealed = state.total;
-    state.samples = state.total;
+    if (dx || dy) state.view = panBounds(state.view, dx, dy, box.width, box.height);
+    state.frameBounds = { ...state.view };
   }
+  paint();
+  renderChrome();
+  requestDetail(false);
+}
+
+function startGlide() {
+  if (glide.raf) return;
+  const step = () => {
+    glide.raf = 0;
+    if (!canExplore()) {
+      cancelGlide();
+      return;
+    }
+    const zoom = easeFactor(glide.factor);
+    glide.factor = zoom.rest;
+    let dx = glide.panX * 0.28;
+    let dy = glide.panY * 0.28;
+    const panLen = Math.hypot(dx, dy);
+    if (panLen > 48) {
+      dx *= 48 / panLen;
+      dy *= 48 / panLen;
+    }
+    glide.panX -= dx;
+    glide.panY -= dy;
+    if (Math.abs(glide.panX) < 0.4) glide.panX = 0;
+    if (Math.abs(glide.panY) < 0.4) glide.panY = 0;
+    if (zoom.applied !== 1 || dx || dy) shiftView(glide.px, glide.py, zoom.applied, dx, dy);
+    if (glide.factor !== 1 || glide.panX || glide.panY) {
+      glide.raf = requestAnimationFrame(step);
+      return;
+    }
+    requestDetail(true);
+  };
+  glide.raf = requestAnimationFrame(step);
+}
+
+function cancelGlide() {
+  if (glide.raf) cancelAnimationFrame(glide.raf);
+  glide.raf = 0;
+  glide.factor = 1;
+  glide.panX = 0;
+  glide.panY = 0;
+}
+
+function paintBlended(box) {
+  prepareVectorCanvas(box);
+  const fractal = currentFractal();
+  const blend = levelBlend(fractal.id, currentMagnification());
+  const base = clampNumber(state.baseDepth + blend.extra, fractal.minDepth, fractal.maxDepth);
+  const next = Math.min(fractal.maxDepth, base + 1);
+  drawStored(geometryAt(base), box, true);
+  if (next > base && blend.fade > 0.004) {
+    ctx.save();
+    ctx.globalAlpha = blend.fade;
+    drawStored(geometryAt(next), box, false);
+    ctx.restore();
+  }
+  rememberCurve(geometryAt(base));
+  state.frameBounds = { ...state.view };
+}
+
+function paintExploredPoints(box) {
+  prepareVectorCanvas(box);
+  const level = pointBudget(state.baseDepth || depthValue(), currentMagnification(), 80000);
+  if (!state.points || state.points.length / 2 < level) {
+    const next = iterateIfs(state.fractalId, state.presetId, { x: 0, y: 0, seed: 1 }, level);
+    state.points = next.points;
+  }
+  state.total = state.points.length / 2;
+  state.revealed = state.total;
+  state.samples = state.total;
   state.frameBounds = { ...state.view };
   state.inked = 0;
   state.inkKey = "";
-  state.finished = true;
-  paint();
-  renderChrome();
+  paintPoints(box);
+}
+
+function geometryAt(level) {
+  const key = `${state.fractalId}:${state.presetId}:${level}`;
+  let geometry = levelCache.get(key);
+  if (!geometry) {
+    geometry = buildGeometry(state.fractalId, state.presetId, level);
+    if (state.fractalId === "dragon" || state.fractalId === "hilbert") {
+      geometry = placeGeometry(geometry, state.home);
+    }
+    levelCache.set(key, geometry);
+  }
+  return geometry;
+}
+
+function drawStored(geometry, box, clear) {
+  if (geometry.mode === "triangles") {
+    const total = geometry.vertices.length / 6;
+    drawTriangles(state.paletteId, ctx, geometry.vertices, box.width, box.height, state.view, {
+      from: 0,
+      until: total,
+      clear,
+      total,
+    });
+    return;
+  }
+  const total = segmentCount(geometry.paths);
+  drawPaths(state.paletteId, ctx, geometry.paths, box.width, box.height, state.view, {
+    from: 0,
+    until: total,
+    clear,
+    total,
+  });
+}
+
+function rememberCurve(geometry) {
+  if (geometry.mode === "triangles") {
+    state.vertices = geometry.vertices;
+    state.paths = null;
+    state.total = geometry.vertices.length / 6;
+  } else {
+    state.paths = geometry.paths;
+    state.vertices = null;
+    state.total = segmentCount(geometry.paths);
+  }
+  state.revealed = state.total;
+  state.samples = state.total;
+  state.inked = state.total;
+  state.inkKey = "blended";
+}
+
+function plateIsScaled() {
+  return Boolean(state.plate && state.view && viewMoved(state.plate, state.view, 0.004));
+}
+
+function viewMoved(a, b, tolerance) {
+  if (!a || !b || !(a.scale > 0) || !(b.scale > 0)) return false;
+  const scale = Math.abs(Math.log(a.scale / b.scale));
+  const span = Math.max(1e-9, a.scale);
+  const center = Math.hypot(a.centerX - b.centerX, a.centerY - b.centerY) / span;
+  return scale > tolerance || center > tolerance;
+}
+
+function blitPlate() {
+  const box = viewBox();
+  const pixelW = Math.max(1, Math.floor(box.width * box.dpr));
+  const pixelH = Math.max(1, Math.floor(box.height * box.dpr));
+  if (canvas.width !== pixelW || canvas.height !== pixelH) {
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, pixelW, pixelH);
+  const rect = escapeBlitRect(state.plate, state.view, pixelW, pixelH);
+  ctx.drawImage(state.plate.canvas, rect.x, rect.y, rect.w, rect.h);
+}
+
+function snapshotEscapePlate() {
+  if (state.plate || currentFractal().kind !== "escape") return;
+  if (!state.raster || !state.iterations || !state.view) return;
+  if (state.nextRow < state.raster.height) return;
+  const shown = state.shownCap || state.revealIter || depthValue();
+  const pixels = paintEscape(
+    state.paletteId,
+    state.iterations,
+    state.basins,
+    state.raster.width,
+    state.raster.height,
+    shown,
+    state.raster.height,
+    shown,
+  );
+  rememberPlate(state.raster, pixels, state.view);
+}
+
+function rememberPlate(raster, pixels, view) {
+  const plate = document.createElement("canvas");
+  plate.width = raster.width;
+  plate.height = raster.height;
+  plate.getContext("2d").putImageData(new ImageData(pixels, raster.width, raster.height), 0, 0);
+  state.plate = {
+    canvas: plate,
+    centerX: view.centerX,
+    centerY: view.centerY,
+    scale: view.scale,
+    flipY: Boolean(view.flipY),
+    width: raster.width,
+    height: raster.height,
+  };
+}
+
+function requestDetail(idle) {
+  if (!canExplore() || currentFractal().kind !== "escape") return;
+  if (needsEscapeRefresh(idle)) scheduleEscape();
+}
+
+function needsEscapeRefresh(idle) {
+  const settling = idle || (
+    glide.factor === 1 && glide.panX === 0 && glide.panY === 0 && performance.now() - glide.movedAt > 150
+  );
+  if (state.exploring) return Boolean(state.detailView) && viewMoved(state.detailView, state.view, Math.log(1.4));
+  if (!state.plate) return true;
+  if (viewMoved(state.plate, state.view, Math.log(1.4))) return true;
+  return settling && viewMoved(state.plate, state.view, 0.01);
 }
 
 function placeGeometry(geometry, home) {
@@ -815,6 +1017,8 @@ function placeGeometry(geometry, home) {
 
 function scheduleEscape() {
   const token = ++state.exploreToken;
+  const target = { ...state.view };
+  state.detailView = target;
   state.exploring = true;
   renderChrome();
   const box = viewBox();
@@ -854,9 +1058,23 @@ function scheduleEscape() {
     state.shownCap = cap;
     state.samples = iterations.length;
     state.exploring = false;
+    state.detailView = null;
     state.finished = true;
+    const shown = state.shownCap || cap;
+    const pixels = paintEscape(
+      state.paletteId,
+      iterations,
+      basins,
+      raster.width,
+      raster.height,
+      shown,
+      raster.height,
+      shown,
+    );
+    rememberPlate(raster, pixels, target);
     paint();
     renderChrome();
+    requestDetail(glide.factor === 1 && glide.panX === 0 && glide.panY === 0);
   };
   requestAnimationFrame(step);
 }
@@ -904,27 +1122,34 @@ canvas.addEventListener("pointercancel", (event) => pointers.delete(event.pointe
 canvas.addEventListener("dblclick", (event) => {
   if (!canExplore()) return;
   const point = localPoint(event);
-  applyZoom(point.x, point.y, 2);
+  queueZoom(point.x, point.y, 2);
 });
 canvas.addEventListener("wheel", (event) => {
   if (!canExplore()) return;
   event.preventDefault();
   const point = localPoint(event);
+  glide.movedAt = performance.now();
   if (event.ctrlKey || Math.abs(event.deltaY) >= Math.abs(event.deltaX)) {
-    const factor = Math.exp(-event.deltaY * 0.0015);
-    applyZoom(point.x, point.y, factor);
+    glide.factor *= wheelZoomFactor(event.deltaY, event.deltaMode);
+    glide.px = point.x;
+    glide.py = point.y;
+    startGlide();
     return;
   }
-  applyPan(-event.deltaX, -event.deltaY);
+  const mode = event.deltaMode | 0;
+  const scale = mode === 1 ? 32 : mode === 2 ? 800 : 1;
+  glide.panX += -event.deltaX * scale;
+  glide.panY += -event.deltaY * scale;
+  startGlide();
 }, { passive: false });
 
 zoomInButton.addEventListener("click", () => {
   const box = viewBox();
-  applyZoom(box.width / 2, box.height / 2, 2);
+  queueZoom(box.width / 2, box.height / 2, 2);
 });
 zoomOutButton.addEventListener("click", () => {
   const box = viewBox();
-  applyZoom(box.width / 2, box.height / 2, 0.5);
+  queueZoom(box.width / 2, box.height / 2, 0.5);
 });
 zoomResetButton.addEventListener("click", resetExplore);
 
@@ -944,6 +1169,20 @@ fractalSelect.addEventListener("change", () => {
 
 paletteSelect.addEventListener("change", () => {
   state.paletteId = paletteSelect.value;
+  if (state.plate && state.raster && state.iterations && state.raster.width === state.plate.width) {
+    const shown = state.shownCap || depthValue();
+    const pixels = paintEscape(
+      state.paletteId,
+      state.iterations,
+      state.basins,
+      state.raster.width,
+      state.raster.height,
+      shown,
+      state.raster.height,
+      shown,
+    );
+    state.plate.canvas.getContext("2d").putImageData(new ImageData(pixels, state.raster.width, state.raster.height), 0, 0);
+  }
   paint();
   renderChrome();
 });

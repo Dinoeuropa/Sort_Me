@@ -5,14 +5,18 @@ import { fitTransform } from "../src/palettes.js";
 import {
   FIT_PAD,
   boundsMagnification,
+  easeFactor,
+  escapeBlitRect,
   escapeMagnification,
   iterationCap,
+  levelBlend,
   mapPointsInto,
   panBounds,
   panEscape,
   pointBudget,
   recursionLevel,
   unproject,
+  wheelZoomFactor,
   zoomBounds,
   zoomEscape,
 } from "../src/fractal-view.js";
@@ -78,6 +82,80 @@ test("closer escape windows spend more iterations and ferns plot more points", (
   assert.equal(pointBudget(20000, 1, 80000), 20000);
   assert.equal(pointBudget(20000, 3, 80000), 60000);
   assert.equal(pointBudget(20000, 20, 80000), 80000);
+});
+
+test("a wheel notch is a small zoom in every delta mode", () => {
+  const pixel = wheelZoomFactor(-100, 0);
+  assert.ok(pixel > 1);
+  assert.ok(pixel < 1.5);
+  const line = wheelZoomFactor(-3, 1);
+  assert.ok(line > wheelZoomFactor(-3, 0));
+  assert.ok(line < 2);
+  const page = wheelZoomFactor(-1, 2);
+  assert.ok(page > 1);
+  assert.ok(page < 2);
+  assert.ok(wheelZoomFactor(-100000, 0) < 2);
+  assert.ok(Math.abs(wheelZoomFactor(0, 0) - 1) < 1e-12);
+  assert.ok(wheelZoomFactor(100, 0) < 1);
+});
+
+test("easing spends part of a pending zoom and keeps the product", () => {
+  const first = easeFactor(9);
+  assert.ok(first.applied > 1);
+  assert.ok(first.applied <= 1.12);
+  assert.ok(Math.abs(first.applied * first.rest - 9) < 1e-9);
+  let rest = 9;
+  let product = 1;
+  for (let i = 0; i < 80; i += 1) {
+    const step = easeFactor(rest);
+    product *= step.applied;
+    rest = step.rest;
+    if (rest === 1) break;
+  }
+  assert.equal(rest, 1);
+  assert.ok(Math.abs(product - 9) < 1e-6);
+  const nudge = easeFactor(1.02);
+  assert.ok(nudge.applied > 1);
+  assert.ok(nudge.applied < 1.02);
+});
+
+test("a scaled escape plate stays anchored under the cursor", () => {
+  const width = 200;
+  const height = 100;
+  const plate = { ...homeEscape, width, height };
+  const same = escapeBlitRect(plate, homeEscape, width, height);
+  assert.ok(Math.abs(same.x) < 1e-6);
+  assert.ok(Math.abs(same.y) < 1e-6);
+  assert.ok(Math.abs(same.w - width) < 1e-6);
+  assert.ok(Math.abs(same.h - height) < 1e-6);
+  const view = zoomEscape(homeEscape, 2, 30, 80, width, height, homeEscape.scale);
+  const rect = escapeBlitRect(plate, view, width, height);
+  const x = rect.x + (30 / width) * rect.w;
+  const y = rect.y + (80 / height) * rect.h;
+  assert.ok(Math.abs(x - 30) < 1e-6, `x ${x}`);
+  assert.ok(Math.abs(y - 80) < 1e-6, `y ${y}`);
+  assert.ok(rect.w > width);
+  assert.ok(rect.h > height);
+});
+
+test("the next fractal level fades in across its scale factor", () => {
+  const start = levelBlend("koch", 1);
+  assert.equal(start.extra, 0);
+  assert.ok(start.fade < 1e-9);
+  const mid = levelBlend("koch", Math.sqrt(3));
+  assert.equal(mid.extra, 0);
+  assert.ok(Math.abs(mid.fade - 0.5) < 1e-9);
+  const edge = levelBlend("koch", 3);
+  assert.equal(edge.extra, 1);
+  assert.ok(edge.fade < 1e-9);
+  const before = levelBlend("koch", 3 * 0.999);
+  assert.equal(before.extra, 0);
+  assert.ok(before.fade > 0.99);
+  assert.ok(Math.abs((before.extra + before.fade) - (edge.extra + edge.fade)) < 0.01);
+  const sier = levelBlend("sierpinski", Math.SQRT2);
+  assert.equal(sier.extra, 0);
+  assert.ok(Math.abs(sier.fade - 0.5) < 1e-9);
+  assert.deepEqual(levelBlend("mandelbrot", 4), { extra: 0, fade: 0 });
 });
 
 test("a curve mapped into its own bounds stays put", () => {

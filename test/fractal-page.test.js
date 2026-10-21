@@ -74,4 +74,9 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /scheduleEscape/);
   assert.match(css, /touch-action:\s*none/);
   assert.match(fractals, /drag or pinch to move and scroll to zoom/);
+  assert.match(fractalApp, /wheelZoomFactor/);
+  assert.match(fractalApp, /easeFactor/);
+  assert.match(fractalApp, /levelBlend/);
+  assert.match(fractalApp, /escapeBlitRect/);
+  assert.match(fractalApp, /startGlide/);
 });
