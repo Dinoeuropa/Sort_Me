@@ -52,7 +52,7 @@ export const FRACTALS = [
     kind: "escape",
     latex: "z_{n+1}=z_n^2+c",
     blurb: "Square z and add the pixel. Points that stay bounded form the set.",
-    note: "Depth is the escape-time cap. The interior never leaves the bound.",
+    note: "Depth is the escape-time cap. Move the cursor to see the Julia set of that point. Auto zoom follows the seahorse spiral.",
     depthLabel: "Iterations",
     legend: ["Inside", "Early", "Late"],
     minDepth: 8,
@@ -71,7 +71,7 @@ export const FRACTALS = [
     kind: "escape",
     latex: "z_{n+1}=z_n^2+c",
     blurb: "The same map as the Mandelbrot set, with c fixed and the pixel as z.",
-    note: "Each preset picks a different c. Depth is how long z is allowed to wander.",
+    note: "Move the cursor to choose c on the Mandelbrot window. Depth is how long z is allowed to wander.",
     depthLabel: "Iterations",
     legend: ["Inside", "Early", "Late"],
     minDepth: 8,
@@ -109,7 +109,7 @@ export const FRACTALS = [
     kind: "escape",
     latex: "z_{n+1}=z_n-\\frac{z_n^3-1}{3z_n^2}",
     blurb: "Newton’s method for z³ − 1. Color is the root the pixel falls into.",
-    note: "Depth is the iteration cap. Most pixels settle on a root well before that.",
+    note: "Move the cursor to bend z³ − 1 a little. The three roots stay. Depth is the iteration cap.",
     depthLabel: "Iterations",
     legend: ["Root 1", "Root ω", "Root ω²"],
     minDepth: 4,
@@ -231,6 +231,28 @@ export function presetById(fractalId, presetId) {
   return preset;
 }
 
+/** Fixed c-window. Zoom must not shrink the cursor's parameter range. */
+export const CURSOR_WINDOW = { minX: -2, maxX: 1, minY: -1.2, maxY: 1.2 };
+
+export function cursorParameter(px, py, width, height) {
+  const u = clampUnit(px / Math.max(1, width));
+  const v = clampUnit(py / Math.max(1, height));
+  return {
+    x: CURSOR_WINDOW.minX + u * (CURSOR_WINDOW.maxX - CURSOR_WINDOW.minX),
+    y: CURSOR_WINDOW.maxY - v * (CURSOR_WINDOW.maxY - CURSOR_WINDOW.minY),
+  };
+}
+
+/** A small bend of z³ − 1. The middle of the cursor window is the plain polynomial. */
+export function newtonCursor(px, py, width, height) {
+  const point = cursorParameter(px, py, width, height);
+  const gain = 0.28;
+  return {
+    px: ((point.x + 0.5) / 1.5) * gain,
+    py: (point.y / 1.2) * gain,
+  };
+}
+
 export function planePoint(preset, width, height, x, y) {
   const spanY = preset.scale;
   const spanX = preset.scale * (width / Math.max(1, height));
@@ -246,7 +268,7 @@ export function escapeValue(fractalId, preset, zx, zy, maxIter) {
   const cap = clampIter(maxIter);
   if (fractal.id === "julia") return julia(zx, zy, preset.cx || 0, preset.cy || 0, cap);
   if (fractal.id === "burning") return burning(zx, zy, cap);
-  if (fractal.id === "newton") return newton(zx, zy, cap);
+  if (fractal.id === "newton") return newton(zx, zy, cap, preset.px || 0, preset.py || 0);
   if (fractal.id === "mandelbrot") return mandelbrot(zx, zy, cap);
   throw new Error(`${fractal.name} is not an escape-time fractal.`);
 }
@@ -329,6 +351,11 @@ export function iterateIfs(fractalId, presetId, cursor, count) {
   return { points, cursor: { x, y, seed, burn: 0 } };
 }
 
+function clampUnit(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
 function clampIter(maxIter) {
   const value = Number.isFinite(maxIter) ? Math.floor(maxIter) : 1;
   return Math.min(500, Math.max(1, value));
@@ -375,7 +402,33 @@ function burning(cx, cy, maxIter) {
   return { iteration: iter, basin: -1 };
 }
 
-function newton(zx, zy, maxIter) {
+function newton(zx, zy, maxIter, px = 0, py = 0) {
+  if (px === 0 && py === 0) return newtonPlain(zx, zy, maxIter);
+  let x = zx;
+  let y = zy;
+  for (let iter = 0; iter < maxIter; iter += 1) {
+    const x2 = x * x - y * y;
+    const y2 = 2 * x * y;
+    const x3 = x2 * x - y2 * y;
+    const y3 = x2 * y + y2 * x;
+    const fx = x3 + (px * x - py * y) - 1;
+    const fy = y3 + (px * y + py * x);
+    const dx = 3 * x2 + px;
+    const dy = 3 * y2 + py;
+    const denom = dx * dx + dy * dy;
+    if (denom < 1e-14) return { iteration: iter + 1, basin: nearestBasin(x, y) };
+    const stepX = (fx * dx + fy * dy) / denom;
+    const stepY = (fy * dx - fx * dy) / denom;
+    x -= stepX;
+    y -= stepY;
+    if (stepX * stepX + stepY * stepY < 1e-12) {
+      return { iteration: iter + 1, basin: nearestBasin(x, y) };
+    }
+  }
+  return { iteration: maxIter, basin: nearestBasin(x, y) };
+}
+
+function newtonPlain(zx, zy, maxIter) {
   let x = zx;
   let y = zy;
   for (let iter = 0; iter < maxIter; iter += 1) {

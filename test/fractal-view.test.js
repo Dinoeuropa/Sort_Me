@@ -3,8 +3,12 @@ import test from "node:test";
 import { planePoint } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
+  NAUTILUS,
   FIT_PAD,
+  autoZoomIterations,
   boundsMagnification,
+  detailTarget,
+  easeZoom,
   escapeMagnification,
   iterationCap,
   mapPointsInto,
@@ -12,6 +16,7 @@ import {
   panEscape,
   pointBudget,
   recursionLevel,
+  steerZoomTarget,
   unproject,
   zoomBounds,
   zoomEscape,
@@ -78,6 +83,73 @@ test("closer escape windows spend more iterations and ferns plot more points", (
   assert.equal(pointBudget(20000, 1, 80000), 20000);
   assert.equal(pointBudget(20000, 3, 80000), 60000);
   assert.equal(pointBudget(20000, 20, 80000), 80000);
+});
+
+test("auto zoom raises iterations with the log of magnification", () => {
+  assert.equal(autoZoomIterations(48, 1), 48);
+  const step = autoZoomIterations(48, 2) - autoZoomIterations(48, 1);
+  assert.ok(step >= 1);
+  assert.equal(autoZoomIterations(48, 4) - autoZoomIterations(48, 2), step);
+  assert.equal(autoZoomIterations(48, 8) - autoZoomIterations(48, 4), step);
+  assert.equal(autoZoomIterations(48, 2 ** 40), 500);
+});
+
+test("zoom targeting prefers a boundary over the empty interior", () => {
+  const width = 5;
+  const height = 5;
+  const iterations = new Uint16Array(width * height);
+  const basins = new Int8Array(iterations.length);
+  basins.fill(-1);
+  iterations.fill(4);
+  iterations[12] = 40;
+  iterations[6] = 30;
+  iterations[7] = 12;
+  iterations[5] = 18;
+  iterations[1] = 22;
+  iterations[11] = 8;
+  const view = { centerX: 0, centerY: 0, scale: 2 };
+  const target = detailTarget(iterations, basins, width, height, view, 40, "escape");
+  const interior = planePoint(view, width, height, 2, 2);
+  assert.ok(target.score > 0);
+  assert.ok(Math.hypot(target.x - interior.x, target.y - interior.y) > 0.2);
+});
+
+test("Newton zoom targeting sits on a basin boundary", () => {
+  const width = 6;
+  const height = 4;
+  const iterations = new Uint16Array(width * height);
+  const basins = new Int8Array(iterations.length);
+  iterations.fill(3);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) basins[y * width + x] = x < 3 ? 0 : 1;
+  }
+  const view = { centerX: 0, centerY: 0, scale: 2 };
+  const target = detailTarget(iterations, basins, width, height, view, 12, "newton");
+  assert.ok(target.score > 0);
+  assert.ok(Math.abs(target.x) < 0.8);
+});
+
+test("Mandelbrot auto zoom homes on the nautilus, then follows detail", () => {
+  const detail = { x: 0.3, y: -0.4, score: 5 };
+  const wide = { centerX: -0.75, centerY: 0, scale: 2.6 };
+  const early = steerZoomTarget(detail, wide, { anchor: NAUTILUS });
+  assert.ok(Math.abs(early.x - NAUTILUS.x) < 1e-12);
+  assert.ok(Math.abs(early.y - NAUTILUS.y) < 1e-12);
+  const deep = { centerX: NAUTILUS.x, centerY: NAUTILUS.y, scale: 0.001 };
+  const later = steerZoomTarget(detail, deep, { anchor: NAUTILUS });
+  assert.ok(Math.abs(later.x - detail.x) < 1e-12);
+  assert.ok(Math.abs(later.y - detail.y) < 1e-12);
+  const local = { x: NAUTILUS.x, y: NAUTILUS.y, score: 5 };
+  const biased = steerZoomTarget(local, deep, { anchor: NAUTILUS, bias: { x: 1, y: 0.5 }, aspect: 1 });
+  assert.ok(biased.x > local.x);
+});
+
+test("each auto zoom step magnifies and eases toward the target", () => {
+  const view = { centerX: 0, centerY: 0, scale: 2, flipY: false };
+  const next = easeZoom(view, { x: 1, y: -1 }, 1.02, 0.5);
+  assert.ok(Math.abs(view.scale / next.scale - 1.02) < 1e-9);
+  assert.ok(next.centerX > view.centerX);
+  assert.ok(next.centerY < view.centerY);
 });
 
 test("a curve mapped into its own bounds stays put", () => {

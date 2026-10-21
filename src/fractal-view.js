@@ -32,6 +32,102 @@ export function iterationCap(baseDepth, magnification) {
   return Math.min(500, Math.max(1, baseDepth + extra));
 }
 
+/** Iterations for a continuous zoom. Grows with log2 of magnification, clamped at 500. */
+export function autoZoomIterations(baseDepth, magnification) {
+  return iterationCap(baseDepth, magnification);
+}
+
+/** Seahorse valley spiral. Early Mandelbrot zooms steer here, then follow finer detail. */
+export const NAUTILUS = { x: -0.743643887037151, y: 0.131825904205330 };
+
+const NEIGHBORS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+export function detailTarget(iterations, basins, width, height, view, maxIter, kind) {
+  const cap = Math.max(1, maxIter);
+  let best = 0;
+  let bx = width / 2;
+  let by = height / 2;
+  const stride = Math.max(1, Math.floor(Math.min(width, height) / 28));
+  for (let y = 1; y < height - 1; y += stride) {
+    for (let x = 1; x < width - 1; x += stride) {
+      const score = pixelDetail(iterations, basins, width, height, x, y, cap, kind);
+      if (score > best) {
+        best = score;
+        bx = x;
+        by = y;
+      }
+    }
+  }
+  if (best <= 0) return { x: view.centerX, y: view.centerY, score: 0 };
+  const point = planePoint(view, width, height, bx, by);
+  return { x: point.x, y: point.y, score: best };
+}
+
+export function steerZoomTarget(detail, view, options = {}) {
+  const anchor = options.anchor || null;
+  let x = detail.x;
+  let y = detail.y;
+  if (anchor) {
+    const dist = Math.hypot(view.centerX - anchor.x, view.centerY - anchor.y);
+    if (view.scale >= 0.02 || dist > view.scale * 2) {
+      x = anchor.x;
+      y = anchor.y;
+    }
+  }
+  const bias = options.bias;
+  if (bias && Number.isFinite(bias.x) && Number.isFinite(bias.y)) {
+    const aspect = options.aspect > 0 ? options.aspect : 1;
+    const spanX = view.scale * aspect;
+    const spanY = view.scale;
+    const ySign = view.flipY ? 1 : -1;
+    const bx = view.centerX + (bias.x - 0.5) * spanX * 0.5;
+    const by = view.centerY + ySign * (bias.y - 0.5) * spanY * 0.5;
+    const weight = anchor && view.scale >= 0.02 ? 0.12 : 0.4;
+    x = x * (1 - weight) + bx * weight;
+    y = y * (1 - weight) + by * weight;
+  }
+  return { x, y, score: detail.score || 0 };
+}
+
+export function easeZoom(view, target, factor = 1.012, pull = 0.06) {
+  const zoom = Number.isFinite(factor) && factor > 1 ? factor : 1.012;
+  const t = Number.isFinite(pull) ? Math.min(1, Math.max(0, pull)) : 0.06;
+  return {
+    ...view,
+    centerX: view.centerX + (target.x - view.centerX) * t,
+    centerY: view.centerY + (target.y - view.centerY) * t,
+    scale: Math.max(5e-14, view.scale / zoom),
+  };
+}
+
+function pixelDetail(iterations, basins, width, height, x, y, maxIter, kind) {
+  const index = y * width + x;
+  const here = iterations[index];
+  const basin = basins[index];
+  let boundary = 0;
+  let variation = 0;
+  for (const [dx, dy] of NEIGHBORS) {
+    const nx = x + dx;
+    const ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+    const next = ny * width + nx;
+    if (kind === "newton") {
+      if (basins[next] !== basin) boundary += 1;
+    } else {
+      variation += Math.abs(iterations[next] - here);
+      if (here < maxIter && iterations[next] < maxIter && iterations[next] !== here) boundary += 1;
+    }
+  }
+  if (kind === "newton") return boundary * (1 + here / maxIter);
+  if (here >= maxIter || here < 2) return 0;
+  return (here / maxIter) * variation * (boundary > 0 ? 1 : 0);
+}
+
 export function recursionLevel(fractalId, baseDepth, magnification, minDepth, maxDepth) {
   const ratio = RATIOS[fractalId];
   const extra = ratio

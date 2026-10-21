@@ -398,8 +398,29 @@ canvas.exploring {
   touch-action: none;
 }
 
+canvas.reactive {
+  cursor: crosshair;
+  touch-action: none;
+}
+
 canvas.exploring:active {
   cursor: grabbing;
+}
+
+.param {
+  position: absolute;
+  z-index: 1;
+  left: 0.8rem;
+  bottom: 0.7rem;
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(16, 14, 12, 0.82);
+  border: 1px solid var(--line);
+  color: var(--brass);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .legend {
