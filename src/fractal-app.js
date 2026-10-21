@@ -1,6 +1,19 @@
 import katex from "../vendor/katex/katex.js";
 import { FRACTALS, buildGeometry, constructionOrder, escapeBand, fractalById, iterateIfs, presetById } from "./fractals.js";
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
+import {
+  boundsMagnification,
+  escapeMagnification,
+  escapeWindow,
+  iterationCap,
+  mapPointsInto,
+  panBounds,
+  panEscape,
+  pointBudget,
+  recursionLevel,
+  zoomBounds,
+  zoomEscape,
+} from "./fractal-view.js";
 import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, paintEscape } from "./palettes.js";
 import { runControlLabel } from "./session.js";
 import { createSpeaker } from "./sound.js";
@@ -22,6 +35,9 @@ const soundButton = document.querySelector("#sound");
 const dock = document.querySelector("#viz-dock");
 const dockSpeed = document.querySelector("#dock-speed");
 const dockToggle = document.querySelector("#dock-toggle");
+const zoomInButton = document.querySelector("#zoom-in");
+const zoomOutButton = document.querySelector("#zoom-out");
+const zoomResetButton = document.querySelector("#zoom-reset");
 const canvas = document.querySelector("#canvas");
 const statusEl = document.querySelector("#status");
 const depthStat = document.querySelector("#depth-stat");
@@ -69,6 +85,12 @@ const state = {
   stage: 0,
   stageTick: 0,
   revealIter: 0,
+  home: null,
+  view: null,
+  baseDepth: 0,
+  exploreToken: 0,
+  exploring: false,
+  shownCap: 0,
 };
 
 for (const fractal of FRACTALS) {
@@ -93,6 +115,17 @@ function currentFractal() {
 
 function currentPreset() {
   return presetById(state.fractalId, state.presetId);
+}
+
+function viewedPreset() {
+  const preset = currentPreset();
+  if (currentFractal().kind !== "escape" || !state.view) return preset;
+  return {
+    ...preset,
+    centerX: state.view.centerX,
+    centerY: state.view.centerY,
+    scale: state.view.scale,
+  };
 }
 
 function depthValue() {
@@ -168,14 +201,18 @@ function renderChrome() {
   renderMath(fractal.latex);
   blurb.textContent = fractal.blurb;
   paletteBlurb.textContent = palette.blurb;
-  note.textContent = fractal.note;
+  note.textContent = zoomNote(fractal);
   fractal.legend.forEach((label, index) => {
     legend[index].textContent = label;
   });
   syncDepthControls();
   const depth = depthValue();
   const drawing = state.running || state.paused || state.finished;
-  const generation = state.stages && drawing ? fractal.minDepth + state.stage : depth;
+  const generation = state.finished && state.home
+    ? exploredLevel()
+    : state.stages && drawing
+      ? fractal.minDepth + state.stage
+      : depth;
   depthStat.textContent = generation.toLocaleString();
   samplesEl.textContent = state.samples.toLocaleString();
   kindEl.textContent = KIND[fractal.kind];
@@ -190,10 +227,16 @@ function renderChrome() {
   dockToggle.textContent = control;
   dock.hidden = !state.dock;
   dockSpeed.value = speedInput.value;
-  if (state.running) statusEl.textContent = "Drawing";
+  if (state.exploring) statusEl.textContent = "Zooming";
+  else if (state.running) statusEl.textContent = "Drawing";
   else if (state.paused) statusEl.textContent = "Paused";
   else if (state.finished) statusEl.textContent = "Drawn";
   else statusEl.textContent = "Ready";
+  const canZoom = state.finished && !state.running;
+  for (const button of [zoomInButton, zoomOutButton, zoomResetButton]) {
+    button.disabled = !canZoom;
+  }
+  canvas.classList.toggle("exploring", canZoom);
   canvas.classList.toggle("pixelated", fractal.kind === "escape");
 }
 
@@ -252,6 +295,12 @@ function resetProgress() {
   state.stage = 0;
   state.stageTick = 0;
   state.revealIter = 0;
+  state.home = null;
+  state.view = null;
+  state.baseDepth = 0;
+  state.exploreToken += 1;
+  state.exploring = false;
+  state.shownCap = 0;
   error.textContent = "";
   if (constructionOrder(state.fractalId) === "generations") {
     const stages = [];
@@ -356,22 +405,25 @@ function paint() {
 
 function paintRaster() {
   if (!state.raster || !state.iterations) return;
-  if (state.nextRow < state.raster.height || state.revealIter <= 0) return;
+  const complete = state.nextRow >= state.raster.height;
+  if (!complete && !state.exploring) return;
+  if (state.revealIter <= 0 && !state.exploring) return;
   canvas.classList.add("pixelated");
   if (canvas.width !== state.raster.width || canvas.height !== state.raster.height) {
     canvas.width = state.raster.width;
     canvas.height = state.raster.height;
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const shown = state.shownCap || depthValue();
   const pixels = paintEscape(
     state.paletteId,
     state.iterations,
     state.basins,
     state.raster.width,
     state.raster.height,
-    depthValue(),
-    state.raster.height,
-    state.revealIter,
+    shown,
+    complete ? state.raster.height : state.nextRow,
+    state.exploring ? shown : state.revealIter,
   );
   ctx.putImageData(new ImageData(pixels, state.raster.width, state.raster.height), 0, 0);
 }
@@ -432,7 +484,7 @@ function advanceEscape(step) {
     const count = Math.min(rows, state.raster.height - state.nextRow);
     const band = escapeBand(
       state.fractalId,
-      currentPreset(),
+      viewedPreset(),
       state.raster.width,
       state.raster.height,
       depthValue(),
@@ -548,6 +600,7 @@ function finish() {
   state.finished = true;
   state.running = false;
   state.paused = false;
+  if (!state.home) captureHome();
   if (first && !state.sweepPlayed) {
     state.sweepPlayed = true;
     const ramp = [];
@@ -636,6 +689,245 @@ function restart() {
   renderChrome();
 }
 
+function captureHome() {
+  const fractal = currentFractal();
+  state.baseDepth = depthValue();
+  if (fractal.kind === "escape") {
+    state.home = escapeWindow(currentPreset());
+  } else {
+    state.home = { ...state.frameBounds };
+  }
+  state.view = { ...state.home };
+}
+
+function currentMagnification() {
+  if (!state.home || !state.view) return 1;
+  if (currentFractal().kind === "escape") return escapeMagnification(state.home, state.view);
+  return boundsMagnification(state.home, state.view);
+}
+
+function exploredLevel() {
+  const fractal = currentFractal();
+  const magnification = currentMagnification();
+  const base = state.baseDepth || depthValue();
+  if (fractal.kind === "escape") return iterationCap(base, magnification);
+  if (fractal.kind === "ifs") return pointBudget(base, magnification, 80000);
+  return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth);
+}
+
+function zoomNote(fractal) {
+  if (!state.finished || !state.home || !state.view) return fractal.note;
+  const magnification = currentMagnification();
+  if (magnification < 1.05 && magnification > 0.95) return fractal.note;
+  const rounded = magnification >= 10 ? Math.round(magnification) : Math.round(magnification * 10) / 10;
+  return `${fractal.note} View is ${rounded}× closer, drawn at level ${exploredLevel().toLocaleString()}.`;
+}
+
+function canExplore() {
+  return state.finished && !state.running && state.home && state.view;
+}
+
+function localPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+}
+
+function applyZoom(px, py, factor) {
+  if (!canExplore()) return;
+  const box = viewBox();
+  const fractal = currentFractal();
+  if (fractal.kind === "escape") {
+    state.view = zoomEscape(state.view, factor, px, py, box.width, box.height, state.home.scale);
+    scheduleEscape();
+    return;
+  }
+  state.view = zoomBounds(state.view, factor, px, py, box.width, box.height, state.home);
+  redrawExplored();
+}
+
+function applyPan(dx, dy) {
+  if (!canExplore() || (dx === 0 && dy === 0)) return;
+  const box = viewBox();
+  const fractal = currentFractal();
+  if (fractal.kind === "escape") {
+    state.view = panEscape(state.view, dx, dy, box.width, box.height);
+    scheduleEscape();
+    return;
+  }
+  state.view = panBounds(state.view, dx, dy, box.width, box.height);
+  redrawExplored();
+}
+
+function resetExplore() {
+  if (!state.home) return;
+  state.view = { ...state.home };
+  if (currentFractal().kind === "escape") scheduleEscape();
+  else redrawExplored();
+}
+
+function redrawExplored() {
+  const fractal = currentFractal();
+  const level = exploredLevel();
+  state.exploring = false;
+  state.exploreToken += 1;
+  if (fractal.kind === "ifs") {
+    if (!state.points || state.points.length / 2 < level) {
+      const next = iterateIfs(state.fractalId, state.presetId, { x: 0, y: 0, seed: 1 }, level);
+      state.points = next.points;
+    }
+    state.total = state.points.length / 2;
+    state.revealed = state.total;
+    state.samples = state.total;
+  } else {
+    let geometry = buildGeometry(state.fractalId, state.presetId, level);
+    if (fractal.id === "dragon" || fractal.id === "hilbert") {
+      geometry = placeGeometry(geometry, state.home);
+    }
+    if (geometry.mode === "triangles") {
+      state.vertices = geometry.vertices;
+      state.paths = null;
+      state.total = geometry.vertices.length / 6;
+    } else {
+      state.paths = geometry.paths;
+      state.vertices = null;
+      state.total = segmentCount(geometry.paths);
+    }
+    state.stages = null;
+    state.revealed = state.total;
+    state.samples = state.total;
+  }
+  state.frameBounds = { ...state.view };
+  state.inked = 0;
+  state.inkKey = "";
+  state.finished = true;
+  paint();
+  renderChrome();
+}
+
+function placeGeometry(geometry, home) {
+  const source = geometry.mode === "polyline" ? geometry.paths : [geometry.vertices];
+  const native = boundsOf(source);
+  if (geometry.mode === "polyline") {
+    return { mode: "polyline", paths: source.map((path) => mapPointsInto(path, native, home)) };
+  }
+  return { mode: "triangles", vertices: mapPointsInto(geometry.vertices, native, home) };
+}
+
+function scheduleEscape() {
+  const token = ++state.exploreToken;
+  state.exploring = true;
+  renderChrome();
+  const box = viewBox();
+  const raster = rasterSize(box.width, box.height, box.dpr);
+  const cap = exploredLevel();
+  const preset = viewedPreset();
+  const iterations = new Uint16Array(raster.width * raster.height);
+  const basins = new Int8Array(iterations.length);
+  basins.fill(-1);
+  let row = 0;
+  const step = () => {
+    if (token !== state.exploreToken) return;
+    const count = Math.max(1, Math.ceil(raster.height / 8));
+    const rows = Math.min(count, raster.height - row);
+    const band = escapeBand(
+      state.fractalId,
+      preset,
+      raster.width,
+      raster.height,
+      cap,
+      row,
+      rows,
+    );
+    iterations.set(band.iterations, row * raster.width);
+    basins.set(band.basins, row * raster.width);
+    row += rows;
+    if (row < raster.height) {
+      requestAnimationFrame(step);
+      return;
+    }
+    if (token !== state.exploreToken) return;
+    state.raster = raster;
+    state.iterations = iterations;
+    state.basins = basins;
+    state.nextRow = raster.height;
+    state.revealIter = cap;
+    state.shownCap = cap;
+    state.samples = iterations.length;
+    state.exploring = false;
+    state.finished = true;
+    paint();
+    renderChrome();
+  };
+  requestAnimationFrame(step);
+}
+
+const pointers = new Map();
+
+function pointerDistance(points) {
+  const [a, b] = points;
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+canvas.addEventListener("pointerdown", (event) => {
+  if (!canExplore()) return;
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  try {
+    canvas.setPointerCapture(event.pointerId);
+  } catch {
+    // A synthetic event cannot capture the pointer. The move events still pan.
+  }
+  pointers.set(event.pointerId, localPoint(event));
+  event.preventDefault();
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (!pointers.has(event.pointerId)) return;
+  const point = localPoint(event);
+  const previous = pointers.get(event.pointerId);
+  pointers.set(event.pointerId, point);
+  if (pointers.size === 1) {
+    applyPan(point.x - previous.x, point.y - previous.y);
+    return;
+  }
+  if (pointers.size !== 2) return;
+  const now = [...pointers.values()];
+  const before = now.map((item) => (item === point ? previous : item));
+  const span = pointerDistance(before);
+  if (span < 1) return;
+  const midX = (now[0].x + now[1].x) / 2;
+  const midY = (now[0].y + now[1].y) / 2;
+  applyZoom(midX, midY, pointerDistance(now) / span);
+});
+
+canvas.addEventListener("pointerup", (event) => pointers.delete(event.pointerId));
+canvas.addEventListener("pointercancel", (event) => pointers.delete(event.pointerId));
+canvas.addEventListener("dblclick", (event) => {
+  if (!canExplore()) return;
+  const point = localPoint(event);
+  applyZoom(point.x, point.y, 2);
+});
+canvas.addEventListener("wheel", (event) => {
+  if (!canExplore()) return;
+  event.preventDefault();
+  const point = localPoint(event);
+  if (event.ctrlKey || Math.abs(event.deltaY) >= Math.abs(event.deltaX)) {
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    applyZoom(point.x, point.y, factor);
+    return;
+  }
+  applyPan(-event.deltaX, -event.deltaY);
+}, { passive: false });
+
+zoomInButton.addEventListener("click", () => {
+  const box = viewBox();
+  applyZoom(box.width / 2, box.height / 2, 2);
+});
+zoomOutButton.addEventListener("click", () => {
+  const box = viewBox();
+  applyZoom(box.width / 2, box.height / 2, 0.5);
+});
+zoomResetButton.addEventListener("click", resetExplore);
+
 fractalSelect.addEventListener("change", () => {
   state.fractalId = fractalSelect.value;
   state.presetId = currentFractal().presets[0].id;
@@ -705,6 +997,15 @@ window.addEventListener("keydown", (event) => {
   } else if (event.code === "ArrowRight") {
     event.preventDefault();
     stepButton.click();
+  } else if ((event.key === "+" || event.key === "=") && canExplore()) {
+    event.preventDefault();
+    zoomInButton.click();
+  } else if (event.key === "-" && canExplore()) {
+    event.preventDefault();
+    zoomOutButton.click();
+  } else if (event.key === "0" && canExplore()) {
+    event.preventDefault();
+    resetExplore();
   }
 });
 
@@ -721,6 +1022,7 @@ new ResizeObserver(() => {
     return;
   }
   if (state.running) restart();
+  else if (state.finished && state.home) scheduleEscape();
 }).observe(canvas.parentElement);
 
 renderPresets();
