@@ -3,6 +3,12 @@ import { planePoint } from "./fractals.js";
 /** Matches the padding drawPaths, drawTriangles, and drawPoints use. */
 export const FIT_PAD = 18;
 
+/** Longest edge while a picture is still being drawn. */
+export const DRAW_RASTER_EDGE = 960;
+
+/** Longest edge of a settled or zoomed picture, in device pixels. */
+export const SHARP_RASTER_EDGE = 2048;
+
 const RATIOS = {
   koch: 3,
   sierpinski: 2,
@@ -98,6 +104,20 @@ export function unproject(bounds, px, py, width, height) {
     x: bounds.minX + (px - offset.x) / scale,
     y: bounds.maxY - (py - offset.y) / scale,
   };
+}
+
+export function rasterSize(width, height, dpr = 1, sharp = false) {
+  const ratio = Math.min(Math.max(Number(dpr) || 1, 1), 2);
+  let pixelW = Math.max(1, Math.floor(width * ratio));
+  let pixelH = Math.max(1, Math.floor(height * ratio));
+  const cap = sharp ? SHARP_RASTER_EDGE : DRAW_RASTER_EDGE;
+  const edge = Math.max(pixelW, pixelH);
+  if (edge > cap) {
+    const fit = cap / edge;
+    pixelW = Math.max(1, Math.floor(pixelW * fit));
+    pixelH = Math.max(1, Math.floor(pixelH * fit));
+  }
+  return { width: pixelW, height: pixelH };
 }
 
 export function mapPointsInto(points, native, home) {
