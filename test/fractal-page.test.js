@@ -4,6 +4,7 @@ import test from "node:test";
 
 const sorting = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const fractals = fs.readFileSync(new URL("../fractals.html", import.meta.url), "utf8");
+const fractalApp = fs.readFileSync(new URL("../src/fractal-app.js", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 test("sorting and fractals are two local pages that link to each other", () => {
@@ -42,4 +43,20 @@ test("the fractal page mirrors the sorting controls", () => {
   assert.match(fractals, /id="note"/);
   assert.doesNotMatch(fractals, /id="program"/);
   assert.doesNotMatch(fractals, /id="compare"/);
+});
+
+test("selecting a fractal waits for Draw", () => {
+  const select = fractalApp.slice(fractalApp.indexOf('fractalSelect.addEventListener("change"'));
+  const selectBody = select.slice(0, select.indexOf("paletteSelect"));
+  assert.match(selectBody, /arm\(\)/);
+  assert.doesNotMatch(selectBody, /restart\(\)/);
+  const preset = fractalApp.slice(fractalApp.indexOf('presets.addEventListener("click"'));
+  const presetBody = preset.slice(0, preset.indexOf("toggleButton"));
+  assert.match(presetBody, /arm\(\)/);
+  assert.doesNotMatch(presetBody, /restart\(\)/);
+  assert.match(fractalApp, /depthInput\.addEventListener\("change", \(\) => arm\(\)\)/);
+  assert.match(
+    fractalApp,
+    /renderPresets\(\);\s*depthInput\.value = String\(currentFractal\(\)\.defaultDepth\);\s*arm\(\);/,
+  );
 });
