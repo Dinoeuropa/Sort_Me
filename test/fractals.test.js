@@ -4,10 +4,12 @@ import {
   FRACTALS,
   buildGeometry,
   constructionOrder,
+  cursorParameter,
   escapeBand,
   escapeValue,
   fractalById,
   iterateIfs,
+  newtonCursor,
   planePoint,
   presetById,
 } from "../src/fractals.js";
@@ -103,6 +105,55 @@ test("julia, burning ship, and newton stay finite and distinct", () => {
   assert.notEqual(omega.basin, root.basin);
   assert.ok(root.iteration < 20);
   assert.ok(omega.iteration <= 20);
+});
+
+test("the cursor maps across the Mandelbrot window", () => {
+  const origin = cursorParameter(0, 0, 300, 200);
+  const far = cursorParameter(300, 200, 300, 200);
+  const middle = cursorParameter(150, 100, 300, 200);
+  assert.ok(Math.abs(origin.x + 2) < 1e-9);
+  assert.ok(Math.abs(origin.y - 1.2) < 1e-9);
+  assert.ok(Math.abs(far.x - 1) < 1e-9);
+  assert.ok(Math.abs(far.y + 1.2) < 1e-9);
+  assert.ok(Math.abs(middle.x + 0.5) < 1e-9);
+  assert.ok(Math.abs(middle.y) < 1e-9);
+  const outside = cursorParameter(300, 0, 300, 200);
+  assert.ok(Math.abs(outside.x - 1) < 1e-9);
+  assert.ok(Math.abs(outside.y - 1.2) < 1e-9);
+  const disk = escapeValue("julia", { cx: 0, cy: 0 }, 0, 0, 20);
+  const pointed = escapeValue("julia", { cx: outside.x, cy: outside.y }, 0, 0, 20);
+  assert.equal(disk.iteration, 20);
+  assert.ok(pointed.iteration < 20);
+});
+
+test("a Newton cursor bends z^3-1 and leaves the plain roots alone", () => {
+  const rest = newtonCursor(150, 100, 300, 200);
+  assert.ok(Math.abs(rest.px) < 1e-9);
+  assert.ok(Math.abs(rest.py) < 1e-9);
+  const edge = newtonCursor(0, 0, 300, 200);
+  assert.ok(Math.abs(edge.px) <= 0.35);
+  assert.ok(Math.abs(edge.py) <= 0.35);
+  assert.ok(Math.abs(edge.px) > 0.05);
+  const plainRoot = escapeValue("newton", {}, 0.9, 0.05, 20);
+  const zeroed = escapeValue("newton", { px: 0, py: 0 }, 0.9, 0.05, 20);
+  assert.deepEqual(zeroed, plainRoot);
+  const bent = { px: 0.2, py: -0.12 };
+  const near = [
+    [0.9, 0.05],
+    [-0.45, 0.85],
+    [-0.45, -0.85],
+  ];
+  const basins = near.map(([x, y]) => escapeValue("newton", bent, x, y, 24).basin);
+  assert.equal(new Set(basins).size, 3);
+  let changed = false;
+  for (let y = -1; y <= 1; y += 0.25) {
+    for (let x = -1; x <= 1; x += 0.25) {
+      const before = escapeValue("newton", {}, x, y, 16);
+      const after = escapeValue("newton", bent, x, y, 16);
+      if (before.basin !== after.basin || before.iteration !== after.iteration) changed = true;
+    }
+  }
+  assert.equal(changed, true);
 });
 
 test("escape rasters reject non-escape fractals and empty bands", () => {

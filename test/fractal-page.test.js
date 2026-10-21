@@ -37,6 +37,8 @@ test("the fractal page mirrors the sorting controls", () => {
   assert.match(fractals, /id="zoom-in"/);
   assert.match(fractals, /id="zoom-out"/);
   assert.match(fractals, /id="zoom-reset"/);
+  assert.match(fractals, /id="auto-zoom"/);
+  assert.match(fractals, /id="param"/);
   assert.match(fractals, /id="canvas"/);
   assert.match(fractals, /aria-label="Fractal visualization"/);
   assert.match(fractals, /id="viz-dock"/);
@@ -74,4 +76,9 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /scheduleEscape/);
   assert.match(css, /touch-action:\s*none/);
   assert.match(fractals, /drag or pinch to move and scroll to zoom/);
+  assert.match(fractalApp, /cursorParameter/);
+  assert.match(fractalApp, /newtonCursor/);
+  assert.match(fractalApp, /autoZoom/);
+  assert.match(fractalApp, /detailTarget/);
+  assert.match(fractalApp, /steerZoomTarget/);
 });

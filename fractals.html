@@ -24,7 +24,8 @@
           <h1>Sort Me</h1>
           <p class="lede">
             Pick a fractal and a coloring, then watch it built in the order the definition produces it.
-            Once it is drawn, drag or pinch to move and scroll to zoom. Closer views draw the next level.
+            On a finished Mandelbrot, Julia, or Newton picture, moving the cursor changes the value.
+            Auto zoom keeps following smaller copies. For the other fractals, drag or pinch to move and scroll to zoom.
             Sound follows the pen. Space plays, and the right arrow steps.
           </p>
         </header>
@@ -75,6 +76,7 @@
       <main class="stage">
         <div class="canvas-frame">
           <canvas id="canvas" width="900" height="520" aria-label="Fractal visualization"></canvas>
+          <p id="param" class="param" hidden></p>
         </div>
         <aside id="viz-dock" class="viz-dock" hidden>
           <label>
@@ -87,6 +89,7 @@
           <button type="button" id="zoom-in" disabled>Zoom in</button>
           <button type="button" id="zoom-out" disabled>Zoom out</button>
           <button type="button" id="zoom-reset" disabled>Reset</button>
+          <button type="button" id="auto-zoom" disabled aria-pressed="false">Auto zoom</button>
         </div>
         <ul class="legend">
           <li><i class="swatch inside"></i> <span id="legend-a">Inside</span></li>

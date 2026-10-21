@@ -1,8 +1,22 @@
 import katex from "../vendor/katex/katex.js";
-import { FRACTALS, buildGeometry, constructionOrder, escapeBand, fractalById, iterateIfs, presetById } from "./fractals.js";
+import {
+  FRACTALS,
+  buildGeometry,
+  constructionOrder,
+  cursorParameter,
+  escapeBand,
+  fractalById,
+  iterateIfs,
+  newtonCursor,
+  presetById,
+} from "./fractals.js";
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
+  NAUTILUS,
+  autoZoomIterations,
   boundsMagnification,
+  detailTarget,
+  easeZoom,
   escapeMagnification,
   escapeWindow,
   iterationCap,
@@ -11,6 +25,7 @@ import {
   panEscape,
   pointBudget,
   recursionLevel,
+  steerZoomTarget,
   zoomBounds,
   zoomEscape,
 } from "./fractal-view.js";
@@ -38,6 +53,8 @@ const dockToggle = document.querySelector("#dock-toggle");
 const zoomInButton = document.querySelector("#zoom-in");
 const zoomOutButton = document.querySelector("#zoom-out");
 const zoomResetButton = document.querySelector("#zoom-reset");
+const autoZoomButton = document.querySelector("#auto-zoom");
+const paramEl = document.querySelector("#param");
 const canvas = document.querySelector("#canvas");
 const statusEl = document.querySelector("#status");
 const depthStat = document.querySelector("#depth-stat");
@@ -91,7 +108,19 @@ const state = {
   exploreToken: 0,
   exploring: false,
   shownCap: 0,
+  autoZoom: false,
+  autoToken: 0,
+  cursorParam: null,
+  frozenParam: null,
+  pointerBias: null,
+  cursorRedraw: false,
+  zoomTarget: null,
+  snapshot: null,
+  snapshotView: null,
+  autoJob: null,
 };
+
+const REACTIVE = new Set(["mandelbrot", "julia", "newton"]);
 
 for (const fractal of FRACTALS) {
   const option = document.createElement("option");
@@ -213,7 +242,7 @@ function renderChrome() {
     : state.stages && drawing
       ? fractal.minDepth + state.stage
       : depth;
-  depthStat.textContent = generation.toLocaleString();
+  depthStat.textContent = state.autoZoom ? formatMag(currentMagnification()) : generation.toLocaleString();
   samplesEl.textContent = state.samples.toLocaleString();
   kindEl.textContent = KIND[fractal.kind];
   presetStat.textContent = preset.name;
@@ -227,17 +256,25 @@ function renderChrome() {
   dockToggle.textContent = control;
   dock.hidden = !state.dock;
   dockSpeed.value = speedInput.value;
-  if (state.exploring) statusEl.textContent = "Zooming";
+  if (state.autoZoom) statusEl.textContent = "Auto zoom";
+  else if (state.exploring && !state.cursorRedraw) statusEl.textContent = "Zooming";
   else if (state.running) statusEl.textContent = "Drawing";
   else if (state.paused) statusEl.textContent = "Paused";
   else if (state.finished) statusEl.textContent = "Drawn";
   else statusEl.textContent = "Ready";
-  const canZoom = state.finished && !state.running;
-  for (const button of [zoomInButton, zoomOutButton, zoomResetButton]) {
-    button.disabled = !canZoom;
-  }
-  canvas.classList.toggle("exploring", canZoom);
-  canvas.classList.toggle("pixelated", fractal.kind === "escape");
+  const reactive = isReactive();
+  const canZoom = state.finished && !state.running && !state.autoZoom;
+  zoomInButton.disabled = !canZoom;
+  zoomOutButton.disabled = !canZoom;
+  zoomResetButton.disabled = !(state.finished && !state.running && state.home);
+  autoZoomButton.disabled = !(state.finished && !state.running && reactive);
+  autoZoomButton.setAttribute("aria-pressed", String(state.autoZoom));
+  canvas.classList.toggle("exploring", canZoom && !reactive);
+  canvas.classList.toggle("reactive", state.finished && !state.running && reactive);
+  canvas.classList.toggle("pixelated", fractal.kind === "escape" && !state.autoZoom);
+  const paramText = formatParam();
+  paramEl.hidden = !paramText;
+  paramEl.textContent = paramText;
 }
 
 function paceLabel(fractal) {
@@ -274,6 +311,10 @@ function stop() {
 function resetProgress() {
   const fractal = currentFractal();
   const depth = depthValue();
+  haltAutoZoom();
+  state.cursorParam = null;
+  state.cursorRedraw = false;
+  state.zoomTarget = null;
   state.finished = false;
   state.paused = false;
   state.samples = 0;
@@ -710,12 +751,17 @@ function exploredLevel() {
   const fractal = currentFractal();
   const magnification = currentMagnification();
   const base = state.baseDepth || depthValue();
-  if (fractal.kind === "escape") return iterationCap(base, magnification);
+  if (fractal.kind === "escape") {
+    return state.autoZoom ? autoZoomIterations(base, magnification) : iterationCap(base, magnification);
+  }
   if (fractal.kind === "ifs") return pointBudget(base, magnification, 80000);
   return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth);
 }
 
 function zoomNote(fractal) {
+  if (state.autoZoom && state.home && state.view) {
+    return `${fractal.note} Auto zoom is ${formatMag(currentMagnification())} deep, at ${exploredLevel().toLocaleString()} iterations.`;
+  }
   if (!state.finished || !state.home || !state.view) return fractal.note;
   const magnification = currentMagnification();
   if (magnification < 1.05 && magnification > 0.95) return fractal.note;
@@ -724,7 +770,36 @@ function zoomNote(fractal) {
 }
 
 function canExplore() {
-  return state.finished && !state.running && state.home && state.view;
+  return state.finished && !state.running && state.home && state.view && !state.autoZoom;
+}
+
+function isReactive(id = state.fractalId) {
+  return REACTIVE.has(id);
+}
+
+function formatMag(mag) {
+  if (!Number.isFinite(mag) || mag < 1.05) return "1×";
+  if (mag >= 1e6) return `${(mag / 1e6).toFixed(mag >= 1e7 ? 0 : 1)}M×`;
+  if (mag >= 10000) return `${(mag / 1000).toFixed(1)}k×`;
+  if (mag >= 10) return `${Math.round(mag).toLocaleString()}×`;
+  return `${(Math.round(mag * 10) / 10).toLocaleString()}×`;
+}
+
+function formatComplex(x, y) {
+  const real = `${x < 0 ? "−" : ""}${Math.abs(x).toFixed(4)}`;
+  const imag = `${Math.abs(y).toFixed(4)}`;
+  return `${real} ${y < 0 ? "−" : "+"} ${imag}i`;
+}
+
+function formatParam() {
+  if (state.autoZoom) {
+    const where = state.fractalId === "mandelbrot" ? "toward the spiral" : "along the boundary";
+    return `Auto zoom ${formatMag(currentMagnification())} ${where}`;
+  }
+  if (!state.cursorParam) return "";
+  if (state.fractalId === "newton") return `p = ${formatComplex(state.cursorParam.px, state.cursorParam.py)}`;
+  const name = state.fractalId === "mandelbrot" ? "Julia c" : "c";
+  return `${name} = ${formatComplex(state.cursorParam.x, state.cursorParam.y)}`;
 }
 
 function localPoint(event) {
@@ -760,6 +835,9 @@ function applyPan(dx, dy) {
 
 function resetExplore() {
   if (!state.home) return;
+  haltAutoZoom();
+  state.cursorParam = null;
+  state.pointerBias = null;
   state.view = { ...state.home };
   if (currentFractal().kind === "escape") scheduleEscape();
   else redrawExplored();
@@ -813,14 +891,65 @@ function placeGeometry(geometry, home) {
   return { mode: "triangles", vertices: mapPointsInto(geometry.vertices, native, home) };
 }
 
+function renderJob(view = state.view) {
+  const preset = currentPreset();
+  const fractal = currentFractal();
+  const framed = fractal.kind === "escape" && view
+    ? { ...preset, centerX: view.centerX, centerY: view.centerY, scale: view.scale }
+    : { ...preset };
+  let fractalId = state.fractalId;
+  const param = state.autoZoom ? state.frozenParam : state.cursorParam;
+  if (param && state.fractalId === "mandelbrot" && !state.autoZoom && Number.isFinite(param.x)) {
+    framed.centerX = 0;
+    framed.centerY = 0;
+    framed.scale = 3.2;
+    framed.cx = param.x;
+    framed.cy = param.y;
+    fractalId = "julia";
+  } else if (param && state.fractalId === "julia" && Number.isFinite(param.x)) {
+    framed.cx = param.x;
+    framed.cy = param.y;
+  } else if (param && state.fractalId === "newton" && Number.isFinite(param.px)) {
+    framed.px = param.px;
+    framed.py = param.py;
+  }
+  return { fractalId, preset: framed };
+}
+
+function coarseRaster(box) {
+  const full = rasterSize(box.width, box.height, 1);
+  const edge = Math.max(full.width, full.height);
+  const cap = 200;
+  if (edge <= cap) return full;
+  const fit = cap / edge;
+  return {
+    width: Math.max(24, Math.round(full.width * fit)),
+    height: Math.max(16, Math.round(full.height * fit)),
+  };
+}
+
+function autoRaster(box) {
+  const full = rasterSize(box.width, box.height, 1);
+  const edge = Math.max(full.width, full.height);
+  const cap = 640;
+  if (edge <= cap) return full;
+  const fit = cap / edge;
+  return {
+    width: Math.max(28, Math.round(full.width * fit)),
+    height: Math.max(20, Math.round(full.height * fit)),
+  };
+}
+
 function scheduleEscape() {
   const token = ++state.exploreToken;
+  if (state.autoZoom) return;
   state.exploring = true;
+  state.cursorRedraw = Boolean(state.cursorParam);
   renderChrome();
   const box = viewBox();
   const raster = rasterSize(box.width, box.height, box.dpr);
   const cap = exploredLevel();
-  const preset = viewedPreset();
+  const job = renderJob();
   const iterations = new Uint16Array(raster.width * raster.height);
   const basins = new Int8Array(iterations.length);
   basins.fill(-1);
@@ -830,8 +959,8 @@ function scheduleEscape() {
     const count = Math.max(1, Math.ceil(raster.height / 8));
     const rows = Math.min(count, raster.height - row);
     const band = escapeBand(
-      state.fractalId,
-      preset,
+      job.fractalId,
+      job.preset,
       raster.width,
       raster.height,
       cap,
@@ -861,14 +990,271 @@ function scheduleEscape() {
   requestAnimationFrame(step);
 }
 
+function haltAutoZoom() {
+  state.autoZoom = false;
+  state.autoToken += 1;
+  state.autoJob = null;
+  state.snapshot = null;
+  state.snapshotView = null;
+  state.frozenParam = null;
+  state.pointerBias = null;
+}
+
+function stopAutoZoom() {
+  const was = state.autoZoom;
+  haltAutoZoom();
+  if (was && state.finished && state.home && state.view) scheduleEscape();
+  else renderChrome();
+}
+
+function freezeCursor() {
+  if (!state.cursorParam) return null;
+  if (state.fractalId === "julia") return { x: state.cursorParam.x, y: state.cursorParam.y };
+  if (state.fractalId === "newton") return { px: state.cursorParam.px, py: state.cursorParam.py };
+  return null;
+}
+
+function captureSnapshot(view) {
+  if (!canvas.width || !canvas.height || !view) return;
+  const box = viewBox();
+  const display = rasterSize(box.width, box.height, box.dpr);
+  if (canvas.width < display.width * 0.7 || canvas.height < display.height * 0.7) return;
+  const snap = document.createElement("canvas");
+  snap.width = canvas.width;
+  snap.height = canvas.height;
+  snap.getContext("2d").drawImage(canvas, 0, 0);
+  state.snapshot = snap;
+  state.snapshotView = { ...view };
+}
+
+function startAutoZoom() {
+  if (!state.finished || state.running || !state.home || !state.view || !isReactive()) return;
+  const hoveringMandelbrot = state.fractalId === "mandelbrot" && state.cursorParam;
+  state.frozenParam = freezeCursor();
+  state.cursorParam = null;
+  state.cursorRedraw = false;
+  window.clearTimeout(refineTimer);
+  state.zoomTarget = state.fractalId === "mandelbrot"
+    ? { x: NAUTILUS.x, y: NAUTILUS.y, score: 0 }
+    : { x: state.view.centerX, y: state.view.centerY, score: 0 };
+  state.autoJob = null;
+  if (hoveringMandelbrot) {
+    state.snapshot = null;
+    state.snapshotView = null;
+  } else {
+    captureSnapshot(state.view);
+  }
+  state.autoZoom = true;
+  state.exploring = false;
+  const token = ++state.autoToken;
+  state.exploreToken += 1;
+  const tick = () => {
+    if (!state.autoZoom || token !== state.autoToken) return;
+    stepAutoZoom(token);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  renderChrome();
+}
+
+function stepAutoZoom(token) {
+  const box = viewBox();
+  const aspect = box.width / Math.max(1, box.height);
+  const detail = state.zoomTarget || { x: state.view.centerX, y: state.view.centerY, score: 0 };
+  const steered = steerZoomTarget(detail, state.view, {
+    anchor: state.fractalId === "mandelbrot" ? NAUTILUS : null,
+    bias: state.pointerBias,
+    aspect,
+  });
+  state.view = easeZoom(state.view, steered, 1.012, 0.055);
+  ensureAutoJob(token, box);
+  pumpAutoJob(token);
+  if (state.snapshot && state.snapshotView) drawScaledSnapshot();
+  renderChrome();
+}
+
+function ensureAutoJob(token, box) {
+  if (state.autoJob && state.autoJob.token === token && !state.autoJob.done) return;
+  if (state.snapshotView) {
+    const stretch = state.snapshotView.scale / state.view.scale;
+    if (stretch < 1.18) return;
+  }
+  const raster = autoRaster(box);
+  const cap = autoZoomIterations(state.baseDepth || depthValue(), currentMagnification());
+  const view = {
+    centerX: state.view.centerX,
+    centerY: state.view.centerY,
+    scale: state.view.scale,
+    flipY: Boolean(state.view.flipY),
+  };
+  const job = renderJob(view);
+  const iterations = new Uint16Array(raster.width * raster.height);
+  const basins = new Int8Array(iterations.length);
+  basins.fill(-1);
+  state.autoJob = {
+    token,
+    raster,
+    cap,
+    fractalId: job.fractalId,
+    preset: job.preset,
+    iterations,
+    basins,
+    row: 0,
+    view,
+    done: false,
+  };
+}
+
+function pumpAutoJob(token) {
+  const job = state.autoJob;
+  if (!job || job.token !== token || job.done) return;
+  const rows = Math.max(1, Math.ceil(job.raster.height / 8));
+  const count = Math.min(rows, job.raster.height - job.row);
+  if (count <= 0) return;
+  const band = escapeBand(
+    job.fractalId,
+    job.preset,
+    job.raster.width,
+    job.raster.height,
+    job.cap,
+    job.row,
+    count,
+  );
+  job.iterations.set(band.iterations, job.row * job.raster.width);
+  job.basins.set(band.basins, job.row * job.raster.width);
+  job.row += count;
+  if (job.row < job.raster.height) return;
+  job.done = true;
+  state.raster = job.raster;
+  state.iterations = job.iterations;
+  state.basins = job.basins;
+  state.nextRow = job.raster.height;
+  state.revealIter = job.cap;
+  state.shownCap = job.cap;
+  state.samples = job.iterations.length;
+  state.finished = true;
+  state.exploring = false;
+  const pixels = paintEscape(
+    state.paletteId,
+    job.iterations,
+    job.basins,
+    job.raster.width,
+    job.raster.height,
+    job.cap,
+    job.raster.height,
+    job.cap,
+  );
+  const snap = document.createElement("canvas");
+  snap.width = job.raster.width;
+  snap.height = job.raster.height;
+  snap.getContext("2d").putImageData(new ImageData(pixels, snap.width, snap.height), 0, 0);
+  state.snapshot = snap;
+  state.snapshotView = { ...job.view };
+  state.zoomTarget = detailTarget(
+    job.iterations,
+    job.basins,
+    job.raster.width,
+    job.raster.height,
+    job.view,
+    job.cap,
+    job.fractalId === "newton" ? "newton" : "escape",
+  );
+}
+
+function drawScaledSnapshot() {
+  const from = state.snapshotView;
+  const source = state.snapshot;
+  const to = state.view;
+  const box = viewBox();
+  const dest = rasterSize(box.width, box.height, box.dpr);
+  const width = dest.width;
+  const height = dest.height;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const aspect = width / Math.max(1, height);
+  const drawScale = from.scale / Math.max(1e-15, to.scale);
+  const spanX = to.scale * aspect;
+  const dw = width * drawScale;
+  const dh = height * drawScale;
+  const dx = width / 2 + (width * (from.centerX - to.centerX)) / spanX - dw / 2;
+  const dy = height / 2 - (height * (from.centerY - to.centerY)) / to.scale - dh / 2;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(source, dx, dy, dw, dh);
+}
+
 const pointers = new Map();
+let cursorFrame = 0;
+let refineTimer = 0;
 
 function pointerDistance(points) {
   const [a, b] = points;
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function paintCursorFrame() {
+  const box = viewBox();
+  const raster = coarseRaster(box);
+  const cap = exploredLevel();
+  const job = renderJob();
+  const band = escapeBand(job.fractalId, job.preset, raster.width, raster.height, cap, 0, raster.height);
+  state.exploreToken += 1;
+  state.raster = raster;
+  state.iterations = band.iterations;
+  state.basins = band.basins;
+  state.nextRow = raster.height;
+  state.revealIter = cap;
+  state.shownCap = cap;
+  state.samples = band.iterations.length;
+  state.exploring = false;
+  state.cursorRedraw = true;
+  state.finished = true;
+  paint();
+  renderChrome();
+}
+
+function onReactivePointer(point) {
+  const box = viewBox();
+  state.pointerBias = {
+    x: Math.min(1, Math.max(0, point.x / Math.max(1, box.width))),
+    y: Math.min(1, Math.max(0, point.y / Math.max(1, box.height))),
+  };
+  if (state.autoZoom) return;
+  state.cursorParam = state.fractalId === "newton"
+    ? newtonCursor(point.x, point.y, box.width, box.height)
+    : cursorParameter(point.x, point.y, box.width, box.height);
+  renderChrome();
+  if (!cursorFrame) {
+    cursorFrame = requestAnimationFrame(() => {
+      cursorFrame = 0;
+      if (!state.cursorParam || state.autoZoom || !state.finished) return;
+      paintCursorFrame();
+    });
+  }
+  window.clearTimeout(refineTimer);
+  refineTimer = window.setTimeout(() => {
+    if (!state.cursorParam || state.autoZoom || !state.finished || state.running) return;
+    scheduleEscape();
+  }, 150);
+}
+
 canvas.addEventListener("pointerdown", (event) => {
+  if (isReactive() && state.finished && !state.running) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    try {
+      canvas.setPointerCapture(event.pointerId);
+    } catch {
+      // A synthetic event cannot capture the pointer. Move events still update the picture.
+    }
+    onReactivePointer(localPoint(event));
+    event.preventDefault();
+    return;
+  }
   if (!canExplore()) return;
   if (event.pointerType === "mouse" && event.button !== 0) return;
   try {
@@ -881,6 +1267,10 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  if (isReactive() && state.finished && !state.running) {
+    onReactivePointer(localPoint(event));
+    return;
+  }
   if (!pointers.has(event.pointerId)) return;
   const point = localPoint(event);
   const previous = pointers.get(event.pointerId);
@@ -901,12 +1291,23 @@ canvas.addEventListener("pointermove", (event) => {
 
 canvas.addEventListener("pointerup", (event) => pointers.delete(event.pointerId));
 canvas.addEventListener("pointercancel", (event) => pointers.delete(event.pointerId));
+canvas.addEventListener("pointerleave", () => {
+  state.pointerBias = null;
+  if (state.autoZoom || !isReactive() || !state.finished || state.running) return;
+  state.cursorParam = null;
+  window.clearTimeout(refineTimer);
+  scheduleEscape();
+});
 canvas.addEventListener("dblclick", (event) => {
-  if (!canExplore()) return;
+  if (!canExplore() || isReactive()) return;
   const point = localPoint(event);
   applyZoom(point.x, point.y, 2);
 });
 canvas.addEventListener("wheel", (event) => {
+  if (state.autoZoom) {
+    event.preventDefault();
+    return;
+  }
   if (!canExplore()) return;
   event.preventDefault();
   const point = localPoint(event);
@@ -927,6 +1328,10 @@ zoomOutButton.addEventListener("click", () => {
   applyZoom(box.width / 2, box.height / 2, 0.5);
 });
 zoomResetButton.addEventListener("click", resetExplore);
+autoZoomButton.addEventListener("click", () => {
+  if (state.autoZoom) stopAutoZoom();
+  else startAutoZoom();
+});
 
 fractalSelect.addEventListener("change", () => {
   state.fractalId = fractalSelect.value;
@@ -1021,6 +1426,7 @@ new ResizeObserver(() => {
     paint();
     return;
   }
+  if (state.autoZoom) return;
   if (state.running) restart();
   else if (state.finished && state.home) scheduleEscape();
 }).observe(canvas.parentElement);
