@@ -9,11 +9,11 @@ export const DRAW_RASTER_EDGE = 960;
 /** Long edge of a finished, zoomed, or reactive picture. 3840 is 4K. */
 export const SHARP_RASTER_EDGE = 3840;
 
-/** Magnification per auto-zoom frame. A second of frames grows the view by less than 20%. */
-export const AUTO_ZOOM_STEP = 1.0024;
+/** Magnification per auto-zoom frame. Sixty frames about double the view. */
+export const AUTO_ZOOM_STEP = 1.012;
 
 /** How much of the remaining gap to the target is closed each auto-zoom frame. */
-export const AUTO_ZOOM_PULL = 0.012;
+export const AUTO_ZOOM_PULL = 0.05;
 
 const RATIOS = {
   koch: 3,
@@ -51,6 +51,42 @@ export function autoZoomIterations(baseDepth, magnification) {
 
 /** Seahorse valley spiral. Early Mandelbrot zooms steer here, then follow finer detail. */
 export const NAUTILUS = { x: -0.743643887037151, y: 0.131825904205330 };
+
+/** How much wider than the camera an auto-zoom plate is rendered, so the view can move inside it. */
+export const PLATE_SCALE = 1.65;
+
+/** Long edge of the plate drawn while auto zoom is moving. Smaller than the settled 4K picture so the next frame arrives quickly. */
+export const AUTO_ZOOM_RASTER_EDGE = 1920;
+
+const ZOOM_PATTERNS = {
+  mandelbrot: [
+    { id: "seahorse", name: "Seahorse spiral", x: NAUTILUS.x, y: NAUTILUS.y },
+    { id: "mini", name: "Mini Mandelbrot", x: -1.768778833, y: 0.001738915 },
+    { id: "elephant", name: "Elephant valley", x: 0.25, y: 0 },
+    { id: "detail", name: "Nearest detail" },
+  ],
+  julia: [
+    { id: "detail", name: "Nearest detail" },
+    { id: "right", name: "Right spiral", bias: { x: 0.82, y: 0.5 } },
+    { id: "upper", name: "Upper spiral", bias: { x: 0.5, y: 0.18 } },
+    { id: "left", name: "Left spiral", bias: { x: 0.18, y: 0.5 } },
+  ],
+  burning: [
+    { id: "detail", name: "Along the hull" },
+    { id: "wreck", name: "Wreck", x: -1.762, y: -0.028 },
+    { id: "mast", name: "Mast", x: -1.45, y: -0.003 },
+  ],
+  newton: [
+    { id: "detail", name: "Basin edge" },
+    { id: "junction", name: "Triple point", x: 0, y: 0 },
+    { id: "pinch", name: "Pinch", x: 0.42, y: 0.36 },
+  ],
+};
+
+/** Named recursive targets for auto zoom. An entry without x follows whatever detail is in frame. */
+export function zoomPatterns(fractalId) {
+  return ZOOM_PATTERNS[fractalId] || [];
+}
 
 const NEIGHBORS = [
   [1, 0],
@@ -117,11 +153,82 @@ export function easeZoom(view, target, factor = AUTO_ZOOM_STEP, pull = AUTO_ZOOM
   };
 }
 
-export function rasterSize(width, height, dpr = 1, sharp = false) {
+/** A plate that contains the camera and is shifted a little toward the next pattern. */
+export function plateWindow(camera, aim, aspect = 1) {
+  const safeAspect = aspect > 0 ? aspect : 1;
+  const halfX = camera.scale * safeAspect * 0.5;
+  const halfY = camera.scale * 0.5;
+  const dx = (aim?.x ?? camera.centerX) - camera.centerX;
+  const dy = (aim?.y ?? camera.centerY) - camera.centerY;
+  const shiftX = Math.max(-halfX * 0.4, Math.min(halfX * 0.4, dx));
+  const shiftY = Math.max(-halfY * 0.4, Math.min(halfY * 0.4, dy));
+  return {
+    centerX: camera.centerX + shiftX,
+    centerY: camera.centerY + shiftY,
+    scale: camera.scale * PLATE_SCALE,
+    flipY: Boolean(camera.flipY),
+  };
+}
+
+/** Keep a camera inside the world rectangle a plate actually covers. */
+export function clampViewToPlate(plate, view, aspect = 1) {
+  const safeAspect = aspect > 0 ? aspect : 1;
+  const plateAspect = plate.width > 0 && plate.height > 0 ? plate.width / plate.height : safeAspect;
+  const fullX = plate.scale * plateAspect;
+  const fullY = plate.scale;
+  const maxScale = Math.min(fullY, fullX / safeAspect);
+  let scale = Math.min(view.scale, maxScale);
+  const minScale = Math.min(maxScale, fullY / 2);
+  if (scale < minScale) scale = minScale;
+  const camX = scale * safeAspect;
+  const camY = scale;
+  const insetX = Math.min(fullX * 0.012, Math.max(0, (fullX - camX) / 2));
+  const insetY = Math.min(fullY * 0.012, Math.max(0, (fullY - camY) / 2));
+  const roomX = Math.max(0, (fullX - camX) / 2 - insetX);
+  const roomY = Math.max(0, (fullY - camY) / 2 - insetY);
+  return {
+    ...view,
+    centerX: Math.min(plate.centerX + roomX, Math.max(plate.centerX - roomX, view.centerX)),
+    centerY: Math.min(plate.centerY + roomY, Math.max(plate.centerY - roomY, view.centerY)),
+    scale,
+  };
+}
+
+/** True while the camera still has spare picture around every edge. */
+export function plateHasRoom(plate, view, aspect = 1) {
+  if (!plate || !view || !(plate.scale > 0) || !(view.scale > 0)) return false;
+  if (plate.scale / view.scale < 1.12) return false;
+  const safeAspect = aspect > 0 ? aspect : 1;
+  const plateAspect = plate.width > 0 && plate.height > 0 ? plate.width / plate.height : safeAspect;
+  const plateHalfX = plate.scale * plateAspect * 0.5;
+  const plateHalfY = plate.scale * 0.5;
+  const camHalfX = view.scale * safeAspect * 0.5;
+  const camHalfY = view.scale * 0.5;
+  const marginX = plateHalfX - camHalfX - Math.abs(view.centerX - plate.centerX);
+  const marginY = plateHalfY - camHalfY - Math.abs(view.centerY - plate.centerY);
+  return marginX > camHalfX * 0.12 && marginY > camHalfY * 0.12;
+}
+
+/** Zoom factor for one frame. Brisk by default, and only slower when the last plate was too slow to keep up. */
+export function zoomStepForPlate(room, durationMs, frameMs = 16.7) {
+  const span = Number.isFinite(room) && room > 1.02 ? room : PLATE_SCALE;
+  const frames = Math.max(8, (Number(durationMs) > 0 ? durationMs : 480) / Math.max(8, frameMs));
+  const matched = Math.pow(span, 1 / frames);
+  return Math.min(AUTO_ZOOM_STEP, Math.max(1.006, matched));
+}
+
+/** Pan speed that crosses the spare plate room over the same render, and no faster. */
+export function glidePull(gap, room, frames) {
+  if (!(gap > 0) || !(room > 0)) return 0;
+  const steps = Math.max(8, frames);
+  return Math.min(AUTO_ZOOM_PULL, (room / steps) / gap);
+}
+
+export function rasterSize(width, height, dpr = 1, sharp = false, longEdge = 0) {
   const ratio = Math.min(Math.max(Number(dpr) || 1, 1), 2);
   let pixelW = Math.max(1, Math.floor(width * ratio));
   let pixelH = Math.max(1, Math.floor(height * ratio));
-  const cap = sharp ? SHARP_RASTER_EDGE : DRAW_RASTER_EDGE;
+  const cap = longEdge > 0 ? longEdge : sharp ? SHARP_RASTER_EDGE : DRAW_RASTER_EDGE;
   const edge = Math.max(pixelW, pixelH);
   if (edge > cap) {
     const fit = cap / edge;

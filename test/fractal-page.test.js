@@ -89,4 +89,7 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /SHARP_RASTER_EDGE|rasterSize\([^)]*true\)/);
   assert.match(fractalApp, /"burning"/);
   assert.match(fractalApp, /AUTO_ZOOM_STEP/);
+  assert.match(fractals, /id="zoom-pattern"/);
+  assert.match(fractalApp, /zoomPatterns/);
+  assert.match(fractalApp, /clampViewToPlate/);
 });
