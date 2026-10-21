@@ -1,18 +1,20 @@
 # Sort Me
 
-A local visualiser with two pages. Sorting watches a program run against the comparison lower bound ⌈log₂(n!)⌉. Fractals watches an escape-time set, a curve, a gasket, or an iterated function system resolve under a coloring you pick.
+A visualiser with two pages, published like any other site. Sorting watches a program run against the comparison lower bound ⌈log₂(n!)⌉. Fractals watches an escape-time set, a curve, a gasket, or an iterated function system resolve under a coloring you pick.
 
 Every generated array is a permutation of **1, 2, 3, …, n**. Length stops at **250**, so a finished chart always rises by 1 from one position to the next. Compare runs two to four programs on that same array. Changing the length or a preset rebuilds the array and keeps the comparison running.
 
-Neither page calls a server, loads a font, or sends the picture anywhere. The included server only binds to `127.0.0.1`.
+Neither page calls an API, loads a remote font, or sends the picture anywhere. KaTeX stays in this repository. The public addresses are `/` for sorting and `/fractals` for fractals. A visit to `/index.html` or `/fractals.html` redirects to those paths, so the address bar does not end in `.html`.
 
-## Run locally
+## Run
 
 ```bash
 npm start
 ```
 
-Open `http://127.0.0.1:4173` for sorting. Fractals are at `http://127.0.0.1:4173/fractals.html`. The brass links at the top of either page switch between them.
+The server listens on every interface and prints its address. Sorting is `/`. Fractals are `/fractals`. The brass links at the top of either page switch between them.
+
+`vercel.json` hosts the same files. Clean URLs drop the `.html` suffix, and the response headers match the page policy.
 
 ## Sorting
 

@@ -7,20 +7,21 @@ const fractals = fs.readFileSync(new URL("../fractals.html", import.meta.url), "
 const fractalApp = fs.readFileSync(new URL("../src/fractal-app.js", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
-test("sorting and fractals are two local pages that link to each other", () => {
+test("sorting and fractals are two pages that link to each other", () => {
   for (const page of [sorting, fractals]) {
     assert.match(page, /Content-Security-Policy/);
     assert.match(page, /script-src 'self'/);
     assert.doesNotMatch(page, /https?:\/\//);
     assert.match(page, /class="site-nav"/);
-    assert.match(page, /href="\.\/index\.html"/);
-    assert.match(page, /href="\.\/fractals\.html"/);
+    assert.match(page, /href="\/"/);
+    assert.match(page, /href="\/fractals"/);
+    assert.doesNotMatch(page, /\.html"/);
     assert.match(page, /aria-label="Sort Me pages"/);
   }
-  assert.match(sorting, /href="\.\/index\.html" aria-current="page"/);
-  assert.match(fractals, /href="\.\/fractals\.html" aria-current="page"/);
-  assert.match(sorting, /src="\.\/src\/app\.js"/);
-  assert.match(fractals, /src="\.\/src\/fractal-app\.js"/);
+  assert.match(sorting, /href="\/" aria-current="page"/);
+  assert.match(fractals, /href="\/fractals" aria-current="page"/);
+  assert.match(sorting, /src="\/src\/app\.js"/);
+  assert.match(fractals, /src="\/src\/fractal-app\.js"/);
   assert.match(css, /\.site-nav/);
 });
 
