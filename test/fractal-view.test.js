@@ -10,16 +10,20 @@ import {
   SHARP_RASTER_EDGE,
   autoZoomIterations,
   boundsMagnification,
+  clampViewToPlate,
   detailTarget,
   easeFactor,
   easeZoom,
   escapeBlitRect,
   escapeMagnification,
+  glidePull,
   iterationCap,
   levelBlend,
   mapPointsInto,
   panBounds,
   panEscape,
+  plateHasRoom,
+  plateWindow,
   pointBudget,
   rasterSize,
   recursionLevel,
@@ -28,6 +32,8 @@ import {
   wheelZoomFactor,
   zoomBounds,
   zoomEscape,
+  zoomPatterns,
+  zoomStepForPlate,
 } from "../src/fractal-view.js";
 
 const homeEscape = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
@@ -158,6 +164,53 @@ test("each auto zoom step magnifies and eases toward the target", () => {
   assert.ok(Math.abs(view.scale / next.scale - 1.02) < 1e-9);
   assert.ok(next.centerX > view.centerX);
   assert.ok(next.centerY < view.centerY);
+});
+
+test("an auto-zoom plate covers the camera and a camera cannot leave it", () => {
+  const camera = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
+  const plate = plateWindow(camera, { x: NAUTILUS.x, y: NAUTILUS.y }, 1.6);
+  assert.ok(plate.scale > camera.scale);
+  assert.ok(plate.scale <= camera.scale * 1.4);
+  const halfY = plate.scale / 2;
+  const halfX = plate.scale * 1.6 / 2;
+  assert.ok(Math.abs(camera.centerX - plate.centerX) + camera.scale * 1.6 / 2 < halfX);
+  assert.ok(Math.abs(camera.centerY - plate.centerY) + camera.scale / 2 < halfY);
+  const rushed = { ...camera, centerX: 2, centerY: 2, scale: camera.scale / 2 };
+  const held = clampViewToPlate({ ...plate, width: 160, height: 100 }, rushed, 1.6);
+  assert.ok(Math.abs(held.centerX - plate.centerX) < halfX);
+  assert.ok(Math.abs(held.centerY - plate.centerY) < halfY);
+  assert.ok(held.scale <= plate.scale);
+  assert.equal(plateHasRoom(plate, camera, 1.6), true);
+  assert.equal(plateHasRoom(camera, camera, 1.6), false);
+});
+
+test("auto zoom speed stretches one plate across the time it takes to draw the next", () => {
+  const gentle = zoomStepForPlate(1.38, 4000, 16.7);
+  const brisk = zoomStepForPlate(1.38, 400, 16.7);
+  assert.ok(gentle > 1);
+  assert.ok(gentle < brisk);
+  assert.ok(brisk <= AUTO_ZOOM_STEP);
+  let scale = 1.38;
+  const frames = Math.round(4000 / 16.7);
+  for (let i = 0; i < frames; i += 1) scale /= gentle;
+  assert.ok(scale > 1);
+  const pull = glidePull(4, 0.2, frames);
+  assert.ok(pull > 0);
+  assert.ok(pull * frames * 4 <= 0.2 + 1e-9);
+});
+
+test("each reactive fractal offers a choice of zoom patterns", () => {
+  const mandelbrot = zoomPatterns("mandelbrot");
+  const names = mandelbrot.map((pattern) => pattern.name);
+  assert.ok(names.includes("Seahorse spiral"));
+  assert.ok(names.includes("Mini Mandelbrot"));
+  assert.ok(names.includes("Elephant valley"));
+  const seahorse = mandelbrot.find((pattern) => pattern.id === "seahorse");
+  const mini = mandelbrot.find((pattern) => pattern.id === "mini");
+  assert.ok(Math.hypot(seahorse.x - mini.x, seahorse.y - mini.y) > 0.5);
+  assert.ok(zoomPatterns("burning").length >= 2);
+  assert.ok(zoomPatterns("newton").some((pattern) => pattern.name === "Pinch"));
+  assert.equal(zoomPatterns("koch").length, 0);
 });
 
 test("auto zoom creeps so the picture can keep up", () => {
