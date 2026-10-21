@@ -43,7 +43,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .shell {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(336px, 432px) minmax(0, 1fr);
   height: 100vh;
   min-height: 100vh;
   overflow: hidden;
