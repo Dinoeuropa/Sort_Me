@@ -9,11 +9,11 @@ export const DRAW_RASTER_EDGE = 960;
 /** Long edge of a finished, zoomed, or reactive picture. 3840 is 4K. */
 export const SHARP_RASTER_EDGE = 3840;
 
-/** Magnification per auto-zoom frame. A second of frames grows the view by less than 20%. */
-export const AUTO_ZOOM_STEP = 1.0024;
+/** Magnification per auto-zoom frame. Sixty frames about double the view. */
+export const AUTO_ZOOM_STEP = 1.012;
 
 /** How much of the remaining gap to the target is closed each auto-zoom frame. */
-export const AUTO_ZOOM_PULL = 0.012;
+export const AUTO_ZOOM_PULL = 0.05;
 
 const RATIOS = {
   koch: 3,
@@ -53,7 +53,10 @@ export function autoZoomIterations(baseDepth, magnification) {
 export const NAUTILUS = { x: -0.743643887037151, y: 0.131825904205330 };
 
 /** How much wider than the camera an auto-zoom plate is rendered, so the view can move inside it. */
-export const PLATE_SCALE = 1.38;
+export const PLATE_SCALE = 1.65;
+
+/** Long edge of the plate drawn while auto zoom is moving. Smaller than the settled 4K picture so the next frame arrives quickly. */
+export const AUTO_ZOOM_RASTER_EDGE = 1920;
 
 const ZOOM_PATTERNS = {
   mandelbrot: [
@@ -63,7 +66,10 @@ const ZOOM_PATTERNS = {
     { id: "detail", name: "Nearest detail" },
   ],
   julia: [
-    { id: "detail", name: "Boundary detail" },
+    { id: "detail", name: "Nearest detail" },
+    { id: "right", name: "Right spiral", bias: { x: 0.82, y: 0.5 } },
+    { id: "upper", name: "Upper spiral", bias: { x: 0.5, y: 0.18 } },
+    { id: "left", name: "Left spiral", bias: { x: 0.18, y: 0.5 } },
   ],
   burning: [
     { id: "detail", name: "Along the hull" },
@@ -72,6 +78,7 @@ const ZOOM_PATTERNS = {
   ],
   newton: [
     { id: "detail", name: "Basin edge" },
+    { id: "junction", name: "Triple point", x: 0, y: 0 },
     { id: "pinch", name: "Pinch", x: 0.42, y: 0.36 },
   ],
 };
@@ -153,8 +160,8 @@ export function plateWindow(camera, aim, aspect = 1) {
   const halfY = camera.scale * 0.5;
   const dx = (aim?.x ?? camera.centerX) - camera.centerX;
   const dy = (aim?.y ?? camera.centerY) - camera.centerY;
-  const shiftX = Math.max(-halfX * 0.22, Math.min(halfX * 0.22, dx));
-  const shiftY = Math.max(-halfY * 0.22, Math.min(halfY * 0.22, dy));
+  const shiftX = Math.max(-halfX * 0.4, Math.min(halfX * 0.4, dx));
+  const shiftY = Math.max(-halfY * 0.4, Math.min(halfY * 0.4, dy));
   return {
     centerX: camera.centerX + shiftX,
     centerY: camera.centerY + shiftY,
@@ -170,7 +177,9 @@ export function clampViewToPlate(plate, view, aspect = 1) {
   const fullX = plate.scale * plateAspect;
   const fullY = plate.scale;
   const maxScale = Math.min(fullY, fullX / safeAspect);
-  const scale = Math.min(view.scale, maxScale);
+  let scale = Math.min(view.scale, maxScale);
+  const minScale = Math.min(maxScale, fullY / 2);
+  if (scale < minScale) scale = minScale;
   const camX = scale * safeAspect;
   const camY = scale;
   const insetX = Math.min(fullX * 0.012, Math.max(0, (fullX - camX) / 2));
@@ -200,12 +209,12 @@ export function plateHasRoom(plate, view, aspect = 1) {
   return marginX > camHalfX * 0.12 && marginY > camHalfY * 0.12;
 }
 
-/** Zoom factor that spends the plate's spare scale over one render. */
+/** Zoom factor for one frame. Brisk by default, and only slower when the last plate was too slow to keep up. */
 export function zoomStepForPlate(room, durationMs, frameMs = 16.7) {
-  const span = Number.isFinite(room) && room > 1.02 ? room : 1.08;
-  const frames = Math.max(8, (Number(durationMs) > 0 ? durationMs : 2400) / Math.max(8, frameMs));
-  const step = Math.pow(span * 0.92, 1 / frames);
-  return Math.min(AUTO_ZOOM_STEP, Math.max(1.0003, step));
+  const span = Number.isFinite(room) && room > 1.02 ? room : PLATE_SCALE;
+  const frames = Math.max(8, (Number(durationMs) > 0 ? durationMs : 480) / Math.max(8, frameMs));
+  const matched = Math.pow(span, 1 / frames);
+  return Math.min(AUTO_ZOOM_STEP, Math.max(1.006, matched));
 }
 
 /** Pan speed that crosses the spare plate room over the same render, and no faster. */
@@ -215,11 +224,11 @@ export function glidePull(gap, room, frames) {
   return Math.min(AUTO_ZOOM_PULL, (room / steps) / gap);
 }
 
-export function rasterSize(width, height, dpr = 1, sharp = false) {
+export function rasterSize(width, height, dpr = 1, sharp = false, longEdge = 0) {
   const ratio = Math.min(Math.max(Number(dpr) || 1, 1), 2);
   let pixelW = Math.max(1, Math.floor(width * ratio));
   let pixelH = Math.max(1, Math.floor(height * ratio));
-  const cap = sharp ? SHARP_RASTER_EDGE : DRAW_RASTER_EDGE;
+  const cap = longEdge > 0 ? longEdge : sharp ? SHARP_RASTER_EDGE : DRAW_RASTER_EDGE;
   const edge = Math.max(pixelW, pixelH);
   if (edge > cap) {
     const fit = cap / edge;

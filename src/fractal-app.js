@@ -14,7 +14,7 @@ import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
   AUTO_ZOOM_PULL,
   AUTO_ZOOM_STEP,
-  NAUTILUS,
+  AUTO_ZOOM_RASTER_EDGE,
   autoZoomIterations,
   boundsMagnification,
   clampViewToPlate,
@@ -24,13 +24,11 @@ import {
   escapeBlitRect,
   escapeMagnification,
   escapeWindow,
-  glidePull,
   iterationCap,
   levelBlend,
   mapPointsInto,
   panBounds,
   panEscape,
-  plateHasRoom,
   plateWindow,
   pointBudget,
   rasterSize,
@@ -126,7 +124,7 @@ const state = {
   shownCap: 0,
   autoZoom: false,
   zoomPatternId: "seahorse",
-  plateMs: 2400,
+  plateMs: 480,
   autoToken: 0,
   cursorParam: null,
   frozenParam: null,
@@ -1327,6 +1325,7 @@ function startAutoZoom() {
   }
   state.autoZoom = true;
   state.exploring = false;
+  state.zoomStamp = performance.now();
   const token = ++state.autoToken;
   state.exploreToken += 1;
   const tick = () => {
@@ -1346,14 +1345,16 @@ function stepAutoZoom(token) {
     const detail = state.zoomTarget || { x: state.view.centerX, y: state.view.centerY, score: 0 };
     const steered = steerZoomTarget(detail, state.view, {
       anchor: pattern && Number.isFinite(pattern.x) ? pattern : null,
-      bias: state.pointerBias,
+      bias: pattern?.bias || state.pointerBias,
       aspect,
     });
-    const room = Math.max(0, state.snapshotView.scale - state.view.scale) * 0.5;
-    const gap = Math.hypot(steered.x - state.view.centerX, steered.y - state.view.centerY);
-    const frames = Math.max(8, state.plateMs / 16.7);
-    const step = zoomStepForPlate(state.snapshotView.scale / state.view.scale, state.plateMs);
-    const eased = easeZoom(state.view, steered, step, glidePull(gap, room, frames));
+    const now = performance.now();
+    const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
+    state.zoomStamp = now;
+    const frames = elapsed / 16.7;
+    const step = zoomStepForPlate(state.snapshotView.scale / state.view.scale, state.plateMs) ** frames;
+    const pull = 1 - (1 - AUTO_ZOOM_PULL) ** frames;
+    const eased = easeZoom(state.view, steered, step, pull);
     state.view = clampViewToPlate(state.snapshotView, eased, aspect);
   }
   ensureAutoJob(token, box);
@@ -1365,18 +1366,18 @@ function stepAutoZoom(token) {
 function ensureAutoJob(token, box) {
   if (state.autoJob && state.autoJob.token === token && !state.autoJob.done) return;
   const aspect = box.width / Math.max(1, box.height);
-  if (plateHasRoom(state.snapshotView, state.view, aspect)) return;
   const pattern = currentPattern();
   const aim = steerZoomTarget(
     state.zoomTarget || { x: state.view.centerX, y: state.view.centerY, score: 0 },
     state.view,
     {
       anchor: pattern && Number.isFinite(pattern.x) ? pattern : null,
+      bias: pattern?.bias || state.pointerBias,
       aspect,
     },
   );
   const cover = plateWindow(state.view, aim, aspect);
-  const raster = rasterSize(box.width, box.height, box.dpr, true);
+  const raster = rasterSize(box.width, box.height, box.dpr, true, AUTO_ZOOM_RASTER_EDGE);
   const cap = autoZoomIterations(state.baseDepth || depthValue(), currentMagnification());
   const view = { ...cover, flipY: Boolean(state.view.flipY) };
   const job = renderJob(view);
@@ -1401,7 +1402,7 @@ function ensureAutoJob(token, box) {
 function pumpAutoJob(token) {
   const job = state.autoJob;
   if (!job || job.token !== token || job.done) return;
-  const rows = Math.max(1, Math.ceil(job.raster.height / 8));
+  const rows = Math.max(1, Math.ceil(job.raster.height / 3));
   const count = Math.min(rows, job.raster.height - job.row);
   if (count <= 0) return;
   const band = escapeBand(

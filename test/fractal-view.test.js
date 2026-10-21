@@ -170,7 +170,7 @@ test("an auto-zoom plate covers the camera and a camera cannot leave it", () => 
   const camera = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
   const plate = plateWindow(camera, { x: NAUTILUS.x, y: NAUTILUS.y }, 1.6);
   assert.ok(plate.scale > camera.scale);
-  assert.ok(plate.scale <= camera.scale * 1.4);
+  assert.ok(plate.scale <= camera.scale * 1.7);
   const halfY = plate.scale / 2;
   const halfX = plate.scale * 1.6 / 2;
   assert.ok(Math.abs(camera.centerX - plate.centerX) + camera.scale * 1.6 / 2 < halfX);
@@ -184,19 +184,21 @@ test("an auto-zoom plate covers the camera and a camera cannot leave it", () => 
   assert.equal(plateHasRoom(camera, camera, 1.6), false);
 });
 
-test("auto zoom speed stretches one plate across the time it takes to draw the next", () => {
-  const gentle = zoomStepForPlate(1.38, 4000, 16.7);
-  const brisk = zoomStepForPlate(1.38, 400, 16.7);
-  assert.ok(gentle > 1);
-  assert.ok(gentle < brisk);
+test("auto zoom doubles about once a second", () => {
+  const gentle = zoomStepForPlate(1.65, 4000, 16.7);
+  const brisk = zoomStepForPlate(1.65, 300, 16.7);
+  assert.ok(gentle >= 1.006);
+  assert.ok(brisk > gentle);
   assert.ok(brisk <= AUTO_ZOOM_STEP);
-  let scale = 1.38;
-  const frames = Math.round(4000 / 16.7);
-  for (let i = 0; i < frames; i += 1) scale /= gentle;
-  assert.ok(scale > 1);
-  const pull = glidePull(4, 0.2, frames);
-  assert.ok(pull > 0);
-  assert.ok(pull * frames * 4 <= 0.2 + 1e-9);
+  const mag = AUTO_ZOOM_STEP ** 60;
+  assert.ok(mag > 1.8);
+  assert.ok(mag < 2.6);
+  let view = { centerX: 0, centerY: 0, scale: 2, flipY: false };
+  for (let i = 0; i < 60; i += 1) {
+    view = easeZoom(view, { x: 1, y: 1 }, AUTO_ZOOM_STEP, AUTO_ZOOM_PULL);
+  }
+  assert.ok(2 / view.scale > 1.8);
+  assert.ok(view.centerX > 0.5);
 });
 
 test("each reactive fractal offers a choice of zoom patterns", () => {
@@ -208,20 +210,18 @@ test("each reactive fractal offers a choice of zoom patterns", () => {
   const seahorse = mandelbrot.find((pattern) => pattern.id === "seahorse");
   const mini = mandelbrot.find((pattern) => pattern.id === "mini");
   assert.ok(Math.hypot(seahorse.x - mini.x, seahorse.y - mini.y) > 0.5);
+  assert.ok(zoomPatterns("julia").length >= 2);
+  assert.ok(zoomPatterns("julia").some((pattern) => pattern.bias));
   assert.ok(zoomPatterns("burning").length >= 2);
-  assert.ok(zoomPatterns("newton").some((pattern) => pattern.name === "Pinch"));
+  assert.ok(zoomPatterns("newton").some((pattern) => pattern.name === "Triple point"));
   assert.equal(zoomPatterns("koch").length, 0);
 });
 
 test("auto zoom creeps so the picture can keep up", () => {
-  assert.ok(AUTO_ZOOM_STEP <= 1.003);
-  assert.ok(AUTO_ZOOM_PULL <= 0.02);
-  let view = { centerX: 0, centerY: 0, scale: 2, flipY: false };
-  for (let i = 0; i < 60; i += 1) {
-    view = easeZoom(view, { x: 1, y: 1 }, AUTO_ZOOM_STEP, AUTO_ZOOM_PULL);
-  }
-  assert.ok(2 / view.scale < 1.2);
-  assert.ok(view.centerX < 0.7);
+  assert.ok(AUTO_ZOOM_STEP >= 1.01);
+  assert.ok(AUTO_ZOOM_STEP <= 1.02);
+  assert.ok(AUTO_ZOOM_PULL >= 0.04);
+  assert.ok(AUTO_ZOOM_PULL <= 0.08);
 });
 
 test("a finished escape picture is sampled at 4K", () => {
@@ -230,6 +230,8 @@ test("a finished escape picture is sampled at 4K", () => {
   const sharp = rasterSize(900, 520, 1, true);
   assert.equal(Math.max(sharp.width, sharp.height), SHARP_RASTER_EDGE);
   assert.equal(SHARP_RASTER_EDGE, 3840);
+  const moving = rasterSize(900, 520, 1, true, 1920);
+  assert.equal(Math.max(moving.width, moving.height), 1920);
 });
 
 test("a wheel notch is a small zoom in every delta mode", () => {
