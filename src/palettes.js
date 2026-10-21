@@ -71,31 +71,55 @@ export function paintEscape(
   paletteById(paletteId);
   const data = new Uint8ClampedArray(width * height * 4);
   const limit = Math.max(0, Math.min(height, rowLimit));
+  const max = Math.max(1, shownIter);
+  const span = max + 1;
+  const lut = new Uint8ClampedArray(4 * span * 3);
+  for (let iter = 0; iter < span; iter += 1) {
+    writeLut(lut, span, 3, iter, colorSample(paletteId, iter, shownIter, -1));
+    for (let basin = 0; basin < 3; basin += 1) {
+      writeLut(lut, span, basin, iter, colorSample(paletteId, iter, shownIter, basin));
+    }
+  }
+  const revealing = revealIter != null;
   for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    const visible = y < limit;
     for (let x = 0; x < width; x += 1) {
-      const index = y * width + x;
+      const index = row + x;
       const offset = index * 4;
-      let rgb = INSIDE;
-      if (y < limit) {
+      let slot = 3;
+      let iter = max;
+      if (visible) {
         const iteration = iterations[index];
         const basin = basins ? basins[index] : -1;
-        if (revealIter != null && iteration > revealIter) {
-          rgb = INSIDE;
-        } else if (revealIter != null) {
-          rgb = colorSample(paletteId, iteration, shownIter, basin);
+        if (revealing && iteration > revealIter) {
+          iter = max;
+          slot = 3;
+        } else if (!revealing && iteration > shownIter) {
+          iter = shownIter > max ? max : shownIter;
+          if (iter < 0) iter = 0;
+          slot = 3;
         } else {
-          const shown = iteration > shownIter ? shownIter : iteration;
-          const shownBasin = iteration > shownIter ? -1 : basin;
-          rgb = colorSample(paletteId, shown, shownIter, shownBasin);
+          iter = iteration > max ? max : iteration;
+          if (iter < 0) iter = 0;
+          slot = basin >= 0 ? ((basin % 3) + 3) % 3 : 3;
         }
       }
-      data[offset] = rgb[0];
-      data[offset + 1] = rgb[1];
-      data[offset + 2] = rgb[2];
+      const sample = (slot * span + iter) * 3;
+      data[offset] = lut[sample];
+      data[offset + 1] = lut[sample + 1];
+      data[offset + 2] = lut[sample + 2];
       data[offset + 3] = 255;
     }
   }
   return data;
+}
+
+function writeLut(lut, span, slot, iter, rgb) {
+  const offset = (slot * span + iter) * 3;
+  lut[offset] = rgb[0];
+  lut[offset + 1] = rgb[1];
+  lut[offset + 2] = rgb[2];
 }
 
 export function fitTransform(bounds, width, height, pad = 16) {

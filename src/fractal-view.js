@@ -3,6 +3,18 @@ import { planePoint } from "./fractals.js";
 /** Matches the padding drawPaths, drawTriangles, and drawPoints use. */
 export const FIT_PAD = 18;
 
+/** Long edge while a fractal is still being drawn. */
+export const DRAW_RASTER_EDGE = 960;
+
+/** Long edge of a finished, zoomed, or reactive picture. 3840 is 4K. */
+export const SHARP_RASTER_EDGE = 3840;
+
+/** Magnification per auto-zoom frame. A second of frames grows the view by less than 20%. */
+export const AUTO_ZOOM_STEP = 1.0024;
+
+/** How much of the remaining gap to the target is closed each auto-zoom frame. */
+export const AUTO_ZOOM_PULL = 0.012;
+
 const RATIOS = {
   koch: 3,
   sierpinski: 2,
@@ -94,15 +106,88 @@ export function steerZoomTarget(detail, view, options = {}) {
   return { x, y, score: detail.score || 0 };
 }
 
-export function easeZoom(view, target, factor = 1.012, pull = 0.06) {
-  const zoom = Number.isFinite(factor) && factor > 1 ? factor : 1.012;
-  const t = Number.isFinite(pull) ? Math.min(1, Math.max(0, pull)) : 0.06;
+export function easeZoom(view, target, factor = AUTO_ZOOM_STEP, pull = AUTO_ZOOM_PULL) {
+  const zoom = Number.isFinite(factor) && factor > 1 ? factor : AUTO_ZOOM_STEP;
+  const t = Number.isFinite(pull) ? Math.min(1, Math.max(0, pull)) : AUTO_ZOOM_PULL;
   return {
     ...view,
     centerX: view.centerX + (target.x - view.centerX) * t,
     centerY: view.centerY + (target.y - view.centerY) * t,
     scale: Math.max(5e-14, view.scale / zoom),
   };
+}
+
+export function rasterSize(width, height, dpr = 1, sharp = false) {
+  const ratio = Math.min(Math.max(Number(dpr) || 1, 1), 2);
+  let pixelW = Math.max(1, Math.floor(width * ratio));
+  let pixelH = Math.max(1, Math.floor(height * ratio));
+  const cap = sharp ? SHARP_RASTER_EDGE : DRAW_RASTER_EDGE;
+  const edge = Math.max(pixelW, pixelH);
+  if (edge > cap) {
+    const fit = cap / edge;
+    pixelW = Math.max(1, Math.floor(pixelW * fit));
+    pixelH = Math.max(1, Math.floor(pixelH * fit));
+  } else if (sharp && edge < cap) {
+    const grow = cap / edge;
+    pixelW = Math.max(1, Math.round(pixelW * grow));
+    pixelH = Math.max(1, Math.round(pixelH * grow));
+  }
+  return { width: pixelW, height: pixelH };
+}
+
+const WHEEL_GAIN = 0.0012;
+
+/** Pixel, line, and page wheel deltas become one modest zoom factor. */
+export function wheelZoomFactor(deltaY, deltaMode = 0) {
+  const dy = Number(deltaY);
+  if (!Number.isFinite(dy) || dy === 0) return 1;
+  const mode = deltaMode | 0;
+  const pixels = mode === 1 ? dy * 32 : mode === 2 ? dy * 800 : dy;
+  const clamped = Math.max(-180, Math.min(180, pixels));
+  return Math.exp(-clamped * WHEEL_GAIN);
+}
+
+/** Spend part of a pending zoom. One frame stays inside a fractal level. */
+export function easeFactor(pending, rate = 0.22) {
+  const safe = Number.isFinite(pending) && pending > 0 ? pending : 1;
+  if (Math.abs(Math.log(safe)) < 0.004) return { applied: safe, rest: 1 };
+  let applied = Math.exp(Math.log(safe) * rate);
+  const cap = 1.06;
+  if (applied > cap) applied = cap;
+  else if (applied < 1 / cap) applied = 1 / cap;
+  if ((safe > 1 && applied > safe) || (safe < 1 && applied < safe)) applied = safe;
+  return { applied, rest: safe / applied };
+}
+
+/** Where a finished escape plate is drawn so its world window matches `view`. */
+export function escapeBlitRect(plate, view, width, height) {
+  const plateW = Math.max(1, plate.width || width);
+  const plateH = Math.max(1, plate.height || height);
+  const spanY = plate.scale;
+  const spanX = spanY * (plateW / plateH);
+  const left = plate.centerX - spanX / 2;
+  const right = plate.centerX + spanX / 2;
+  const topY = plate.centerY + (plate.flipY ? -spanY / 2 : spanY / 2);
+  const botY = plate.centerY + (plate.flipY ? spanY / 2 : -spanY / 2);
+  const topLeft = worldToPixel(view, width, height, left, topY);
+  const bottomRight = worldToPixel(view, width, height, right, botY);
+  return {
+    x: topLeft.x,
+    y: topLeft.y,
+    w: bottomRight.x - topLeft.x,
+    h: bottomRight.y - topLeft.y,
+  };
+}
+
+/** Fractional progress toward the next generation, so a level change is a fade. */
+export function levelBlend(fractalId, magnification) {
+  const ratio = RATIOS[fractalId];
+  if (!ratio || !(magnification > 0)) return { extra: 0, fade: 0 };
+  const t = Math.log(Math.max(1, magnification)) / Math.log(ratio);
+  if (!Number.isFinite(t) || t <= 0) return { extra: 0, fade: 0 };
+  const extra = Math.floor(t + 1e-9);
+  const fade = Math.min(1, Math.max(0, t - extra));
+  return { extra, fade: fade < 1e-9 ? 0 : fade };
 }
 
 function pixelDetail(iterations, basins, width, height, x, y, maxIter, kind) {
@@ -210,6 +295,16 @@ export function mapPointsInto(points, native, home) {
     out[i + 1] = oy + (points[i + 1] - native.minY) * scale;
   }
   return out;
+}
+
+function worldToPixel(view, width, height, wx, wy) {
+  const spanY = view.scale;
+  const spanX = spanY * (width / Math.max(1, height));
+  const ny = (wy - view.centerY) / spanY;
+  return {
+    x: ((wx - view.centerX) / spanX + 0.5) * width,
+    y: view.flipY ? (ny + 0.5) * height : (0.5 - ny) * height,
+  };
 }
 
 function appliedFactor(magnification, factor) {
