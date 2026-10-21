@@ -3,7 +3,9 @@ import test from "node:test";
 import { planePoint } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
+  DRAW_RASTER_EDGE,
   FIT_PAD,
+  SHARP_RASTER_EDGE,
   boundsMagnification,
   escapeMagnification,
   iterationCap,
@@ -11,6 +13,7 @@ import {
   panBounds,
   panEscape,
   pointBudget,
+  rasterSize,
   recursionLevel,
   unproject,
   zoomBounds,
@@ -78,6 +81,17 @@ test("closer escape windows spend more iterations and ferns plot more points", (
   assert.equal(pointBudget(20000, 1, 80000), 20000);
   assert.equal(pointBudget(20000, 3, 80000), 60000);
   assert.equal(pointBudget(20000, 20, 80000), 80000);
+});
+
+test("a zoomed escape picture is sampled at screen resolution", () => {
+  const drawing = rasterSize(1200, 700, 2, false);
+  const sharp = rasterSize(1200, 700, 2, true);
+  assert.ok(Math.max(drawing.width, drawing.height) <= DRAW_RASTER_EDGE);
+  assert.equal(Math.max(sharp.width, sharp.height), SHARP_RASTER_EDGE);
+  assert.ok(sharp.width > drawing.width);
+  const frame = rasterSize(968, 625, 1, true);
+  assert.equal(frame.width, 968);
+  assert.equal(frame.height, 625);
 });
 
 test("a curve mapped into its own bounds stays put", () => {

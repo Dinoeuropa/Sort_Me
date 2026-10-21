@@ -10,6 +10,7 @@ import {
   panBounds,
   panEscape,
   pointBudget,
+  rasterSize,
   recursionLevel,
   zoomBounds,
   zoomEscape,
@@ -139,17 +140,9 @@ function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, number));
 }
 
-function rasterSize(width, height, dpr) {
-  const ratio = Math.min(dpr || 1, 2);
-  let pixelW = Math.max(1, Math.floor(width * ratio));
-  let pixelH = Math.max(1, Math.floor(height * ratio));
-  const edge = Math.max(pixelW, pixelH);
-  if (edge > 680) {
-    const fit = 680 / edge;
-    pixelW = Math.max(1, Math.floor(pixelW * fit));
-    pixelH = Math.max(1, Math.floor(pixelH * fit));
-  }
-  return { width: pixelW, height: pixelH };
+function escapeRaster(box) {
+  const sharp = state.finished || state.exploring || currentMagnification() > 1.02;
+  return rasterSize(box.width, box.height, box.dpr, sharp);
 }
 
 function viewBox() {
@@ -237,7 +230,10 @@ function renderChrome() {
     button.disabled = !canZoom;
   }
   canvas.classList.toggle("exploring", canZoom);
-  canvas.classList.toggle("pixelated", fractal.kind === "escape");
+  const box = viewBox();
+  const deviceW = box.width * box.dpr;
+  const upscaled = fractal.kind === "escape" && state.raster && state.raster.width + 1 < deviceW;
+  canvas.classList.toggle("pixelated", upscaled);
 }
 
 function paceLabel(fractal) {
@@ -335,7 +331,7 @@ function pathsOf(geometry) {
 
 function ensureEscape() {
   const box = viewBox();
-  const raster = rasterSize(box.width, box.height, box.dpr);
+  const raster = escapeRaster(box);
   if (
     state.raster &&
     state.iterations &&
@@ -408,7 +404,6 @@ function paintRaster() {
   const complete = state.nextRow >= state.raster.height;
   if (!complete && !state.exploring) return;
   if (state.revealIter <= 0 && !state.exploring) return;
-  canvas.classList.add("pixelated");
   if (canvas.width !== state.raster.width || canvas.height !== state.raster.height) {
     canvas.width = state.raster.width;
     canvas.height = state.raster.height;
@@ -818,7 +813,7 @@ function scheduleEscape() {
   state.exploring = true;
   renderChrome();
   const box = viewBox();
-  const raster = rasterSize(box.width, box.height, box.dpr);
+  const raster = rasterSize(box.width, box.height, box.dpr, true);
   const cap = exploredLevel();
   const preset = viewedPreset();
   const iterations = new Uint16Array(raster.width * raster.height);
@@ -1016,7 +1011,7 @@ new ResizeObserver(() => {
     return;
   }
   const box = viewBox();
-  const raster = rasterSize(box.width, box.height, box.dpr);
+  const raster = escapeRaster(box);
   if (state.raster && raster.width === state.raster.width && raster.height === state.raster.height) {
     paint();
     return;
