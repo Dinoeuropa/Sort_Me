@@ -407,6 +407,23 @@ canvas.exploring:active {
   cursor: grabbing;
 }
 
+.mode-badge {
+  position: absolute;
+  z-index: 1;
+  top: 0.7rem;
+  right: 0.8rem;
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(16, 14, 12, 0.82);
+  border: 1px solid var(--line);
+  color: var(--brass);
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  pointer-events: none;
+}
+
 .param {
   position: absolute;
   z-index: 1;

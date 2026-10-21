@@ -3,21 +3,29 @@ import test from "node:test";
 import { planePoint } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
-  NAUTILUS,
+  AUTO_ZOOM_PULL,
+  AUTO_ZOOM_STEP,
   FIT_PAD,
+  NAUTILUS,
+  SHARP_RASTER_EDGE,
   autoZoomIterations,
   boundsMagnification,
   detailTarget,
+  easeFactor,
   easeZoom,
+  escapeBlitRect,
   escapeMagnification,
   iterationCap,
+  levelBlend,
   mapPointsInto,
   panBounds,
   panEscape,
   pointBudget,
+  rasterSize,
   recursionLevel,
   steerZoomTarget,
   unproject,
+  wheelZoomFactor,
   zoomBounds,
   zoomEscape,
 } from "../src/fractal-view.js";
@@ -150,6 +158,81 @@ test("each auto zoom step magnifies and eases toward the target", () => {
   assert.ok(Math.abs(view.scale / next.scale - 1.02) < 1e-9);
   assert.ok(next.centerX > view.centerX);
   assert.ok(next.centerY < view.centerY);
+});
+
+test("auto zoom creeps so the picture can keep up", () => {
+  assert.ok(AUTO_ZOOM_STEP <= 1.003);
+  assert.ok(AUTO_ZOOM_PULL <= 0.02);
+  let view = { centerX: 0, centerY: 0, scale: 2, flipY: false };
+  for (let i = 0; i < 60; i += 1) {
+    view = easeZoom(view, { x: 1, y: 1 }, AUTO_ZOOM_STEP, AUTO_ZOOM_PULL);
+  }
+  assert.ok(2 / view.scale < 1.2);
+  assert.ok(view.centerX < 0.7);
+});
+
+test("a finished escape picture is sampled at 4K", () => {
+  const drawing = rasterSize(1400, 800, 2, false);
+  assert.ok(Math.max(drawing.width, drawing.height) <= 960);
+  const sharp = rasterSize(900, 520, 1, true);
+  assert.equal(Math.max(sharp.width, sharp.height), SHARP_RASTER_EDGE);
+  assert.equal(SHARP_RASTER_EDGE, 3840);
+});
+
+test("a wheel notch is a small zoom in every delta mode", () => {
+  const pixel = wheelZoomFactor(-100, 0);
+  assert.ok(pixel > 1);
+  assert.ok(pixel < 1.5);
+  assert.ok(wheelZoomFactor(-3, 1) > wheelZoomFactor(-3, 0));
+  assert.ok(wheelZoomFactor(-1, 2) < 2);
+  assert.ok(wheelZoomFactor(-100000, 0) < 2);
+  assert.ok(Math.abs(wheelZoomFactor(0, 0) - 1) < 1e-12);
+  assert.ok(wheelZoomFactor(100, 0) < 1);
+});
+
+test("easing spends part of a pending zoom and keeps the product", () => {
+  const first = easeFactor(9);
+  assert.ok(first.applied > 1);
+  assert.ok(first.applied <= 1.06);
+  assert.ok(Math.abs(first.applied * first.rest - 9) < 1e-9);
+  let rest = 9;
+  let product = 1;
+  for (let i = 0; i < 80; i += 1) {
+    const step = easeFactor(rest);
+    product *= step.applied;
+    rest = step.rest;
+    if (rest === 1) break;
+  }
+  assert.equal(rest, 1);
+  assert.ok(Math.abs(product - 9) < 1e-6);
+});
+
+test("a scaled escape plate stays anchored under the cursor", () => {
+  const width = 200;
+  const height = 100;
+  const plate = { ...homeEscape, width, height };
+  const same = escapeBlitRect(plate, homeEscape, width, height);
+  assert.ok(Math.abs(same.x) < 1e-6);
+  assert.ok(Math.abs(same.w - width) < 1e-6);
+  const view = zoomEscape(homeEscape, 2, 30, 80, width, height, homeEscape.scale);
+  const rect = escapeBlitRect(plate, view, width, height);
+  const x = rect.x + (30 / width) * rect.w;
+  const y = rect.y + (80 / height) * rect.h;
+  assert.ok(Math.abs(x - 30) < 1e-6);
+  assert.ok(Math.abs(y - 80) < 1e-6);
+});
+
+test("the next fractal level fades in across its scale factor", () => {
+  const mid = levelBlend("koch", Math.sqrt(3));
+  assert.equal(mid.extra, 0);
+  assert.ok(Math.abs(mid.fade - 0.5) < 1e-9);
+  const edge = levelBlend("koch", 3);
+  assert.equal(edge.extra, 1);
+  assert.ok(edge.fade < 1e-9);
+  const before = levelBlend("koch", 3 * 0.999);
+  assert.equal(before.extra, 0);
+  assert.ok(before.fade > 0.99);
+  assert.deepEqual(levelBlend("mandelbrot", 4), { extra: 0, fade: 0 });
 });
 
 test("a curve mapped into its own bounds stays put", () => {

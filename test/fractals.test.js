@@ -156,6 +156,15 @@ test("a Newton cursor bends z^3-1 and leaves the plain roots alone", () => {
   assert.equal(changed, true);
 });
 
+test("a burning-ship cursor folds z around a chosen c", () => {
+  const plain = escapeValue("burning", {}, 0.3, -0.2, 24);
+  const aimed = escapeValue("burning", { cx: -0.6, cy: 0.15 }, 0.3, -0.2, 24);
+  assert.notDeepEqual(aimed, plain);
+  const origin = escapeValue("burning", { cx: 0, cy: 0 }, 0, 0, 12);
+  const classic = escapeValue("burning", {}, 0, 0, 12);
+  assert.deepEqual(origin, classic);
+});
+
 test("escape rasters reject non-escape fractals and empty bands", () => {
   assert.throws(() => escapeBand("koch", {}, 2, 2, 4, 0, 1), /escape/i);
   const band = escapeBand("mandelbrot", { centerX: 0, centerY: 0, scale: 3 }, 4, 4, 5, 4, 3);

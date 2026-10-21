@@ -90,7 +90,7 @@ export const FRACTALS = [
     kind: "escape",
     latex: "z_{n+1}=(|\\operatorname{Re} z_n|+i|\\operatorname{Im} z_n|)^2+c",
     blurb: "A Mandelbrot cousin that folds both axes before squaring.",
-    note: "Depth is the escape-time cap. The ship points up because the view is flipped.",
+    note: "Move the cursor to choose c. Depth is the escape-time cap. The ship points up because the view is flipped.",
     depthLabel: "Iterations",
     legend: ["Inside", "Early", "Late"],
     minDepth: 8,
@@ -267,7 +267,10 @@ export function escapeValue(fractalId, preset, zx, zy, maxIter) {
   const fractal = fractalById(fractalId);
   const cap = clampIter(maxIter);
   if (fractal.id === "julia") return julia(zx, zy, preset.cx || 0, preset.cy || 0, cap);
-  if (fractal.id === "burning") return burning(zx, zy, cap);
+  if (fractal.id === "burning") {
+    if ("cx" in preset || "cy" in preset) return burningJulia(zx, zy, preset.cx || 0, preset.cy || 0, cap);
+    return burning(zx, zy, cap);
+  }
   if (fractal.id === "newton") return newton(zx, zy, cap, preset.px || 0, preset.py || 0);
   if (fractal.id === "mandelbrot") return mandelbrot(zx, zy, cap);
   throw new Error(`${fractal.name} is not an escape-time fractal.`);
@@ -286,6 +289,11 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
   const spanY = preset.scale;
   const spanX = preset.scale * (width / height);
   const flip = Boolean(preset.flipY);
+  const cursorC = fractal.id === "burning" && ("cx" in preset || "cy" in preset);
+  const paramX = preset.cx || 0;
+  const paramY = preset.cy || 0;
+  const bendX = preset.px || 0;
+  const bendY = preset.py || 0;
   for (let row = 0; row < rows; row += 1) {
     const py = start + row;
     const ny = flip ? (py + 0.5) / height - 0.5 : 0.5 - (py + 0.5) / height;
@@ -293,9 +301,22 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
     const offset = row * width;
     for (let px = 0; px < width; px += 1) {
       const cx = preset.centerX + ((px + 0.5) / width - 0.5) * spanX;
-      const sample = escapeValue(fractal.id, preset, cx, cy, cap);
-      iterations[offset + px] = sample.iteration;
-      basins[offset + px] = sample.basin;
+      const index = offset + px;
+      if (fractal.id === "julia") {
+        iterations[index] = juliaIterations(cx, cy, paramX, paramY, cap);
+      } else if (fractal.id === "burning") {
+        iterations[index] = cursorC
+          ? juliaFoldIterations(cx, cy, paramX, paramY, cap)
+          : juliaFoldIterations(0, 0, cx, cy, cap);
+      } else if (fractal.id === "newton") {
+        const sample = bendX === 0 && bendY === 0
+          ? newtonPlain(cx, cy, cap)
+          : newton(cx, cy, cap, bendX, bendY);
+        iterations[index] = sample.iteration;
+        basins[index] = sample.basin;
+      } else {
+        iterations[index] = mandelbrotIterations(cx, cy, cap);
+      }
     }
   }
   return { iterations, basins };
@@ -362,6 +383,10 @@ function clampIter(maxIter) {
 }
 
 function mandelbrot(cx, cy, maxIter) {
+  return { iteration: mandelbrotIterations(cx, cy, maxIter), basin: -1 };
+}
+
+function mandelbrotIterations(cx, cy, maxIter) {
   let x = 0;
   let y = 0;
   let iter = 0;
@@ -371,10 +396,14 @@ function mandelbrot(cx, cy, maxIter) {
     x = next;
     iter += 1;
   }
-  return { iteration: iter, basin: -1 };
+  return iter;
 }
 
 function julia(zx, zy, cx, cy, maxIter) {
+  return { iteration: juliaIterations(zx, zy, cx, cy, maxIter), basin: -1 };
+}
+
+function juliaIterations(zx, zy, cx, cy, maxIter) {
   let x = zx;
   let y = zy;
   let iter = 0;
@@ -384,12 +413,20 @@ function julia(zx, zy, cx, cy, maxIter) {
     x = next;
     iter += 1;
   }
-  return { iteration: iter, basin: -1 };
+  return iter;
 }
 
 function burning(cx, cy, maxIter) {
-  let x = 0;
-  let y = 0;
+  return burningJulia(0, 0, cx, cy, maxIter);
+}
+
+function burningJulia(zx, zy, cx, cy, maxIter) {
+  return { iteration: juliaFoldIterations(zx, zy, cx, cy, maxIter), basin: -1 };
+}
+
+function juliaFoldIterations(zx, zy, cx, cy, maxIter) {
+  let x = zx;
+  let y = zy;
   let iter = 0;
   while (x * x + y * y <= 4 && iter < maxIter) {
     const ax = Math.abs(x);
@@ -399,7 +436,7 @@ function burning(cx, cy, maxIter) {
     x = next;
     iter += 1;
   }
-  return { iteration: iter, basin: -1 };
+  return iter;
 }
 
 function newton(zx, zy, maxIter, px = 0, py = 0) {
