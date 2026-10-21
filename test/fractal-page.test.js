@@ -34,6 +34,9 @@ test("the fractal page mirrors the sorting controls", () => {
   assert.match(fractals, /id="toggle"/);
   assert.match(fractals, /id="step"/);
   assert.match(fractals, /id="sound"/);
+  assert.match(fractals, /id="zoom-in"/);
+  assert.match(fractals, /id="zoom-out"/);
+  assert.match(fractals, /id="zoom-reset"/);
   assert.match(fractals, /id="canvas"/);
   assert.match(fractals, /aria-label="Fractal visualization"/);
   assert.match(fractals, /id="viz-dock"/);
@@ -60,4 +63,15 @@ test("selecting a fractal waits for Draw", () => {
     fractalApp,
     /renderPresets\(\);\s*depthInput\.value = String\(currentFractal\(\)\.defaultDepth\);\s*arm\(\);/,
   );
+});
+
+test("a finished fractal can be dragged and zoomed", () => {
+  assert.match(fractalApp, /canvas.addEventListener\("pointerdown"/);
+  assert.match(fractalApp, /canvas.addEventListener\("pointermove"/);
+  assert.match(fractalApp, /canvas.addEventListener\("wheel"/);
+  assert.match(fractalApp, /pointerType === "mouse"/);
+  assert.match(fractalApp, /recursionLevel/);
+  assert.match(fractalApp, /scheduleEscape/);
+  assert.match(css, /touch-action:\s*none/);
+  assert.match(fractals, /drag or pinch to move and scroll to zoom/);
 });

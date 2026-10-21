@@ -393,6 +393,15 @@ canvas {
   display: block;
 }
 
+canvas.exploring {
+  cursor: grab;
+  touch-action: none;
+}
+
+canvas.exploring:active {
+  cursor: grabbing;
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;

@@ -24,6 +24,7 @@
           <h1>Sort Me</h1>
           <p class="lede">
             Pick a fractal and a coloring, then watch it built in the order the definition produces it.
+            Once it is drawn, drag or pinch to move and scroll to zoom. Closer views draw the next level.
             Sound follows the pen. Space plays, and the right arrow steps.
           </p>
         </header>
@@ -82,6 +83,11 @@
           </label>
           <button type="button" id="dock-toggle">Pause</button>
         </aside>
+        <div class="row" id="explore" role="group" aria-label="Zoom the drawn fractal">
+          <button type="button" id="zoom-in" disabled>Zoom in</button>
+          <button type="button" id="zoom-out" disabled>Zoom out</button>
+          <button type="button" id="zoom-reset" disabled>Reset</button>
+        </div>
         <ul class="legend">
           <li><i class="swatch inside"></i> <span id="legend-a">Inside</span></li>
           <li><i class="swatch early"></i> <span id="legend-b">Early</span></li>
