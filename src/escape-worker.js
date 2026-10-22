@@ -1,9 +1,10 @@
-import { escapeBand, escapeFloor } from "./fractals.js";
+import { escapeBand, paletteRange } from "./fractals.js";
 import { paintEscape } from "./palettes.js";
 
 /** One horizontal band of an escape picture, already colored. */
 export function renderPart({ fractalId, preset, width, height, cap, y0, rows, paletteId }) {
   const band = escapeBand(fractalId, preset, width, height, cap, y0, rows);
+  const window = paletteRange(fractalId, preset, width, height, cap);
   const pixels = paintEscape(
     paletteId,
     band.iterations,
@@ -13,7 +14,8 @@ export function renderPart({ fractalId, preset, width, height, cap, y0, rows, pa
     cap,
     rows,
     cap,
-    escapeFloor(fractalId, preset, width, height, cap),
+    window.floor,
+    window.top,
   );
   return {
     iterations: band.iterations,

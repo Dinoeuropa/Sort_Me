@@ -1,4 +1,17 @@
-import { hasDeepCenter, perturbIterations, plateFloor, referenceOrbit, seriesSkip } from "./precision.js";
+import { paletteWindow } from "./palettes.js";
+import {
+  ddAdd,
+  ddJuliaBeta,
+  ddNewtonPole,
+  ddNewtonStart,
+  hasDeepCenter,
+  juliaReference,
+  perturbIterations,
+  referenceOrbit,
+  seriesSkip,
+  shipJuliaReference,
+  shipReference,
+} from "./precision.js";
 
 const NEWTON_ROOTS = [
   [1, 0],
@@ -291,8 +304,8 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
   const spanY = preset.scale;
   const spanX = preset.scale * (width / height);
   const flip = Boolean(preset.flipY);
-  if (fractal.id === "mandelbrot" && hasDeepCenter(preset)) {
-    perturbBand(preset, width, height, cap, start, rows, iterations, spanX, spanY, flip);
+  if (hasDeepCenter(preset)) {
+    deepBand(fractal.id, preset, width, height, cap, start, rows, iterations, basins, spanX, spanY, flip);
     return { iterations, basins };
   }
   const cursorC = fractal.id === "burning" && ("cx" in preset || "cy" in preset);
@@ -328,40 +341,115 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
   return { iterations, basins };
 }
 
-/**
- * The iteration a picture's coloring starts from. Zero except for a deep Mandelbrot plate, whose
- * pixels all escape near the cap and would otherwise share one pale shade.
- */
-export function escapeFloor(fractalId, preset, width, height, maxIter) {
-  if (fractalId !== "mandelbrot" || !hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return 0;
-  const cap = clampIter(maxIter);
-  const reference = referenceOrbit(preset.centerX, preset.centerXLo || 0, preset.centerY, preset.centerYLo || 0, cap);
-  return plateFloor(reference, preset.scale * (width / height), preset.scale, cap);
+/** Rows of a deep Newton plate are rendered in double-double for at most this many steps per pixel. */
+const NEWTON_DEEP_STEPS = 48;
+
+/** The reference orbit a deep plate's pixels are offsets from, at the plate's double-double center. */
+function deepReference(fractalId, preset, cap) {
+  const x = preset.centerX;
+  const xLo = preset.centerXLo || 0;
+  const y = preset.centerY;
+  const yLo = preset.centerYLo || 0;
+  if (fractalId === "mandelbrot") return referenceOrbit(x, xLo, y, yLo, cap);
+  if (fractalId === "julia") return juliaReference(x, xLo, y, yLo, preset.cx || 0, preset.cy || 0, cap);
+  if (fractalId === "burning") {
+    if ("cx" in preset || "cy" in preset) return shipJuliaReference(x, xLo, y, yLo, preset.cx || 0, preset.cy || 0, cap);
+    return shipReference(x, xLo, y, yLo, cap);
+  }
+  return null;
 }
 
 /**
- * Mandelbrot pixels as offsets from a reference orbit at the plate's double-double center.
- * Pixel offsets are small enough for a plain double, so the plate keeps its detail far below
- * the depth at which absolute coordinates run out of digits.
+ * A deep Newton pixel: the start is formed in double-double and iterated that way while plain
+ * doubles could not tell it from its neighbors, then the ordinary method finishes.
  */
-function perturbBand(preset, width, height, cap, start, rows, iterations, spanX, spanY, flip) {
-  const reference = referenceOrbit(preset.centerX, preset.centerXLo || 0, preset.centerY, preset.centerYLo || 0, cap);
+function newtonDeep(preset, dx, dy, cap, px, py, pixel) {
+  const [xhi, xlo] = ddAdd(preset.centerX, preset.centerXLo || 0, dx, 0);
+  const [yhi, ylo] = ddAdd(preset.centerY, preset.centerYLo || 0, dy, 0);
+  const begin = ddNewtonStart(xhi, xlo, yhi, ylo, px, py, pixel, Math.min(cap, NEWTON_DEEP_STEPS));
+  const rest = px === 0 && py === 0
+    ? newtonPlain(begin.x, begin.y, cap - begin.steps)
+    : newton(begin.x, begin.y, cap - begin.steps, px, py);
+  return { iteration: rest.iteration + begin.steps, basin: rest.basin };
+}
+
+/** The escape time, or Newton sample, at a plain-double offset from a deep plate's center. */
+function deepSampler(fractalId, preset, cap, spanX, spanY, width) {
+  if (fractalId === "newton") {
+    const px = preset.px || 0;
+    const py = preset.py || 0;
+    const pixel = spanX / Math.max(1, width);
+    return (dx, dy) => newtonDeep(preset, dx, dy, cap, px, py, pixel);
+  }
+  const reference = deepReference(fractalId, preset, cap);
   const skip = seriesSkip(reference, Math.hypot(spanX, spanY) / 2);
+  return (dx, dy) => perturbIterations(reference, dx, dy, cap, skip);
+}
+
+/**
+ * Pixels of a deep plate as offsets from its double-double center. Offsets are small enough for a
+ * plain double, so the plate keeps its detail far below the depth at which absolute coordinates
+ * run out of digits.
+ */
+function deepBand(fractalId, preset, width, height, cap, start, rows, iterations, basins, spanX, spanY, flip) {
+  const sample = deepSampler(fractalId, preset, cap, spanX, spanY, width);
+  const basinColored = fractalId === "newton";
   for (let row = 0; row < rows; row += 1) {
     const py = start + row;
     const ny = flip ? (py + 0.5) / height - 0.5 : 0.5 - (py + 0.5) / height;
-    const dcy = ny * spanY;
+    const dy = ny * spanY;
     const offset = row * width;
     for (let px = 0; px < width; px += 1) {
-      const dcx = ((px + 0.5) / width - 0.5) * spanX;
-      iterations[offset + px] = perturbIterations(reference, dcx, dcy, cap, skip);
+      const dx = ((px + 0.5) / width - 0.5) * spanX;
+      const index = offset + px;
+      if (basinColored) {
+        const value = sample(dx, dy);
+        iterations[index] = value.iteration;
+        basins[index] = value.basin;
+      } else {
+        iterations[index] = sample(dx, dy);
+      }
     }
   }
 }
 
-const ANCHOR_CAP = 2400;
+let cachedWindow = null;
 
-const MINI_SHIP = { x: -1.86113, y: -0.00048 };
+/**
+ * The range of iterations a plate's palette is spread over. The whole cap for an ordinary plate,
+ * which leaves its colors as they are. A deep plate's pixels all land within a few percent of one
+ * another, far below the cap for a Julia set or Newton's method and just under it for the
+ * Mandelbrot set, so there the palette is fitted to what the plate holds, judged from a grid of
+ * samples. The fit comes in between a tenth and a thousandth of the full view, so a dive begins
+ * colored exactly like the picture it left. Every band of a plate asks, so the last answer is kept.
+ */
+export function paletteRange(fractalId, preset, width, height, maxIter) {
+  const cap = clampIter(maxIter);
+  if (!hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return { floor: 0, top: cap };
+  const depth = Math.min(1, Math.max(0, (-Math.log10(preset.scale) - 1) / 2));
+  if (!(depth > 0)) return { floor: 0, top: cap };
+  const key = [
+    fractalId, preset.centerX, preset.centerXLo, preset.centerY, preset.centerYLo, preset.scale,
+    preset.cx, preset.cy, preset.px, preset.py, width, height, cap,
+  ].join(":");
+  if (cachedWindow && cachedWindow.key === key) return cachedWindow.window;
+  const spanY = preset.scale;
+  const spanX = preset.scale * (width / height);
+  const sample = deepSampler(fractalId, preset, cap, spanX, spanY, width);
+  const cells = 12;
+  const samples = [];
+  for (let j = 0; j < cells; j += 1) {
+    for (let i = 0; i < cells; i += 1) {
+      const value = sample(((i + 0.5) / cells - 0.5) * spanX, ((j + 0.5) / cells - 0.5) * spanY);
+      samples.push(fractalId === "newton" ? value.iteration : value);
+    }
+  }
+  const window = paletteWindow(samples, cap, depth);
+  cachedWindow = { key, window };
+  return window;
+}
+
+const ANCHOR_CAP = 2400;
 
 /**
  * The center of a double spiral in the seahorse valley: a Misiurewicz point whose critical orbit
@@ -375,6 +463,20 @@ const SEAHORSE_SPIRAL = {
   xLo: 1.6423472316984958e-17,
   y: 0.13172167175968114,
   yLo: 1.0660999617601176e-17,
+};
+
+/**
+ * A point on the edge of the burning ship beside the small ship near −1.861: the critical orbit
+ * lands on a repelling cycle of period 5 after 26 steps. The picture turns and shrinks onto it by
+ * the cycle's multiplier, so the structure holds at every depth and the escape time rises by
+ * about six per doubling. Solved to double-double by Newton's method on the fold map:
+ * about −1.86152721876583997265194 − 0.00107475069499134205765i.
+ */
+const SHIP_SPIRAL = {
+  x: -1.86152721876584,
+  xLo: 2.7348055431868542e-17,
+  y: -0.001074750694991342,
+  yLo: -5.765019283232786e-20,
 };
 
 function boundaryClass(fractalId, preset, x, y, cap) {
@@ -434,41 +536,32 @@ export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CA
 }
 
 /**
- * The one point auto zoom dives toward for a fractal.
- * Mandelbrot dives into a spiral center in the seahorse valley, held to double-double precision,
- * and a Julia set into its repelling fixed point. Each is on the edge of the set, so a boundary
- * stays in the frame at every depth. The others search for an edge near a known feature.
+ * The one point auto zoom dives toward for a fractal, each held to double-double precision so the
+ * edge stays in the frame at every depth.
+ * Mandelbrot dives into a spiral center in the seahorse valley, a Julia set into its repelling
+ * fixed point, Newton's method into the pole where the three basins meet, and the burning ship
+ * into a spiral beside its small ship. A burning ship with c fixed by the cursor has no such
+ * point ready, so it searches for an edge near the middle of the picture in plain doubles.
  */
 export function autoZoomTarget(fractalId, preset) {
   if (fractalId === "mandelbrot") return { ...SEAHORSE_SPIRAL };
-  if (fractalId === "julia") {
-    const cx = preset.cx || 0;
-    const cy = preset.cy || 0;
-    const re = 1 - 4 * cx;
-    const im = -4 * cy;
-    const mag = Math.hypot(re, im);
-    const rootRe = Math.sqrt((mag + re) / 2);
-    const rootIm = (im < 0 ? -1 : 1) * Math.sqrt(Math.max(0, (mag - re) / 2));
-    return { x: (1 + rootRe) / 2, y: rootIm / 2 };
-  }
-  if (fractalId === "newton") {
-    return boundaryAnchor("newton", preset, { x: 0, y: 0 }, 0.3);
-  }
+  if (fractalId === "julia") return ddJuliaBeta(preset.cx || 0, preset.cy || 0);
+  if (fractalId === "newton") return ddNewtonPole(preset.px || 0, preset.py || 0);
   if ("cx" in preset || "cy" in preset) {
     return boundaryAnchor("burning", preset, { x: preset.centerX || 0, y: preset.centerY || 0 }, (preset.scale || 1) * 0.25);
   }
-  return boundaryAnchor("burning", preset, MINI_SHIP, 0.0008, ANCHOR_CAP);
+  return { ...SHIP_SPIRAL };
 }
 
 /**
- * How small a view auto zoom may reach for a fractal, as a multiple of the target's distance from the origin.
- * The Mandelbrot dive is drawn in double-double, so it runs until a plate pixel nears the 32nd digit.
- * Julia and Newton stop where a double can no longer tell pixels apart.
- * The burning ship breaks into dust a few thousand times in, so it turns back sooner than the rest.
+ * How small a view auto zoom may reach, as a multiple of the target's distance from the origin.
+ * A dive onto a double-double target is drawn in double-double, so it runs until a plate pixel
+ * nears the 32nd digit. A burning ship with c from the cursor dives toward a plain-double edge
+ * that breaks into dust a few thousand times in, so it turns back sooner.
  */
-export function autoZoomFloor(fractalId) {
-  if (fractalId === "mandelbrot") return 1e-28;
-  return fractalId === "burning" ? 2.5e-5 : 5e-12;
+export function autoZoomFloor(fractalId, preset = {}) {
+  if (fractalId === "burning" && ("cx" in preset || "cy" in preset)) return 2.5e-5;
+  return 1e-28;
 }
 
 /** How the picture is produced: iterations, generations, a path, or the chaos game. */
@@ -602,7 +695,7 @@ function newton(zx, zy, maxIter, px = 0, py = 0) {
     const dx = 3 * x2 + px;
     const dy = 3 * y2 + py;
     const denom = dx * dx + dy * dy;
-    if (denom < 1e-14) return { iteration: iter + 1, basin: nearestBasin(x, y) };
+    if (!(denom > 0) || denom === Infinity) return { iteration: iter + 1, basin: nearestBasin(x, y) };
     const stepX = (fx * dx + fy * dy) / denom;
     const stepY = (fy * dx - fx * dy) / denom;
     x -= stepX;
@@ -629,7 +722,7 @@ function newtonPlain(zx, zy, maxIter) {
     const dx = 3 * x2;
     const dy = 3 * y2;
     const denom = dx * dx + dy * dy;
-    if (denom < 1e-14) return { iteration: iter + 1, basin: nearestBasin(x, y) };
+    if (!(denom > 0) || denom === Infinity) return { iteration: iter + 1, basin: nearestBasin(x, y) };
     x -= (fx * dx + fy * dy) / denom;
     y -= (fy * dx - fx * dy) / denom;
   }

@@ -7,7 +7,7 @@ import {
   constructionOrder,
   cursorParameter,
   escapeBand,
-  escapeFloor,
+  paletteRange,
   fractalById,
   iterateIfs,
   newtonCursor,
@@ -1274,6 +1274,22 @@ function scheduleEscape(quick = false) {
   });
 }
 
+function recolorPlate(result, width, height) {
+  const window = paletteRange(result.fractalId, result.preset, width, height, result.cap);
+  return paintEscape(
+    state.paletteId,
+    result.iterations,
+    result.basins,
+    width,
+    height,
+    result.cap,
+    height,
+    result.cap,
+    window.floor,
+    window.top,
+  );
+}
+
 function applyEscapeResult(result) {
   const width = result.width;
   const height = result.height;
@@ -1291,17 +1307,7 @@ function applyEscapeResult(result) {
   state.cursorRedraw = false;
   const pixels = result.paletteId === state.paletteId
     ? result.pixels
-    : paintEscape(
-      state.paletteId,
-      result.iterations,
-      result.basins,
-      width,
-      height,
-      result.cap,
-      height,
-      result.cap,
-      escapeFloor(result.fractalId, result.preset, width, height, result.cap),
-    );
+    : recolorPlate(result, width, height);
   const current = pictureView();
   const box = viewBox();
   const aspect = box.width / Math.max(1, box.height);
@@ -1416,7 +1422,7 @@ function startAutoZoom() {
   state.autoDeep = null;
   state.autoZoom = true;
   const job = renderJob(state.view);
-  state.autoPath = autoZoomPath(state.view, autoZoomTarget(job.fractalId, job.preset), autoZoomFloor(job.fractalId));
+  state.autoPath = autoZoomPath(state.view, autoZoomTarget(job.fractalId, job.preset), autoZoomFloor(job.fractalId, job.preset));
   state.autoOctave = 0;
   state.autoFade = null;
   state.autoRampAt = null;
