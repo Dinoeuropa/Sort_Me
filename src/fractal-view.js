@@ -39,12 +39,15 @@ export function boundsMagnification(home, view) {
   return (home.maxX - home.minX) / Math.max(1e-12, view.maxX - view.minX);
 }
 
+/** Deep zooms stay on the boundary only while the cap keeps rising. 18 per octave goes blank near 200M×. */
+export const ITERATION_LIMIT = 16384;
+
 export function iterationCap(baseDepth, magnification) {
-  const extra = Math.max(0, Math.round(Math.log2(Math.max(1, magnification)) * 18));
-  return Math.min(500, Math.max(1, baseDepth + extra));
+  const extra = Math.max(0, Math.round(Math.log2(Math.max(1, magnification)) * 96));
+  return Math.min(ITERATION_LIMIT, Math.max(1, baseDepth + extra));
 }
 
-/** Iterations for a continuous zoom. Grows with log2 of magnification, clamped at 500. */
+/** Iterations for a continuous zoom. Grows with log2 of magnification for as long as the zoom runs. */
 export function autoZoomIterations(baseDepth, magnification) {
   return iterationCap(baseDepth, magnification);
 }
@@ -98,22 +101,71 @@ const NEIGHBORS = [
 export function detailTarget(iterations, basins, width, height, view, maxIter, kind) {
   const cap = Math.max(1, maxIter);
   let best = 0;
+  let raw = 0;
   let bx = width / 2;
   let by = height / 2;
-  const stride = Math.max(1, Math.floor(Math.min(width, height) / 28));
-  for (let y = 1; y < height - 1; y += stride) {
-    for (let x = 1; x < width - 1; x += stride) {
-      const score = pixelDetail(iterations, basins, width, height, x, y, cap, kind);
-      if (score > best) {
-        best = score;
-        bx = x;
-        by = y;
-      }
+  const aspect = width / Math.max(1, height);
+  const consider = (x, y) => {
+    const score = pixelDetail(iterations, basins, width, height, x, y, cap, kind);
+    if (score <= 0) return;
+    const dx = (x + 0.5) / width - 0.5;
+    const dy = (y + 0.5) / height - 0.5;
+    const weighted = score / (1 + Math.hypot(dx * aspect, dy) * 2.5);
+    if (weighted > best) {
+      best = weighted;
+      raw = score;
+      bx = x;
+      by = y;
     }
+  };
+  // Full rows and columns, a few hundred apart, so a filament thinner than the old stride is still found.
+  const rowStep = Math.max(1, Math.floor(height / 240));
+  for (let y = 1; y < height - 1; y += rowStep) {
+    for (let x = 1; x < width - 1; x += 1) consider(x, y);
   }
-  if (best <= 0) return { x: view.centerX, y: view.centerY, score: 0 };
+  const colStep = Math.max(1, Math.floor(width / 240));
+  for (let x = 1; x < width - 1; x += colStep) {
+    for (let y = 1; y < height - 1; y += 1) consider(x, y);
+  }
+  if (raw <= 0) return { x: view.centerX, y: view.centerY, score: 0 };
   const point = planePoint(view, width, height, bx, by);
-  return { x: point.x, y: point.y, score: best };
+  return { x: point.x, y: point.y, score: raw };
+}
+
+/**
+ * Draw the plate through its source pixels.
+ * A destination rect millions of pixels wide is dropped by the browser and leaves the paper color.
+ */
+export function escapeSourceBlit(plate, view, width, height) {
+  if (!plate || !view || !(view.scale > 0) || !(plate.scale > 0)) return null;
+  const plateW = Math.max(1, plate.width || width);
+  const plateH = Math.max(1, plate.height || height);
+  const rect = escapeBlitRect(plate, view, width, height);
+  if (!(rect.w > 0) || !(rect.h > 0) || !Number.isFinite(rect.x) || !Number.isFinite(rect.y)) return null;
+  const x0 = Math.max(0, rect.x);
+  const y0 = Math.max(0, rect.y);
+  const x1 = Math.min(width, rect.x + rect.w);
+  const y1 = Math.min(height, rect.y + rect.h);
+  if (!(x1 > x0) || !(y1 > y0)) return null;
+  let sx = ((x0 - rect.x) / rect.w) * plateW;
+  let sy = ((y0 - rect.y) / rect.h) * plateH;
+  let sw = ((x1 - x0) / rect.w) * plateW;
+  let sh = ((y1 - y0) / rect.h) * plateH;
+  if (!(sw > 0) || !(sh > 0) || !Number.isFinite(sx) || !Number.isFinite(sy)) return null;
+  if (sw < 1 || sh < 1) {
+    const cx = Math.min(plateW - 0.5, Math.max(0.5, sx + sw / 2));
+    const cy = Math.min(plateH - 0.5, Math.max(0.5, sy + sh / 2));
+    sw = Math.max(sw, 1);
+    sh = Math.max(sh, 1);
+    sx = cx - sw / 2;
+    sy = cy - sh / 2;
+  }
+  sx = Math.min(plateW - 0.01, Math.max(0, sx));
+  sy = Math.min(plateH - 0.01, Math.max(0, sy));
+  sw = Math.min(sw, plateW - sx);
+  sh = Math.min(sh, plateH - sy);
+  if (!(sw > 0) || !(sh > 0)) return null;
+  return { sx, sy, sw, sh, dx: x0, dy: y0, dw: x1 - x0, dh: y1 - y0 };
 }
 
 export function steerZoomTarget(detail, view, options = {}) {
@@ -139,20 +191,23 @@ export function steerZoomTarget(detail, view, options = {}) {
   return { x, y, score: detail.score || 0 };
 }
 
-/** Keep the next aim near the camera so a new plate cannot yank the view to another filament. */
+/**
+ * Glide onto detail that is still in view.
+ * A pick many view-widths away stays put, so one plate cannot teleport to another filament.
+ */
 export function steadyAim(previous, picked, camera) {
-  const span = Math.max(1e-12, camera?.scale || 1);
+  const span = camera?.scale > 0 ? camera.scale : 1;
   let x = Number.isFinite(picked?.x) ? picked.x : camera.centerX;
   let y = Number.isFinite(picked?.y) ? picked.y : camera.centerY;
   const lead = Math.hypot(x - camera.centerX, y - camera.centerY);
-  const reach = span * 0.18;
+  const reach = span * 0.95;
   if (lead > reach) {
     const keep = reach / lead;
     x = camera.centerX + (x - camera.centerX) * keep;
     y = camera.centerY + (y - camera.centerY) * keep;
   }
   if (previous && Number.isFinite(previous.x) && Number.isFinite(previous.y)) {
-    const step = span * 0.08;
+    const step = span * 0.85;
     const dx = x - previous.x;
     const dy = y - previous.y;
     const dist = Math.hypot(dx, dy);
@@ -164,14 +219,33 @@ export function steadyAim(previous, picked, camera) {
   return { x, y, score: picked?.score || 0 };
 }
 
+/** Slide toward structure when the current plate is a flat field. Zoom stays put until an edge returns. */
+export function recoverZoomTarget(previous, camera, turn = 0) {
+  const span = camera?.scale > 0 ? camera.scale : 1;
+  const originX = camera?.centerX || 0;
+  const originY = camera?.centerY || 0;
+  let dx = (Number.isFinite(previous?.x) ? previous.x : originX) - originX;
+  let dy = (Number.isFinite(previous?.y) ? previous.y : originY) - originY;
+  const lead = Math.hypot(dx, dy);
+  if (lead < span * 0.08) {
+    const angle = (Number.isFinite(turn) ? turn : 0) * 2.399963;
+    dx = Math.cos(angle);
+    dy = Math.sin(angle);
+  } else {
+    dx /= lead;
+    dy /= lead;
+  }
+  return { x: originX + dx * span * 0.55, y: originY + dy * span * 0.55, score: 0 };
+}
+
 export function easeZoom(view, target, factor = AUTO_ZOOM_STEP, pull = AUTO_ZOOM_PULL) {
-  const zoom = Number.isFinite(factor) && factor > 1 ? factor : AUTO_ZOOM_STEP;
+  const zoom = Number.isFinite(factor) && factor >= 1 ? factor : AUTO_ZOOM_STEP;
   const t = Number.isFinite(pull) ? Math.min(1, Math.max(0, pull)) : AUTO_ZOOM_PULL;
   return {
     ...view,
     centerX: view.centerX + (target.x - view.centerX) * t,
     centerY: view.centerY + (target.y - view.centerY) * t,
-    scale: Math.max(5e-14, view.scale / zoom),
+    scale: Math.max(1e-300, view.scale / zoom),
   };
 }
 
@@ -300,9 +374,25 @@ export function plateCovers(plate, view, aspect = 1) {
   return marginX >= -1e-9 && marginY >= -1e-9;
 }
 
-/** Long edge of every auto-zoom plate. One size, so the picture does not step while the zoom runs. */
-export function plateRasterEdge() {
-  return 2560;
+/**
+ * Long edge of an auto-zoom plate.
+ * Stays large through ordinary depths. Deeper caps shrink the plate so the next
+ * frame still arrives before the zoom outruns it.
+ */
+export function plateRasterEdge(cap = 500) {
+  const iterations = Number.isFinite(cap) && cap > 0 ? cap : 500;
+  if (iterations <= 700) return 2560;
+  const edge = Math.round(2560 * Math.sqrt(320 / iterations));
+  return Math.max(640, Math.min(2560, edge));
+}
+
+/** Stop zooming in once the current plate would be stretched into a flat smear. */
+export function limitZoomDepth(plate, view, maxRatio = 10) {
+  if (!plate || !view || !(plate.scale > 0) || !(view.scale > 0)) return view;
+  const ratio = Number.isFinite(maxRatio) && maxRatio > 1 ? maxRatio : 10;
+  const minScale = plate.scale / ratio;
+  if (view.scale >= minScale) return view;
+  return { ...view, scale: minScale };
 }
 
 /** Zoom factor for one frame. Brisk by default, and only slower when the last plate was too slow to keep up. */
@@ -408,10 +498,16 @@ function pixelDetail(iterations, basins, width, height, x, y, maxIter, kind) {
       if (basins[next] !== basin) boundary += 1;
     } else {
       variation += Math.abs(iterations[next] - here);
-      if (here < maxIter && iterations[next] < maxIter && iterations[next] !== here) boundary += 1;
+      const nextInside = iterations[next] >= maxIter;
+      if ((here >= maxIter) !== nextInside) boundary += 1;
+      else if (here < maxIter && iterations[next] !== here) boundary += 1;
     }
   }
   if (kind === "newton") return boundary * (1 + here / maxIter);
+  if (here < maxIter && boundary > 0 && variation > 0) {
+    const onEdge = here >= 2;
+    return (here / maxIter) * variation * (onEdge ? 1 : 0) + boundary * 4;
+  }
   if (here >= maxIter || here < 2) return 0;
   return (here / maxIter) * variation * (boundary > 0 ? 1 : 0);
 }

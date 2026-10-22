@@ -379,7 +379,7 @@ function clampUnit(value) {
 
 function clampIter(maxIter) {
   const value = Number.isFinite(maxIter) ? Math.floor(maxIter) : 1;
-  return Math.min(500, Math.max(1, value));
+  return Math.min(16384, Math.max(1, value));
 }
 
 function mandelbrot(cx, cy, maxIter) {
