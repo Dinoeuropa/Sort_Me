@@ -177,9 +177,7 @@ export function clampViewToPlate(plate, view, aspect = 1) {
   const fullX = plate.scale * plateAspect;
   const fullY = plate.scale;
   const maxScale = Math.min(fullY, fullX / safeAspect);
-  let scale = Math.min(view.scale, maxScale);
-  const minScale = Math.min(maxScale, fullY / 2);
-  if (scale < minScale) scale = minScale;
+  const scale = Math.min(view.scale, maxScale);
   const camX = scale * safeAspect;
   const camY = scale;
   const insetX = Math.min(fullX * 0.012, Math.max(0, (fullX - camX) / 2));
@@ -207,6 +205,62 @@ export function plateHasRoom(plate, view, aspect = 1) {
   const marginX = plateHalfX - camHalfX - Math.abs(view.centerX - plate.centerX);
   const marginY = plateHalfY - camHalfY - Math.abs(view.centerY - plate.centerY);
   return marginX > camHalfX * 0.12 && marginY > camHalfY * 0.12;
+}
+
+/** Where the camera will be after `seconds` of auto zoom, so the next plate can cover that view. */
+export function aheadView(view, target, seconds = 0.35) {
+  const frames = Math.max(0, Number(seconds) || 0) * 60;
+  const step = AUTO_ZOOM_STEP ** frames;
+  const pull = 1 - (1 - AUTO_ZOOM_PULL) ** frames;
+  return easeZoom(view, target, step, pull);
+}
+
+/** One window that contains every camera, widened so the view can keep moving inside it. */
+export function coverViews(views, aspect = 1) {
+  const camera = views[0];
+  const safeAspect = aspect > 0 ? aspect : 1;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const view of views) {
+    const halfX = view.scale * safeAspect * 0.5;
+    const halfY = view.scale * 0.5;
+    minX = Math.min(minX, view.centerX - halfX);
+    maxX = Math.max(maxX, view.centerX + halfX);
+    minY = Math.min(minY, view.centerY - halfY);
+    maxY = Math.max(maxY, view.centerY + halfY);
+  }
+  const spanX = (maxX - minX) * 1.08;
+  const spanY = (maxY - minY) * 1.08;
+  return {
+    centerX: (minX + maxX) / 2,
+    centerY: (minY + maxY) / 2,
+    scale: Math.max(spanY, spanX / safeAspect, camera.scale * PLATE_SCALE),
+    flipY: Boolean(camera.flipY),
+  };
+}
+
+/** True when the camera rectangle sits inside the plate, including a zoomed-in camera. */
+export function plateCovers(plate, view, aspect = 1) {
+  if (!plate || !view || !(plate.scale > 0) || !(view.scale > 0)) return false;
+  const safeAspect = aspect > 0 ? aspect : 1;
+  const plateAspect = plate.width > 0 && plate.height > 0 ? plate.width / plate.height : safeAspect;
+  const plateHalfX = plate.scale * plateAspect * 0.5;
+  const plateHalfY = plate.scale * 0.5;
+  const camHalfX = view.scale * safeAspect * 0.5;
+  const camHalfY = view.scale * 0.5;
+  const marginX = plateHalfX - camHalfX - Math.abs(view.centerX - plate.centerX);
+  const marginY = plateHalfY - camHalfY - Math.abs(view.centerY - plate.centerY);
+  return marginX >= -1e-9 && marginY >= -1e-9;
+}
+
+/** Long edge for an auto-zoom plate. Deep iteration counts use a smaller plate so a new one still arrives. */
+export function plateRasterEdge(cap) {
+  const iterations = Number(cap) || 0;
+  if (iterations > 140) return AUTO_ZOOM_RASTER_EDGE;
+  if (iterations > 64) return 2560;
+  return SHARP_RASTER_EDGE;
 }
 
 /** Zoom factor for one frame. Brisk by default, and only slower when the last plate was too slow to keep up. */

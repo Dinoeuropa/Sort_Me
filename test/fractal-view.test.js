@@ -9,8 +9,10 @@ import {
   NAUTILUS,
   SHARP_RASTER_EDGE,
   autoZoomIterations,
+  aheadView,
   boundsMagnification,
   clampViewToPlate,
+  coverViews,
   detailTarget,
   easeFactor,
   easeZoom,
@@ -22,7 +24,9 @@ import {
   mapPointsInto,
   panBounds,
   panEscape,
+  plateCovers,
   plateHasRoom,
+  plateRasterEdge,
   plateWindow,
   pointBudget,
   rasterSize,
@@ -215,6 +219,26 @@ test("each reactive fractal offers a choice of zoom patterns", () => {
   assert.ok(zoomPatterns("burning").length >= 2);
   assert.ok(zoomPatterns("newton").some((pattern) => pattern.name === "Triple point"));
   assert.equal(zoomPatterns("koch").length, 0);
+});
+
+test("zooming in is not paused while the next plate is still drawing", () => {
+  const camera = { centerX: 0, centerY: 0, scale: 2, flipY: false };
+  const ahead = aheadView(camera, { x: 1, y: 0 }, 0.35);
+  const grown = camera.scale / ahead.scale;
+  assert.ok(grown > 1.2);
+  assert.ok(grown < 1.4);
+  assert.ok(ahead.centerX > camera.centerX);
+  const cover = coverViews([camera, ahead], 1.5);
+  assert.ok(cover.scale >= camera.scale * 1.65 - 1e-9);
+  assert.equal(plateCovers(cover, camera, 1.5), true);
+  assert.equal(plateCovers(cover, ahead, 1.5), true);
+  const plate = { centerX: 0, centerY: 0, scale: 2, width: 300, height: 200, flipY: false };
+  const held = clampViewToPlate(plate, { centerX: 0.1, centerY: -0.05, scale: 0.4, flipY: false }, 1.5);
+  assert.ok(Math.abs(held.scale - 0.4) < 1e-9);
+  assert.ok(Math.abs(held.centerX - 0.1) < 1e-9);
+  assert.equal(plateRasterEdge(32), SHARP_RASTER_EDGE);
+  assert.equal(plateRasterEdge(96), 2560);
+  assert.equal(plateRasterEdge(180), 1920);
 });
 
 test("auto zoom creeps so the picture can keep up", () => {
