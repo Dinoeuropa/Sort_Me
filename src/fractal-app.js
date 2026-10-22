@@ -7,6 +7,7 @@ import {
   constructionOrder,
   cursorParameter,
   escapeBand,
+  escapeFloor,
   fractalById,
   iterateIfs,
   newtonCursor,
@@ -41,6 +42,7 @@ import {
   plateBudget,
   plateCovers,
   plateFrame,
+  plateMargin,
   plateRasterEdge,
   pointBudget,
   rasterSize,
@@ -1282,7 +1284,17 @@ function applyEscapeResult(result) {
   state.cursorRedraw = false;
   const pixels = result.paletteId === state.paletteId
     ? result.pixels
-    : paintEscape(state.paletteId, result.iterations, result.basins, width, height, result.cap, height, result.cap);
+    : paintEscape(
+      state.paletteId,
+      result.iterations,
+      result.basins,
+      width,
+      height,
+      result.cap,
+      height,
+      result.cap,
+      escapeFloor(result.fractalId, result.preset, width, height, result.cap),
+    );
   const current = pictureView();
   const box = viewBox();
   const aspect = box.width / Math.max(1, box.height);
@@ -1471,7 +1483,7 @@ function ensureAutoPlate(token, box) {
   const to = from + plateLookahead();
   const samples = [];
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(path, from + ((to - from) * i) / 4));
-  const cover = coverViews(samples, aspect);
+  const cover = coverViews(samples, aspect, plateMargin(from));
   const deepest = samples[samples.length - 1].scale;
   const cap = autoZoomIterations(state.baseDepth || depthValue(), (state.home?.scale || deepest) / deepest);
   const edge = Math.min(state.plateEdge || plateRasterEdge(cap), PLATE_EDGE_MAX);

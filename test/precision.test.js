@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoZoomFloor, autoZoomTarget, escapeBand, escapeValue, presetById } from "../src/fractals.js";
+import { autoZoomFloor, autoZoomTarget, escapeBand, escapeFloor, escapeValue, presetById } from "../src/fractals.js";
+import { paintEscape } from "../src/palettes.js";
 import {
   autoZoomIterations,
   autoZoomPath,
@@ -21,6 +22,7 @@ import {
   hasDeepCenter,
   perturbIterations,
   referenceOrbit,
+  seriesSkip,
   shiftView,
   viewOffset,
 } from "../src/precision.js";
@@ -104,22 +106,83 @@ test("perturbation matches double-double iteration at a depth doubles cannot rea
   const scale = 1e-20;
   const cap = autoZoomIterations(48, 2.6 / scale);
   const reference = referenceOrbit(target.x, target.xLo, target.y, target.yLo, cap);
+  const skip = seriesSkip(reference, scale * Math.SQRT1_2);
+  assert.ok(skip > 1500 && skip < cap * 0.8, `skips ${skip} of ${cap}`);
   let same = 0;
+  let sameSkipped = 0;
   let distinct = new Set();
   for (let j = 0; j < 6; j += 1) {
     for (let i = 0; i < 6; i += 1) {
       const dcx = ((i + 0.5) / 6 - 0.5) * scale;
       const dcy = ((j + 0.5) / 6 - 0.5) * scale;
       const fast = perturbIterations(reference, dcx, dcy, cap);
+      const skipped = perturbIterations(reference, dcx, dcy, cap, skip);
       const [cx, cxLo] = ddAdd(target.x, target.xLo, dcx, 0);
       const [cy, cyLo] = ddAdd(target.y, target.yLo, dcy, 0);
       const exact = ddMandelbrotIterations(cx, cxLo, cy, cyLo, cap);
       if (fast === exact) same += 1;
+      if (skipped === exact) sameSkipped += 1;
       distinct.add(fast);
     }
   }
   assert.ok(same >= 34, `${same} of 36 agree`);
+  assert.ok(sameSkipped >= 34, `${sameSkipped} of 36 agree after the linear skip`);
   assert.ok(distinct.size > 6, "the frame still has structure");
+});
+
+test("the linear skip only reaches far when the plate is small next to the reference", () => {
+  const target = autoZoomTarget("mandelbrot", {});
+  const reference = referenceOrbit(target.x, target.xLo, target.y, target.yLo, 4000);
+  assert.equal(seriesSkip(reference, 0), 0);
+  assert.ok(seriesSkip(reference, 0.1) < 4);
+  const near = seriesSkip(reference, 1e-9);
+  const deep = seriesSkip(reference, 1e-28);
+  assert.ok(near >= 0 && near < 400, `shallow skip ${near}`);
+  assert.ok(deep > 3000 && deep <= reference.count - 2, `deep skip ${deep}`);
+  assert.equal(seriesSkip(reference, 1e-28), deep);
+  const escaping = referenceOrbit(0.5, 0, 0.5, 0, 4000);
+  assert.ok(escaping.count < 4000);
+  assert.ok(seriesSkip(escaping, 1e-30) <= escaping.count - 2);
+  assert.equal(perturbIterations(escaping, 1e-31, 0, 4000, seriesSkip(escaping, 1e-30)), perturbIterations(escaping, 1e-31, 0, 4000));
+});
+
+test("a deep plate spreads the palette over the iterations it holds, and a shallow one is unchanged", () => {
+  const target = autoZoomTarget("mandelbrot", {});
+  const seahorse = presetById("mandelbrot", "seahorse");
+  assert.equal(escapeFloor("mandelbrot", seahorse, 64, 36, 300), 0);
+  assert.equal(escapeFloor("mandelbrot", { ...seahorse, centerXLo: 0, centerYLo: 0 }, 64, 36, 300), 0);
+  assert.equal(escapeFloor("julia", { ...seahorse, cx: 0.3, cy: 0.5, centerXLo: 0 }, 64, 36, 300), 0);
+  const scale = 1e-24;
+  const cap = autoZoomIterations(48, 2.6 / scale);
+  const deep = { ...deepCenter(target, 0, 0), scale, flipY: false };
+  const floor = escapeFloor("mandelbrot", deep, 64, 36, cap);
+  assert.ok(floor > cap * 0.6, `floor ${floor} sits well above zero for a cap of ${cap}`);
+  assert.ok(floor < cap * 0.95);
+  assert.equal(escapeFloor("mandelbrot", deep, 64, 36, cap), floor);
+  const band = escapeBand("mandelbrot", deep, 64, 36, cap, 0, 36);
+  const lowest = band.iterations.reduce((low, value) => Math.min(low, value), cap);
+  assert.ok(lowest > floor * 0.9, `the lowest pixel ${lowest} is near the floor ${floor}`);
+  const flat = paintEscape("ink", band.iterations, band.basins, 64, 36, cap, 36, cap);
+  const spread = paintEscape("ink", band.iterations, band.basins, 64, 36, cap, 36, cap, floor);
+  const range = (pixels) => {
+    let low = 255;
+    let high = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (band.iterations[i / 4] >= cap) continue;
+      low = Math.min(low, pixels[i]);
+      high = Math.max(high, pixels[i]);
+    }
+    return high - low;
+  };
+  assert.ok(range(spread) > range(flat) * 3, `windowed range ${range(spread)} vs flat ${range(flat)}`);
+  const inside = band.iterations.findIndex((value) => value >= cap);
+  if (inside >= 0) assert.deepEqual([...spread.subarray(inside * 4, inside * 4 + 3)], [...flat.subarray(inside * 4, inside * 4 + 3)]);
+  const plain = paintEscape("ink", Uint16Array.from([0, 5, 10]), Int8Array.from([-1, -1, -1]), 3, 1, 10, 1, 10);
+  const same = paintEscape("ink", Uint16Array.from([0, 5, 10]), Int8Array.from([-1, -1, -1]), 3, 1, 10, 1, 10, 0);
+  assert.deepEqual([...plain], [...same]);
+  const lifted = paintEscape("ink", Uint16Array.from([0, 5, 10]), Int8Array.from([-1, -1, -1]), 3, 1, 10, 1, 10, 5);
+  assert.deepEqual([...lifted.subarray(0, 3)], [...lifted.subarray(4, 7)]);
+  assert.deepEqual([...lifted.subarray(8, 11)], [...plain.subarray(8, 11)]);
 });
 
 test("the Mandelbrot dive target is a spiral center on the edge, held to double-double precision", () => {

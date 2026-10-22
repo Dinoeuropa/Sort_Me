@@ -73,10 +73,17 @@ export function ddMandelbrotIterations(cx, cxLo, cy, cyLo, maxIter) {
 
 let cachedOrbit = null;
 
+/** Largest offset, relative to the reference, at which its square is still dropped. */
+const SERIES_TOLERANCE = 1e-8;
+
 /**
  * The orbit of the reference point, Z_0 = 0, Z_1 = C, ..., iterated in double-double and stored
  * as doubles. It stops after the first escaped term, since a pixel that outlives the reference
  * rebases onto the start of the orbit. The last orbit is kept, as one plate asks for it per band.
+ *
+ * While a pixel's offset is tiny next to the reference, it grows linearly: δ_n = B_n · dc with
+ * B_{n+1} = 2 Z_n B_n + 1. `series` holds B_n and `reach` the largest |B_k| / |Z_k| up to n, which
+ * says how big an offset may be for the linear step to n to hold.
  */
 export function referenceOrbit(cx, cxLo, cy, cyLo, maxIter) {
   const cap = Math.max(1, maxIter | 0);
@@ -85,12 +92,20 @@ export function referenceOrbit(cx, cxLo, cy, cyLo, maxIter) {
     return cached;
   }
   const orbit = new Float64Array((cap + 1) * 2);
+  const series = new Float64Array((cap + 1) * 2);
+  const reach = new Float64Array(cap + 1);
   let xhi = 0;
   let xlo = 0;
   let yhi = 0;
   let ylo = 0;
   let count = 1;
   for (let n = 1; n <= cap; n += 1) {
+    const zx = orbit[n * 2 - 2];
+    const zy = orbit[n * 2 - 1];
+    const bx = series[n * 2 - 2];
+    const by = series[n * 2 - 1];
+    series[n * 2] = 2 * (zx * bx - zy * by) + 1;
+    series[n * 2 + 1] = 2 * (zx * by + zy * bx);
     const xx = ddMul(xhi, xlo, xhi, xlo);
     const yy = ddMul(yhi, ylo, yhi, ylo);
     const xy = ddMul(xhi, xlo, yhi, ylo);
@@ -103,12 +118,31 @@ export function referenceOrbit(cx, cxLo, cy, cyLo, maxIter) {
     ylo = im[1];
     orbit[n * 2] = xhi + xlo;
     orbit[n * 2 + 1] = yhi + ylo;
+    const size = Math.hypot(orbit[n * 2], orbit[n * 2 + 1]);
+    const ratio = size > 0 ? Math.hypot(series[n * 2], series[n * 2 + 1]) / size : Infinity;
+    reach[n] = Math.max(reach[n - 1], ratio);
     count = n + 1;
     if (xhi * xhi + yhi * yhi > 4) break;
   }
-  const result = { orbit, count, cx, cxLo, cy, cyLo, cap };
+  const result = { orbit, series, reach, count, cx, cxLo, cy, cyLo, cap };
   cachedOrbit = result;
   return result;
+}
+
+/**
+ * How many iterations every pixel within `radius` of the reference may take in one linear step.
+ * Zero when the plate is wide enough that offsets matter from the start.
+ */
+export function seriesSkip(reference, radius) {
+  if (!(radius > 0)) return 0;
+  if (reference.skipRadius === radius) return reference.skip;
+  const reach = reference.reach;
+  const limit = reference.count - 2;
+  let skip = 0;
+  while (skip < limit && reach[skip + 1] * radius <= SERIES_TOLERANCE) skip += 1;
+  reference.skipRadius = radius;
+  reference.skip = skip;
+  return skip;
 }
 
 /**
@@ -116,14 +150,23 @@ export function referenceOrbit(cx, cxLo, cy, cyLo, maxIter) {
  * The offset from the reference orbit is iterated in plain doubles, and whenever the pixel's own
  * orbit comes closer to the origin than its offset, or the reference runs out, the pixel becomes
  * its own reference from Z_0 again. That rebasing keeps the offset small, so no glitches appear.
+ * `skip` iterations, from seriesSkip, are taken at once as a linear step.
  */
-export function perturbIterations(reference, dcx, dcy, maxIter) {
+export function perturbIterations(reference, dcx, dcy, maxIter, skip = 0) {
   const orbit = reference.orbit;
   const last = reference.count - 1;
   let dx = 0;
   let dy = 0;
   let m = 0;
   let iter = 0;
+  if (skip > 0 && skip < maxIter && skip < last) {
+    const bx = reference.series[skip * 2];
+    const by = reference.series[skip * 2 + 1];
+    dx = bx * dcx - by * dcy;
+    dy = bx * dcy + by * dcx;
+    m = skip;
+    iter = skip;
+  }
   while (iter < maxIter) {
     const zrx = orbit[m * 2];
     const zry = orbit[m * 2 + 1];
@@ -144,6 +187,33 @@ export function perturbIterations(reference, dcx, dcy, maxIter) {
     }
   }
   return iter;
+}
+
+/**
+ * The iteration below which a plate's coloring is clamped. Deep in the set every pixel escapes
+ * within a few percent of the cap, so the palette is spread over the range the plate actually
+ * holds, judged from a coarse grid of samples: the ramp starts a little under their fifth
+ * percentile. Shallow plates reach zero and are unchanged.
+ */
+export function plateFloor(reference, spanX, spanY, maxIter) {
+  const cap = Math.max(1, maxIter | 0);
+  const key = `${spanX}:${spanY}:${cap}`;
+  if (reference.floorKey === key) return reference.floor;
+  const cells = 12;
+  const skip = seriesSkip(reference, Math.hypot(spanX, spanY) / 2);
+  const samples = [];
+  for (let j = 0; j < cells; j += 1) {
+    for (let i = 0; i < cells; i += 1) {
+      samples.push(perturbIterations(reference, ((i + 0.5) / cells - 0.5) * spanX, ((j + 0.5) / cells - 0.5) * spanY, cap, skip));
+    }
+  }
+  samples.sort((a, b) => a - b);
+  const low = samples[Math.floor(samples.length * 0.05)];
+  const window = Math.max(cap - low, cap * 0.05);
+  const floor = Math.max(0, Math.round(cap - window * 1.1));
+  reference.floorKey = key;
+  reference.floor = floor;
+  return floor;
 }
 
 /** True when a view or preset carries a double-double center. */

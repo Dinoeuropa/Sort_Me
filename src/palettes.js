@@ -58,6 +58,10 @@ export function colorSample(paletteId, iteration, maxIter, basin = -1) {
   return palette.paint(iter, max);
 }
 
+/**
+ * Color an iteration grid. `floorIter` is where the palette starts: iterations at or below it take
+ * the first color, and the ramp runs from there to `shownIter`.
+ */
 export function paintEscape(
   paletteId,
   iterations,
@@ -67,17 +71,20 @@ export function paintEscape(
   shownIter,
   rowLimit = height,
   revealIter = null,
+  floorIter = 0,
 ) {
   paletteById(paletteId);
   const data = new Uint8ClampedArray(width * height * 4);
   const limit = Math.max(0, Math.min(height, rowLimit));
   const max = Math.max(1, shownIter);
   const span = max + 1;
+  const floor = Math.min(Math.max(0, floorIter | 0), max - 1);
   const lut = new Uint8ClampedArray(4 * span * 3);
   for (let iter = 0; iter < span; iter += 1) {
-    writeLut(lut, span, 3, iter, colorSample(paletteId, iter, shownIter, -1));
+    const lifted = Math.max(0, iter - floor);
+    writeLut(lut, span, 3, iter, colorSample(paletteId, lifted, shownIter - floor, -1));
     for (let basin = 0; basin < 3; basin += 1) {
-      writeLut(lut, span, basin, iter, colorSample(paletteId, iter, shownIter, basin));
+      writeLut(lut, span, basin, iter, colorSample(paletteId, lifted, shownIter - floor, basin));
     }
   }
   const revealing = revealIter != null;

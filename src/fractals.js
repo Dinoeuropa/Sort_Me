@@ -1,4 +1,4 @@
-import { hasDeepCenter, perturbIterations, referenceOrbit } from "./precision.js";
+import { hasDeepCenter, perturbIterations, plateFloor, referenceOrbit, seriesSkip } from "./precision.js";
 
 const NEWTON_ROOTS = [
   [1, 0],
@@ -329,12 +329,24 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
 }
 
 /**
+ * The iteration a picture's coloring starts from. Zero except for a deep Mandelbrot plate, whose
+ * pixels all escape near the cap and would otherwise share one pale shade.
+ */
+export function escapeFloor(fractalId, preset, width, height, maxIter) {
+  if (fractalId !== "mandelbrot" || !hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return 0;
+  const cap = clampIter(maxIter);
+  const reference = referenceOrbit(preset.centerX, preset.centerXLo || 0, preset.centerY, preset.centerYLo || 0, cap);
+  return plateFloor(reference, preset.scale * (width / height), preset.scale, cap);
+}
+
+/**
  * Mandelbrot pixels as offsets from a reference orbit at the plate's double-double center.
  * Pixel offsets are small enough for a plain double, so the plate keeps its detail far below
  * the depth at which absolute coordinates run out of digits.
  */
 function perturbBand(preset, width, height, cap, start, rows, iterations, spanX, spanY, flip) {
   const reference = referenceOrbit(preset.centerX, preset.centerXLo || 0, preset.centerY, preset.centerYLo || 0, cap);
+  const skip = seriesSkip(reference, Math.hypot(spanX, spanY) / 2);
   for (let row = 0; row < rows; row += 1) {
     const py = start + row;
     const ny = flip ? (py + 0.5) / height - 0.5 : 0.5 - (py + 0.5) / height;
@@ -342,7 +354,7 @@ function perturbBand(preset, width, height, cap, start, rows, iterations, spanX,
     const offset = row * width;
     for (let px = 0; px < width; px += 1) {
       const dcx = ((px + 0.5) / width - 0.5) * spanX;
-      iterations[offset + px] = perturbIterations(reference, dcx, dcy, cap);
+      iterations[offset + px] = perturbIterations(reference, dcx, dcy, cap, skip);
     }
   }
 }

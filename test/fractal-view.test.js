@@ -5,6 +5,9 @@ import { fitTransform } from "../src/palettes.js";
 import {
   AUTO_RAMP_MS,
   AUTO_ZOOM_STEP,
+  PLATE_EDGE_MIN,
+  PLATE_SCALE,
+  PLATE_SCALE_SETTLED,
   PLATE_TARGET_MS,
   FIT_PAD,
   SHARP_RASTER_EDGE,
@@ -29,6 +32,7 @@ import {
   plateCovers,
   pickPlate,
   plateBudget,
+  plateMargin,
   plateRasterEdge,
   pointBudget,
   rasterSize,
@@ -301,8 +305,9 @@ test("plates shrink on a slow machine and grow back when they arrive early", () 
   const slow = plateBudget(2560, PLATE_TARGET_MS * 4);
   assert.ok(slow < 2560);
   assert.ok(slow >= 2560 * 0.6 - 1);
-  const crawl = plateBudget(900, PLATE_TARGET_MS * 100);
-  assert.equal(crawl, 600);
+  const crawl = plateBudget(500, PLATE_TARGET_MS * 100);
+  assert.equal(crawl, PLATE_EDGE_MIN);
+  assert.ok(PLATE_EDGE_MIN >= 400);
   const quick = plateBudget(1200, PLATE_TARGET_MS / 4);
   assert.ok(quick > 1200);
   assert.ok(quick <= 1500);
@@ -326,6 +331,23 @@ test("the finest plate that covers the frame is drawn, and none means every plat
   assert.equal(plateCovers(shot.view, frame, 1280 / 720), false);
   assert.equal(pickPlate([shot], frame, 1280 / 720), 0);
   assert.equal(pickPlate([shot], { ...frame, centerX: 0.05 }, 1280 / 720), -1);
+});
+
+test("plates lose their wide margin once the target sits in the middle of the frame", () => {
+  assert.equal(plateMargin(0), PLATE_SCALE);
+  assert.equal(plateMargin(5.9), PLATE_SCALE);
+  assert.equal(plateMargin(6), PLATE_SCALE_SETTLED);
+  assert.equal(plateMargin(80), PLATE_SCALE_SETTLED);
+  assert.ok(PLATE_SCALE_SETTLED > 1 && PLATE_SCALE_SETTLED < PLATE_SCALE);
+  const camera = { centerX: -0.74, centerY: 0.13, scale: 1e-10, flipY: false };
+  const ahead = { ...camera, scale: 1e-11 };
+  const wide = coverViews([camera, ahead], 1.5);
+  const snug = coverViews([camera, ahead], 1.5, plateMargin(40));
+  assert.ok(Math.abs(wide.scale - camera.scale * PLATE_SCALE) < 1e-20);
+  assert.ok(Math.abs(snug.scale - camera.scale * PLATE_SCALE_SETTLED) < 1e-20);
+  assert.ok(plateCovers(snug, camera, 1.5));
+  assert.ok(plateCovers(snug, ahead, 1.5));
+  assert.equal(coverViews([camera], 1.5, 0).scale, wide.scale);
 });
 
 test("auto zoom doubles about once a second", () => {

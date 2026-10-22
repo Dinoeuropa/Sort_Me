@@ -72,8 +72,19 @@ export const AUTO_OCTAVES_PER_FRAME = Math.log2(AUTO_ZOOM_STEP);
 /** How much wider than the camera an auto-zoom plate is rendered, so the view can move inside it. */
 export const PLATE_SCALE = 1.65;
 
+/**
+ * Plate margin once the target sits in the middle of the frame. From then on the camera only
+ * moves inward, so a wide ring around it would be drawn and never shown.
+ */
+export const PLATE_SCALE_SETTLED = 1.08;
+
 /** Octaves over which the target slides from where it started to the middle of the frame. */
 const AUTO_ENTER_OCTAVES = 6;
+
+/** How much wider than the camera to draw the next plate at this point on the path. */
+export function plateMargin(octave) {
+  return octave >= AUTO_ENTER_OCTAVES ? PLATE_SCALE_SETTLED : PLATE_SCALE;
+}
 
 /** Milliseconds over which auto zoom builds from rest to full pace when it starts. */
 export const AUTO_RAMP_MS = 1400;
@@ -141,15 +152,19 @@ export function autoZoomRamp(elapsedMs) {
   return t * t * (3 - 2 * t);
 }
 
+/** Smallest long edge of an auto-zoom plate. A late plate is stretched further than a small one is blurred. */
+export const PLATE_EDGE_MIN = 400;
+
 /**
  * Long edge for the next plate, from how long the last one took.
- * A slow machine gets smaller plates so they keep arriving before the view has stretched far.
+ * A slow machine, or a deep view where every pixel runs thousands of iterations, gets smaller
+ * plates so they keep arriving before the view has stretched far.
  */
 export function plateBudget(edge, durationMs, ceiling = PLATE_EDGE_MAX) {
   const current = Number.isFinite(edge) && edge > 0 ? edge : ceiling;
   const took = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : PLATE_TARGET_MS;
   const factor = Math.min(1.25, Math.max(0.6, Math.sqrt(PLATE_TARGET_MS / took)));
-  return Math.round(Math.max(600, Math.min(ceiling, current * factor)));
+  return Math.round(Math.max(PLATE_EDGE_MIN, Math.min(ceiling, current * factor)));
 }
 
 /** Index of the finest plate that covers the camera whole, or -1 when none does. */
@@ -242,7 +257,7 @@ export function clampViewToPlate(plate, view, aspect = 1) {
 }
 
 /** One window that contains every camera, widened so the view can keep moving inside it. */
-export function coverViews(views, aspect = 1) {
+export function coverViews(views, aspect = 1, margin = PLATE_SCALE) {
   const camera = views[0];
   const safeAspect = aspect > 0 ? aspect : 1;
   let minX = Infinity;
@@ -263,7 +278,7 @@ export function coverViews(views, aspect = 1) {
   const center = shiftView(camera, (minX + maxX) / 2, (minY + maxY) / 2);
   return {
     ...centerOf(center),
-    scale: Math.max(spanY, spanX / safeAspect, camera.scale * PLATE_SCALE),
+    scale: Math.max(spanY, spanX / safeAspect, camera.scale * (margin > 1 ? margin : PLATE_SCALE)),
     flipY: Boolean(camera.flipY),
   };
 }
