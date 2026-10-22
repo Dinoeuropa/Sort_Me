@@ -52,7 +52,7 @@ export const FRACTALS = [
     kind: "escape",
     latex: "z_{n+1}=z_n^2+c",
     blurb: "Square z and add the pixel. Points that stay bounded form the set.",
-    note: "Depth is the escape-time cap. Move the cursor to see the Julia set of that point. Choose a pattern, then auto zoom into that copy.",
+    note: "Depth is the escape-time cap. Move the cursor to see the Julia set of that point. Auto zoom then dives into the edge of that copy.",
     depthLabel: "Iterations",
     legend: ["Inside", "Early", "Late"],
     minDepth: 8,
@@ -320,6 +320,103 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
     }
   }
   return { iterations, basins };
+}
+
+const ANCHOR_CAP = 2400;
+
+const MINI_SHIP = { x: -1.86113, y: -0.00048 };
+
+const SEAHORSE_VALLEY = { x: -0.7436438870371587, y: 0.1318259042053120 };
+
+function boundaryClass(fractalId, preset, x, y, cap) {
+  const value = escapeValue(fractalId, preset, x, y, cap);
+  if (fractalId === "newton") return value.basin;
+  return value.iteration >= cap ? 1 : 0;
+}
+
+/**
+ * A point on the edge of the set, found by bisection between an inside and an outside sample.
+ * It is exact to double precision, so a very deep zoom keeps a boundary in view.
+ */
+export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CAP) {
+  const fallback = { x: start.x, y: start.y };
+  if (!(radius > 0)) return fallback;
+  const cells = 24;
+  for (let tries = 0, span = radius; tries < 6; tries += 1, span *= 3) {
+    const step = (2 * span) / cells;
+    const classes = new Int16Array((cells + 1) * (cells + 1));
+    const at = (i, j) => ({ x: start.x - span + i * step, y: start.y - span + j * step });
+    for (let j = 0; j <= cells; j += 1) {
+      for (let i = 0; i <= cells; i += 1) {
+        const point = at(i, j);
+        classes[j * (cells + 1) + i] = boundaryClass(fractalId, preset, point.x, point.y, cap);
+      }
+    }
+    let best = null;
+    let bestDistance = Infinity;
+    for (let j = 0; j <= cells; j += 1) {
+      for (let i = 0; i <= cells; i += 1) {
+        const here = classes[j * (cells + 1) + i];
+        for (const [di, dj] of [[1, 0], [0, 1]]) {
+          const ni = i + di;
+          const nj = j + dj;
+          if (ni > cells || nj > cells || classes[nj * (cells + 1) + ni] === here) continue;
+          const a = at(i, j);
+          const b = at(ni, nj);
+          const distance = Math.hypot((a.x + b.x) / 2 - start.x, (a.y + b.y) / 2 - start.y);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = { a, b, classA: here };
+          }
+        }
+      }
+    }
+    if (!best) continue;
+    let { a, b } = best;
+    for (let round = 0; round < 80; round += 1) {
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      if (mid.x === a.x && mid.y === a.y) break;
+      if (boundaryClass(fractalId, preset, mid.x, mid.y, cap) === best.classA) a = mid;
+      else b = mid;
+    }
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+  return fallback;
+}
+
+/**
+ * The one point auto zoom dives toward for a fractal.
+ * Mandelbrot dives into the seahorse valley, and a Julia set into its repelling fixed point.
+ * Each lands on the edge of the set to double precision, so a boundary stays in the frame at every depth.
+ * The others search for an edge near a known feature.
+ */
+export function autoZoomTarget(fractalId, preset) {
+  if (fractalId === "mandelbrot") return boundaryAnchor("mandelbrot", preset, SEAHORSE_VALLEY, 2e-9);
+  if (fractalId === "julia") {
+    const cx = preset.cx || 0;
+    const cy = preset.cy || 0;
+    const re = 1 - 4 * cx;
+    const im = -4 * cy;
+    const mag = Math.hypot(re, im);
+    const rootRe = Math.sqrt((mag + re) / 2);
+    const rootIm = (im < 0 ? -1 : 1) * Math.sqrt(Math.max(0, (mag - re) / 2));
+    return { x: (1 + rootRe) / 2, y: rootIm / 2 };
+  }
+  if (fractalId === "newton") {
+    return boundaryAnchor("newton", preset, { x: 0, y: 0 }, 0.3);
+  }
+  if ("cx" in preset || "cy" in preset) {
+    return boundaryAnchor("burning", preset, { x: preset.centerX || 0, y: preset.centerY || 0 }, (preset.scale || 1) * 0.25);
+  }
+  return boundaryAnchor("burning", preset, MINI_SHIP, 0.0008, ANCHOR_CAP);
+}
+
+/**
+ * How small a view auto zoom may reach for a fractal, as a multiple of the target's distance from the origin.
+ * The burning ship breaks into dust a few thousand times in, so it turns back sooner than the rest.
+ */
+export function autoZoomFloor(fractalId) {
+  return fractalId === "burning" ? 2.5e-5 : 5e-12;
 }
 
 /** How the picture is produced: iterations, generations, a path, or the chaos game. */

@@ -1,6 +1,8 @@
 import katex from "../vendor/katex/katex.js";
 import {
   FRACTALS,
+  autoZoomFloor,
+  autoZoomTarget,
   buildGeometry,
   constructionOrder,
   cursorParameter,
@@ -12,20 +14,15 @@ import {
 } from "./fractals.js";
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
-  AUTO_ZOOM_PULL,
-  AUTO_ZOOM_STEP,
-  aheadView,
+  advanceAutoZoom,
   autoZoomIterations,
+  autoZoomPath,
+  autoZoomView,
   boundsMagnification,
-  clampViewToPlate,
   coverViews,
-  detailTarget,
   easeFactor,
-  easeZoom,
   escapeSourceBlit,
   fitZoomOut,
-  limitZoomDepth,
-  recoverZoomTarget,
   escapeMagnification,
   escapeWindow,
   iterationCap,
@@ -36,15 +33,12 @@ import {
   DRAW_RASTER_EDGE,
   plateCovers,
   plateRasterEdge,
-  steadyAim,
   pointBudget,
   rasterSize,
   recursionLevel,
-  steerZoomTarget,
   wheelZoomFactor,
   zoomBounds,
   zoomEscape,
-  zoomPatterns,
 } from "./fractal-view.js";
 import { renderEscape } from "./escape-pool.js";
 import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, paintEscape } from "./palettes.js";
@@ -72,8 +66,6 @@ const zoomInButton = document.querySelector("#zoom-in");
 const zoomOutButton = document.querySelector("#zoom-out");
 const zoomResetButton = document.querySelector("#zoom-reset");
 const autoZoomButton = document.querySelector("#auto-zoom");
-const zoomPatternSelect = document.querySelector("#zoom-pattern");
-const zoomPatternLabel = document.querySelector("#zoom-pattern-label");
 const paramEl = document.querySelector("#param");
 const modeBadge = document.querySelector("#mode-badge");
 const canvas = document.querySelector("#canvas");
@@ -135,15 +127,15 @@ const state = {
   flightJob: 0,
   flightView: null,
   autoZoom: false,
-  zoomPatternId: "seahorse",
   autoToken: 0,
   cursorParam: null,
   frozenParam: null,
-  pointerBias: null,
   cursorRedraw: false,
-  zoomTarget: null,
-  detailLost: false,
-  seekTurn: 0,
+  autoPath: null,
+  autoOctave: 0,
+  autoPace: 1,
+  autoStart: null,
+  autoFade: null,
   snapshot: null,
   snapshotView: null,
   plate: null,
@@ -232,32 +224,6 @@ function renderPresets() {
   }
 }
 
-function currentPattern() {
-  const patterns = zoomPatterns(state.fractalId);
-  return patterns.find((pattern) => pattern.id === state.zoomPatternId) || patterns[0] || null;
-}
-
-function renderPatterns() {
-  const patterns = zoomPatterns(state.fractalId);
-  const signature = patterns.map((pattern) => pattern.id).join(",");
-  if (zoomPatternSelect.dataset.signature !== signature) {
-    zoomPatternSelect.replaceChildren();
-    for (const pattern of patterns) {
-      const option = document.createElement("option");
-      option.value = pattern.id;
-      option.textContent = pattern.name;
-      zoomPatternSelect.append(option);
-    }
-    zoomPatternSelect.dataset.signature = signature;
-    if (!patterns.some((pattern) => pattern.id === state.zoomPatternId)) {
-      state.zoomPatternId = patterns[0]?.id || "";
-    }
-  }
-  zoomPatternSelect.value = state.zoomPatternId;
-  zoomPatternLabel.hidden = patterns.length < 2;
-  zoomPatternSelect.disabled = patterns.length < 2;
-}
-
 function syncDepthControls() {
   const fractal = currentFractal();
   depthInput.min = String(fractal.minDepth);
@@ -316,7 +282,6 @@ function renderChrome() {
   zoomResetButton.disabled = !(state.finished && !state.running && state.home);
   autoZoomButton.disabled = !(state.finished && !state.running && reactive);
   autoZoomButton.setAttribute("aria-pressed", String(state.autoZoom));
-  renderPatterns();
   modeBadge.hidden = !(reactive && state.finished && !state.running);
   canvas.classList.toggle("exploring", canZoom && !reactive);
   canvas.classList.toggle("reactive", state.finished && !state.running && reactive);
@@ -371,7 +336,6 @@ function resetProgress() {
   state.plate = null;
   state.cursorDirty = false;
   state.cursorRedraw = false;
-  state.zoomTarget = null;
   levelCache.clear();
   state.finished = false;
   state.paused = false;
@@ -829,9 +793,7 @@ function exploredLevel() {
 
 function zoomNote(fractal) {
   if (state.autoZoom && state.home && state.view) {
-    const pattern = currentPattern();
-    const toward = pattern ? ` toward ${pattern.name}` : "";
-    return `${fractal.note} Auto zoom is ${formatMag(currentMagnification())} deep${toward}, at ${exploredLevel().toLocaleString()} iterations.`;
+    return `${fractal.note} Auto zoom is ${formatMag(currentMagnification())} deep, at ${exploredLevel().toLocaleString()} iterations.`;
   }
   if (!state.finished || !state.home || !state.view) return fractal.note;
   const magnification = currentMagnification();
@@ -864,9 +826,7 @@ function formatComplex(x, y) {
 
 function formatParam() {
   if (state.autoZoom) {
-    const pattern = currentPattern();
-    const where = pattern ? pattern.name.toLowerCase() : "the boundary";
-    return `Auto zoom ${formatMag(currentMagnification())} toward ${where}`;
+    return `Auto zoom ${formatMag(currentMagnification())}`;
   }
   if (!state.cursorParam) return "";
   if (state.fractalId === "newton") return `p = ${formatComplex(state.cursorParam.px, state.cursorParam.py)}`;
@@ -1154,7 +1114,6 @@ function resetExplore() {
   if (!state.home) return;
   haltAutoZoom();
   state.cursorParam = null;
-  state.pointerBias = null;
   state.view = { ...state.home };
   if (currentFractal().kind === "escape") scheduleEscape();
   else redrawExplored();
@@ -1378,14 +1337,14 @@ function installPixels(pixels, width, height, done) {
 function haltAutoZoom() {
   state.autoZoom = false;
   state.autoHold = false;
-  state.detailLost = false;
-  state.seekTurn = 0;
+  state.autoPath = null;
+  state.autoStart = null;
+  state.autoFade = null;
   state.autoToken += 1;
   state.plateFlight = 0;
   state.snapshot = null;
   state.snapshotView = null;
   state.frozenParam = null;
-  state.pointerBias = null;
 }
 
 function stopAutoZoom() {
@@ -1422,12 +1381,6 @@ function startAutoZoom() {
   state.cursorParam = null;
   state.cursorDirty = false;
   state.cursorRedraw = false;
-  const pattern = currentPattern();
-  state.zoomTarget = pattern && Number.isFinite(pattern.x)
-    ? { x: pattern.x, y: pattern.y, score: 0 }
-    : { x: state.view.centerX, y: state.view.centerY, score: 0 };
-  state.detailLost = false;
-  state.seekTurn = 0;
   state.plateFlight = 0;
   state.autoHold = Boolean(hoveringMandelbrot);
   if (hoveringMandelbrot) {
@@ -1437,6 +1390,14 @@ function startAutoZoom() {
     captureSnapshot(state.view);
   }
   state.autoZoom = true;
+  const job = renderJob(state.view);
+  state.autoPath = autoZoomPath(state.view, autoZoomTarget(job.fractalId, job.preset), autoZoomFloor(job.fractalId));
+  state.autoOctave = 0;
+  state.autoPace = 1;
+  state.autoFade = null;
+  state.autoStart = state.snapshot && state.snapshotView
+    ? { canvas: state.snapshot, view: state.snapshotView }
+    : null;
   state.exploring = false;
   state.zoomStamp = performance.now();
   const token = ++state.autoToken;
@@ -1450,54 +1411,93 @@ function startAutoZoom() {
   renderChrome();
 }
 
+const AUTO_FADE_MS = 1400;
+
 let plateSerial = 1;
 
 function stepAutoZoom(token) {
   const box = viewBox();
   const aspect = box.width / Math.max(1, box.height);
-  if (!state.autoHold && state.snapshot && state.snapshotView) {
-    const steered = steerAutoZoom(aspect);
-    const now = performance.now();
-    const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
-    state.zoomStamp = now;
-    const frames = elapsed / 16.7;
-    const step = state.detailLost ? 1 : AUTO_ZOOM_STEP ** frames;
-    const pull = state.detailLost
-      ? Math.min(0.4, 1 - (0.7 ** frames))
-      : 1 - (1 - AUTO_ZOOM_PULL) ** frames;
-    const eased = easeZoom(state.view, steered, step, pull);
-    const limited = limitZoomDepth(state.snapshotView, eased, 10);
-    state.view = clampViewToPlate(state.snapshotView, limited, aspect);
+  const path = state.autoPath;
+  const now = performance.now();
+  const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
+  state.zoomStamp = now;
+  const frames = elapsed / 16.7;
+  if (path && state.autoFade) {
+    stepAutoFade(elapsed);
+    renderChrome();
+    return;
   }
-  ensureAutoPlate(token, box);
+  if (path && !state.autoHold && state.snapshot && state.snapshotView) {
+    const next = advanceAutoZoom(path, state.autoOctave, frames, state.autoPace);
+    const candidate = autoZoomView(path, next.octave);
+    const stretch = state.snapshotView.scale / candidate.scale;
+    if (plateCovers(state.snapshotView, candidate, aspect) && stretch < 6) {
+      state.autoOctave = next.octave;
+      state.view = candidate;
+      state.autoPace = Math.min(1, state.autoPace * 1.012 ** frames);
+      if (next.done && state.autoStart) beginAutoFade();
+    } else {
+      state.autoPace = Math.max(0.3, state.autoPace * 0.97 ** frames);
+    }
+  }
+  if (!state.autoFade) ensureAutoPlate(token, box);
   if (!state.autoHold && state.snapshot && state.snapshotView) drawScaledSnapshot();
   renderChrome();
 }
 
-function steerAutoZoom(aspect) {
-  const pattern = currentPattern();
-  const detail = state.zoomTarget || { x: state.view.centerX, y: state.view.centerY, score: 0 };
-  return steerZoomTarget(detail, state.view, {
-    anchor: pattern && Number.isFinite(pattern.x) ? pattern : null,
-    bias: pattern?.bias || state.pointerBias,
-    aspect,
-  });
+/** At the deepest point the picture dissolves into the first one and the dive starts again. */
+function beginAutoFade() {
+  state.autoFade = {
+    t: 0,
+    deep: { canvas: state.snapshot, view: state.snapshotView },
+    deepCamera: { ...state.view },
+  };
+}
+
+function stepAutoFade(elapsed) {
+  const fade = state.autoFade;
+  const start = state.autoStart;
+  fade.t = Math.min(1, fade.t + elapsed / AUTO_FADE_MS);
+  const box = viewBox();
+  const dest = motionRaster(box);
+  if (canvas.width !== dest.width || canvas.height !== dest.height) {
+    canvas.width = dest.width;
+    canvas.height = dest.height;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, dest.width, dest.height);
+  drawEscapePlate(fade.deep.canvas, fade.deep.view, fade.deepCamera, dest.width, dest.height);
+  const alpha = fade.t * fade.t * (3 - 2 * fade.t);
+  ctx.globalAlpha = alpha;
+  drawEscapePlate(start.canvas, start.view, autoZoomView(state.autoPath, 0), dest.width, dest.height);
+  ctx.globalAlpha = 1;
+  if (fade.t < 1) return;
+  state.view = autoZoomView(state.autoPath, 0);
+  state.snapshot = start.canvas;
+  state.snapshotView = start.view;
+  state.autoOctave = 0;
+  state.autoPace = 1;
+  state.autoFade = null;
 }
 
 function ensureAutoPlate(token, box) {
-  if (state.plateFlight) return;
+  if (state.plateFlight || !state.autoPath) return;
   const aspect = box.width / Math.max(1, box.height);
-  const aim = steerAutoZoom(aspect);
-  const ahead = aheadView(state.view, aim, 0.35);
+  const look = advanceAutoZoom(state.autoPath, state.autoOctave, 36, 1);
+  const ahead = autoZoomView(state.autoPath, look.octave);
   const cover = coverViews([state.view, ahead], aspect);
-  const cap = autoZoomIterations(state.baseDepth || depthValue(), currentMagnification());
+  const deepest = Math.min(state.view.scale, ahead.scale);
+  const cap = autoZoomIterations(state.baseDepth || depthValue(), (state.home?.scale || deepest) / deepest);
   const raster = rasterSize(box.width, box.height, box.dpr, true, plateRasterEdge(cap));
   const view = { ...cover, flipY: Boolean(state.view.flipY) };
   const job = renderJob(view);
   const flightId = plateSerial++;
   const epoch = state.epoch;
   const fractalAt = state.fractalId;
-  const patternId = state.zoomPatternId;
   state.plateFlight = flightId;
   renderEscape({
     fractalId: job.fractalId,
@@ -1511,9 +1511,9 @@ function ensureAutoPlate(token, box) {
     if (state.plateFlight === flightId) state.plateFlight = 0;
     if (!result || result.dropped) return;
     if (!state.autoZoom || token !== state.autoToken || state.epoch !== epoch) return;
-    if (state.fractalId !== fractalAt || state.zoomPatternId !== patternId) return;
+    if (state.fractalId !== fractalAt) return;
     adoptAutoPlate(result, token);
-    if (state.autoZoom && token === state.autoToken && state.zoomPatternId === patternId) {
+    if (state.autoZoom && token === state.autoToken) {
       ensureAutoPlate(token, viewBox());
     }
   }).catch(() => {
@@ -1551,6 +1551,7 @@ function adoptAutoPlate(result, token) {
     state.shownJob = result.jobId;
     state.snapshot = snap;
     state.snapshotView = finished;
+    if (!state.autoStart) state.autoStart = { canvas: snap, view: finished };
     state.autoHold = false;
     state.raster = { width: result.width, height: result.height };
     state.iterations = result.iterations;
@@ -1570,23 +1571,6 @@ function adoptAutoPlate(result, token) {
       width: snap.width,
       height: snap.height,
     };
-    const picked = detailTarget(
-      result.iterations,
-      result.basins,
-      result.width,
-      result.height,
-      result.view,
-      result.cap,
-      result.fractalId === "newton" ? "newton" : "escape",
-    );
-    if (picked.score > 0) {
-      state.detailLost = false;
-      state.zoomTarget = steadyAim(state.zoomTarget, picked, state.view);
-    } else if (state.view && state.view.scale < 0.02) {
-      state.detailLost = true;
-      state.seekTurn += 1;
-      state.zoomTarget = recoverZoomTarget(state.zoomTarget, state.view, state.seekTurn);
-    }
   });
 }
 
@@ -1633,10 +1617,6 @@ function pointerDistance(points) {
 
 function onReactivePointer(point) {
   const box = viewBox();
-  state.pointerBias = {
-    x: Math.min(1, Math.max(0, point.x / Math.max(1, box.width))),
-    y: Math.min(1, Math.max(0, point.y / Math.max(1, box.height))),
-  };
   if (state.autoZoom) return;
   if (state.fractalId === "mandelbrot" && !state.reactiveView) {
     state.reactiveView = { centerX: 0, centerY: 0, scale: 3.2, flipY: false };
@@ -1698,7 +1678,6 @@ canvas.addEventListener("pointermove", (event) => {
 canvas.addEventListener("pointerup", (event) => pointers.delete(event.pointerId));
 canvas.addEventListener("pointercancel", (event) => pointers.delete(event.pointerId));
 canvas.addEventListener("pointerleave", () => {
-  state.pointerBias = null;
   if (state.autoZoom || !isReactive() || !state.finished || state.running) return;
   state.cursorParam = null;
   state.cursorDirty = false;
@@ -1744,20 +1723,6 @@ zoomResetButton.addEventListener("click", resetExplore);
 autoZoomButton.addEventListener("click", () => {
   if (state.autoZoom) stopAutoZoom();
   else startAutoZoom();
-});
-
-zoomPatternSelect.addEventListener("change", () => {
-  state.zoomPatternId = zoomPatternSelect.value;
-  if (state.autoZoom && state.view) {
-    const pattern = currentPattern();
-    state.zoomTarget = pattern && Number.isFinite(pattern.x)
-      ? { x: pattern.x, y: pattern.y, score: 0 }
-      : { x: state.view.centerX, y: state.view.centerY, score: 0 };
-    state.detailLost = false;
-    state.seekTurn = 0;
-    state.plateFlight = 0;
-  }
-  renderChrome();
 });
 
 fractalSelect.addEventListener("change", () => {

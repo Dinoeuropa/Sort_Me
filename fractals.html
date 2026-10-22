@@ -25,7 +25,7 @@
           <p class="lede">
             Pick a fractal and a coloring, then watch it built in the order the definition produces it.
             On a finished Mandelbrot, Julia, burning ship, or Newton picture, moving the cursor changes the value.
-            Auto zoom eases into a pattern you choose. For every fractal, drag or pinch to move and scroll to zoom.
+            Auto zoom glides into the edge of the set and keeps going. For every fractal, drag or pinch to move and scroll to zoom.
             Sound follows the pen. Space plays, and the right arrow steps.
           </p>
         </header>
@@ -91,10 +91,6 @@
           <button type="button" id="zoom-out" disabled>Zoom out</button>
           <button type="button" id="zoom-reset" disabled>Reset</button>
           <button type="button" id="auto-zoom" disabled aria-pressed="false">Auto zoom</button>
-          <label id="zoom-pattern-label" class="zoom-pattern">
-            Pattern
-            <select id="zoom-pattern" aria-label="Recursive pattern to zoom toward"></select>
-          </label>
         </div>
         <ul class="legend">
           <li><i class="swatch inside"></i> <span id="legend-a">Inside</span></li>
