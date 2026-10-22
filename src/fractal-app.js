@@ -22,8 +22,10 @@ import {
   detailTarget,
   easeFactor,
   easeZoom,
-  escapeBlitRect,
+  escapeSourceBlit,
   fitZoomOut,
+  limitZoomDepth,
+  recoverZoomTarget,
   escapeMagnification,
   escapeWindow,
   iterationCap,
@@ -140,6 +142,8 @@ const state = {
   pointerBias: null,
   cursorRedraw: false,
   zoomTarget: null,
+  detailLost: false,
+  seekTurn: 0,
   snapshot: null,
   snapshotView: null,
   plate: null,
@@ -1077,8 +1081,7 @@ function blitPlate() {
   ctx.imageSmoothingQuality = "high";
   ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, dest.width, dest.height);
-  const rect = escapeBlitRect(state.plate, pictureView(), dest.width, dest.height);
-  if (rect.w > 1 && rect.h > 1) ctx.drawImage(state.plate.canvas, rect.x, rect.y, rect.w, rect.h);
+  drawEscapePlate(state.plate.canvas, state.plate, pictureView(), dest.width, dest.height);
 }
 
 function rememberCurrentPlate() {
@@ -1375,6 +1378,8 @@ function installPixels(pixels, width, height, done) {
 function haltAutoZoom() {
   state.autoZoom = false;
   state.autoHold = false;
+  state.detailLost = false;
+  state.seekTurn = 0;
   state.autoToken += 1;
   state.plateFlight = 0;
   state.snapshot = null;
@@ -1421,6 +1426,8 @@ function startAutoZoom() {
   state.zoomTarget = pattern && Number.isFinite(pattern.x)
     ? { x: pattern.x, y: pattern.y, score: 0 }
     : { x: state.view.centerX, y: state.view.centerY, score: 0 };
+  state.detailLost = false;
+  state.seekTurn = 0;
   state.plateFlight = 0;
   state.autoHold = Boolean(hoveringMandelbrot);
   if (hoveringMandelbrot) {
@@ -1454,10 +1461,13 @@ function stepAutoZoom(token) {
     const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
     state.zoomStamp = now;
     const frames = elapsed / 16.7;
-    const step = AUTO_ZOOM_STEP ** frames;
-    const pull = 1 - (1 - AUTO_ZOOM_PULL) ** frames;
+    const step = state.detailLost ? 1 : AUTO_ZOOM_STEP ** frames;
+    const pull = state.detailLost
+      ? Math.min(0.4, 1 - (0.7 ** frames))
+      : 1 - (1 - AUTO_ZOOM_PULL) ** frames;
     const eased = easeZoom(state.view, steered, step, pull);
-    state.view = clampViewToPlate(state.snapshotView, eased, aspect);
+    const limited = limitZoomDepth(state.snapshotView, eased, 10);
+    state.view = clampViewToPlate(state.snapshotView, limited, aspect);
   }
   ensureAutoPlate(token, box);
   if (!state.autoHold && state.snapshot && state.snapshotView) drawScaledSnapshot();
@@ -1569,8 +1579,21 @@ function adoptAutoPlate(result, token) {
       result.cap,
       result.fractalId === "newton" ? "newton" : "escape",
     );
-    state.zoomTarget = steadyAim(state.zoomTarget, picked, state.view);
+    if (picked.score > 0) {
+      state.detailLost = false;
+      state.zoomTarget = steadyAim(state.zoomTarget, picked, state.view);
+    } else if (state.view && state.view.scale < 0.02) {
+      state.detailLost = true;
+      state.seekTurn += 1;
+      state.zoomTarget = recoverZoomTarget(state.zoomTarget, state.view, state.seekTurn);
+    }
   });
+}
+
+function drawEscapePlate(source, plate, view, width, height) {
+  const blit = escapeSourceBlit(plate, view, width, height);
+  if (!blit) return;
+  ctx.drawImage(source, blit.sx, blit.sy, blit.sw, blit.sh, blit.dx, blit.dy, blit.dw, blit.dh);
 }
 
 function motionRaster(box) {
@@ -1598,8 +1621,7 @@ function drawScaledSnapshot() {
   ctx.imageSmoothingQuality = "high";
   ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, width, height);
-  const rect = escapeBlitRect(from, to, width, height);
-  if (rect.w > 1 && rect.h > 1) ctx.drawImage(source, rect.x, rect.y, rect.w, rect.h);
+  drawEscapePlate(source, from, to, width, height);
 }
 
 const pointers = new Map();
@@ -1731,6 +1753,8 @@ zoomPatternSelect.addEventListener("change", () => {
     state.zoomTarget = pattern && Number.isFinite(pattern.x)
       ? { x: pattern.x, y: pattern.y, score: 0 }
       : { x: state.view.centerX, y: state.view.centerY, score: 0 };
+    state.detailLost = false;
+    state.seekTurn = 0;
     state.plateFlight = 0;
   }
   renderChrome();
