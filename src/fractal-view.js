@@ -1,4 +1,4 @@
-import { planePoint } from "./fractals.js";
+import { deepCenter, hasDeepCenter, shiftView, viewOffset } from "./precision.js";
 
 /** Matches the padding drawPaths, drawTriangles, and drawPoints use. */
 export const FIT_PAD = 18;
@@ -26,6 +26,23 @@ export function escapeWindow(preset) {
     scale: preset.scale,
     flipY: Boolean(preset.flipY),
   };
+}
+
+/** A plate's window: the camera it was drawn for, with its pixel size, keeping a double-double center. */
+export function plateFrame(view, width, height) {
+  const frame = {
+    centerX: view.centerX,
+    centerY: view.centerY,
+    scale: view.scale,
+    flipY: Boolean(view.flipY),
+    width,
+    height,
+  };
+  if (hasDeepCenter(view)) {
+    frame.centerXLo = view.centerXLo || 0;
+    frame.centerYLo = view.centerYLo || 0;
+  }
+  return frame;
 }
 
 export function escapeMagnification(home, view) {
@@ -74,17 +91,21 @@ export const PLATE_EDGE_MAX = 2560;
  * A fixed path from the starting view into a target point.
  * The scale falls exponentially with `octave`, and the target drifts to the center of the frame
  * on a smooth curve. Nothing is measured while zooming, so the camera never re-aims.
- * `floor` keeps the pixel size above what a double can tell apart.
+ * `floor` keeps the pixel size above what the arithmetic can tell apart.
+ * A target with `xLo` and `yLo` is double-double, and the camera center then stays double-double.
  */
 export function autoZoomPath(start, target, floor = 5e-12) {
   const reach = Math.max(1, Math.hypot(target.x, target.y));
   const minScale = Math.max(Number(floor) || 5e-12, 0) * reach;
   const maxOctave = Math.max(1, Math.log2(start.scale / minScale));
+  const deep = typeof target.xLo === "number" || typeof target.yLo === "number";
+  const aim = { centerX: target.x, centerY: target.y, centerXLo: target.xLo || 0, centerYLo: target.yLo || 0 };
+  const offset = viewOffset(aim, start);
   return {
     start: { centerX: start.centerX, centerY: start.centerY, scale: start.scale, flipY: Boolean(start.flipY) },
-    target: { x: target.x, y: target.y },
-    offsetX: (target.x - start.centerX) / start.scale,
-    offsetY: (target.y - start.centerY) / start.scale,
+    target: deep ? { x: target.x, y: target.y, xLo: target.xLo || 0, yLo: target.yLo || 0 } : { x: target.x, y: target.y },
+    offsetX: offset.dx / start.scale,
+    offsetY: offset.dy / start.scale,
     maxOctave,
   };
 }
@@ -95,9 +116,14 @@ export function autoZoomView(path, octave) {
   const p = Math.min(1, o / AUTO_ENTER_OCTAVES);
   const keep = 1 - p * p * (3 - 2 * p);
   const scale = path.start.scale * 2 ** -o;
+  const dx = -path.offsetX * keep * scale;
+  const dy = -path.offsetY * keep * scale;
+  if (typeof path.target.xLo === "number") {
+    return { ...deepCenter(path.target, dx, dy), scale, flipY: path.start.flipY };
+  }
   return {
-    centerX: path.target.x - path.offsetX * keep * scale,
-    centerY: path.target.y - path.offsetY * keep * scale,
+    centerX: path.target.x + dx,
+    centerY: path.target.y + dy,
     scale,
     flipY: path.start.flipY,
   };
@@ -226,19 +252,29 @@ export function coverViews(views, aspect = 1) {
   for (const view of views) {
     const halfX = view.scale * safeAspect * 0.5;
     const halfY = view.scale * 0.5;
-    minX = Math.min(minX, view.centerX - halfX);
-    maxX = Math.max(maxX, view.centerX + halfX);
-    minY = Math.min(minY, view.centerY - halfY);
-    maxY = Math.max(maxY, view.centerY + halfY);
+    const at = viewOffset(view, camera);
+    minX = Math.min(minX, at.dx - halfX);
+    maxX = Math.max(maxX, at.dx + halfX);
+    minY = Math.min(minY, at.dy - halfY);
+    maxY = Math.max(maxY, at.dy + halfY);
   }
   const spanX = (maxX - minX) * 1.08;
   const spanY = (maxY - minY) * 1.08;
+  const center = shiftView(camera, (minX + maxX) / 2, (minY + maxY) / 2);
   return {
-    centerX: (minX + maxX) / 2,
-    centerY: (minY + maxY) / 2,
+    ...centerOf(center),
     scale: Math.max(spanY, spanX / safeAspect, camera.scale * PLATE_SCALE),
     flipY: Boolean(camera.flipY),
   };
+}
+
+function centerOf(view) {
+  const center = { centerX: view.centerX, centerY: view.centerY };
+  if (hasDeepCenter(view)) {
+    center.centerXLo = view.centerXLo || 0;
+    center.centerYLo = view.centerYLo || 0;
+  }
+  return center;
 }
 
 /**
@@ -254,9 +290,10 @@ export function plateCovers(plate, view, aspect = 1, slack = 0) {
   const plateHalfY = plate.scale * 0.5;
   const camHalfX = view.scale * safeAspect * 0.5;
   const camHalfY = view.scale * 0.5;
-  const marginX = plateHalfX - camHalfX - Math.abs(view.centerX - plate.centerX);
-  const marginY = plateHalfY - camHalfY - Math.abs(view.centerY - plate.centerY);
-  const allowed = Math.max(1e-9, slack * view.scale);
+  const at = viewOffset(view, plate);
+  const marginX = plateHalfX - camHalfX - Math.abs(at.dx);
+  const marginY = plateHalfY - camHalfY - Math.abs(at.dy);
+  const allowed = Math.max(1e-9, slack) * view.scale;
   return marginX >= -allowed && marginY >= -allowed;
 }
 
@@ -323,10 +360,11 @@ export function escapeBlitRect(plate, view, width, height) {
   const plateH = Math.max(1, plate.height || height);
   const spanY = plate.scale;
   const spanX = spanY * (plateW / plateH);
-  const left = plate.centerX - spanX / 2;
-  const right = plate.centerX + spanX / 2;
-  const topY = plate.centerY + (plate.flipY ? -spanY / 2 : spanY / 2);
-  const botY = plate.centerY + (plate.flipY ? spanY / 2 : -spanY / 2);
+  const at = viewOffset(plate, view);
+  const left = at.dx - spanX / 2;
+  const right = at.dx + spanX / 2;
+  const topY = at.dy + (plate.flipY ? -spanY / 2 : spanY / 2);
+  const botY = at.dy + (plate.flipY ? spanY / 2 : -spanY / 2);
   const topLeft = worldToPixel(view, width, height, left, topY);
   const bottomRight = worldToPixel(view, width, height, right, botY);
   return {
@@ -361,27 +399,25 @@ export function pointBudget(baseCount, magnification, maxCount) {
   return Math.min(maxCount, Math.max(baseCount, scaled));
 }
 
+/**
+ * Zoom about a pixel. The point under the pointer moves by its offset from the center times the
+ * change in span, a small plain double, so a double-double center keeps its digits.
+ */
 export function zoomEscape(view, factor, px, py, width, height, homeScale) {
-  const before = planePoint(view, width, height, px, py);
   const applied = appliedFactor(escapeMagnification({ scale: homeScale }, view), factor);
-  const next = { ...view, scale: view.scale / applied };
-  const after = planePoint(next, width, height, px, py);
-  return {
-    ...next,
-    centerX: next.centerX + (before.x - after.x),
-    centerY: next.centerY + (before.y - after.y),
-  };
+  const scale = view.scale / applied;
+  const aspect = width / Math.max(1, height);
+  const nx = px / Math.max(1, width) - 0.5;
+  const ny = view.flipY ? py / Math.max(1, height) - 0.5 : 0.5 - py / Math.max(1, height);
+  const shrink = view.scale - scale;
+  return { ...shiftView(view, nx * shrink * aspect, ny * shrink), scale };
 }
 
 export function panEscape(view, dx, dy, width, height) {
   const spanY = view.scale;
   const spanX = view.scale * (width / Math.max(1, height));
   const ySign = view.flipY ? -1 : 1;
-  return {
-    ...view,
-    centerX: view.centerX - (dx / Math.max(1, width)) * spanX,
-    centerY: view.centerY + ySign * (dy / Math.max(1, height)) * spanY,
-  };
+  return shiftView(view, -(dx / Math.max(1, width)) * spanX, ySign * (dy / Math.max(1, height)) * spanY);
 }
 
 export function zoomBounds(bounds, factor, px, py, width, height, home) {
@@ -432,12 +468,13 @@ export function mapPointsInto(points, native, home) {
   return out;
 }
 
-function worldToPixel(view, width, height, wx, wy) {
+/** Pixel of a point given by its offset from the camera center. */
+function worldToPixel(view, width, height, dx, dy) {
   const spanY = view.scale;
   const spanX = spanY * (width / Math.max(1, height));
-  const ny = (wy - view.centerY) / spanY;
+  const ny = dy / spanY;
   return {
-    x: ((wx - view.centerX) / spanX + 0.5) * width,
+    x: (dx / spanX + 0.5) * width,
     y: view.flipY ? (ny + 0.5) * height : (0.5 - ny) * height,
   };
 }

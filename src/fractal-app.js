@@ -40,6 +40,7 @@ import {
   pickPlate,
   plateBudget,
   plateCovers,
+  plateFrame,
   plateRasterEdge,
   pointBudget,
   rasterSize,
@@ -49,6 +50,7 @@ import {
   zoomEscape,
 } from "./fractal-view.js";
 import { renderEscape } from "./escape-pool.js";
+import { hasDeepCenter, viewOffset } from "./precision.js";
 import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, paintEscape } from "./palettes.js";
 import { runControlLabel } from "./session.js";
 import { createSpeaker } from "./sound.js";
@@ -821,6 +823,10 @@ function isReactive(id = state.fractalId) {
 
 function formatMag(mag) {
   if (!Number.isFinite(mag) || mag < 1.05) return "1×";
+  if (mag >= 1e9) {
+    const power = Math.floor(Math.log10(mag));
+    return `${(mag / 10 ** power).toFixed(1)}e${power}×`;
+  }
   if (mag >= 1e6) return `${(mag / 1e6).toFixed(mag >= 1e7 ? 0 : 1)}M×`;
   if (mag >= 10000) return `${(mag / 1000).toFixed(1)}k×`;
   if (mag >= 10) return `${Math.round(mag).toLocaleString()}×`;
@@ -1034,8 +1040,9 @@ function drawStored(geometry, box, clear) {
 function viewMoved(a, b, tolerance) {
   if (!a || !b || !(a.scale > 0) || !(b.scale > 0)) return false;
   const scale = Math.abs(Math.log(a.scale / b.scale));
-  const span = Math.max(1e-9, a.scale);
-  const center = Math.hypot(a.centerX - b.centerX, a.centerY - b.centerY) / span;
+  const span = a.scale;
+  const at = viewOffset(a, b);
+  const center = Math.hypot(at.dx, at.dy) / span;
   return scale > tolerance || center > tolerance;
 }
 
@@ -1078,15 +1085,7 @@ function rememberPlate(raster, pixels, view) {
   plate.width = raster.width;
   plate.height = raster.height;
   plate.getContext("2d").putImageData(new ImageData(pixels, raster.width, raster.height), 0, 0);
-  state.plate = {
-    canvas: plate,
-    centerX: view.centerX,
-    centerY: view.centerY,
-    scale: view.scale,
-    flipY: Boolean(view.flipY),
-    width: raster.width,
-    height: raster.height,
-  };
+  state.plate = { canvas: plate, ...plateFrame(view, raster.width, raster.height) };
 }
 
 function glideDestination(view) {
@@ -1189,6 +1188,10 @@ function renderJob(view = pictureView() || state.view) {
     framed.centerY = view.centerY;
     framed.scale = view.scale;
     framed.flipY = Boolean(view.flipY);
+    if (hasDeepCenter(view)) {
+      framed.centerXLo = view.centerXLo || 0;
+      framed.centerYLo = view.centerYLo || 0;
+    }
   }
   if (param && state.fractalId === "mandelbrot" && !state.autoZoom && Number.isFinite(param.x)) {
     framed.cx = param.x;
@@ -1242,14 +1245,7 @@ function scheduleEscape() {
     view: target,
   });
   state.flightJob = task.jobId;
-  state.flightView = {
-    centerX: target.centerX,
-    centerY: target.centerY,
-    scale: target.scale,
-    flipY: Boolean(target.flipY),
-    width: raster.width,
-    height: raster.height,
-  };
+  state.flightView = plateFrame(target, raster.width, raster.height);
   task.then((result) => {
     if (state.flightJob === result?.jobId) {
       state.flightJob = 0;
@@ -1290,14 +1286,7 @@ function applyEscapeResult(result) {
   const current = pictureView();
   const box = viewBox();
   const aspect = box.width / Math.max(1, box.height);
-  const finished = {
-    centerX: result.view.centerX,
-    centerY: result.view.centerY,
-    scale: result.view.scale,
-    flipY: Boolean(result.view.flipY),
-    width,
-    height,
-  };
+  const finished = plateFrame(result.view, width, height);
   if (current && state.plate && !plateCovers(finished, current, aspect) && plateCovers(state.plate, current, aspect)) {
     return;
   }
@@ -1305,15 +1294,7 @@ function applyEscapeResult(result) {
   plate.width = width;
   plate.height = height;
   plate.getContext("2d").putImageData(new ImageData(pixels, width, height), 0, 0);
-  state.plate = {
-    canvas: plate,
-    centerX: finished.centerX,
-    centerY: finished.centerY,
-    scale: finished.scale,
-    flipY: finished.flipY,
-    width,
-    height,
-  };
+  state.plate = { canvas: plate, ...finished };
   if (current && viewMoved(finished, current, 0.004)) blitPlate();
   else {
     if (canvas.width !== width || canvas.height !== height) {
@@ -1535,14 +1516,7 @@ function adoptAutoPlate(result, token) {
     if (!state.autoZoom || token !== state.autoToken || result.jobId < state.shownJob) return;
     const box = viewBox();
     const aspect = box.width / Math.max(1, box.height);
-    const finished = {
-      centerX: result.view.centerX,
-      centerY: result.view.centerY,
-      scale: result.view.scale,
-      flipY: Boolean(result.view.flipY),
-      width: result.width,
-      height: result.height,
-    };
+    const finished = plateFrame(result.view, result.width, result.height);
     if (!plateCovers(finished, state.view, aspect, COVER_SLACK)) return;
     state.shownJob = result.jobId;
     const plate = { canvas: snap, view: finished, born: performance.now() };
@@ -1559,15 +1533,7 @@ function adoptAutoPlate(result, token) {
     state.shownCap = result.cap;
     state.finished = true;
     state.exploring = false;
-    state.plate = {
-      canvas: snap,
-      centerX: finished.centerX,
-      centerY: finished.centerY,
-      scale: finished.scale,
-      flipY: finished.flipY,
-      width: snap.width,
-      height: snap.height,
-    };
+    state.plate = { canvas: snap, ...finished, width: snap.width, height: snap.height };
   };
   if (result.bitmap) place(result.bitmap);
   else if (result.pixels) installPixels(result.pixels, result.width, result.height, place);

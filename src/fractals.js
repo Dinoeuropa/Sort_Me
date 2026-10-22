@@ -1,3 +1,5 @@
+import { hasDeepCenter, perturbIterations, referenceOrbit } from "./precision.js";
+
 const NEWTON_ROOTS = [
   [1, 0],
   [-0.5, Math.sqrt(3) / 2],
@@ -289,6 +291,10 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
   const spanY = preset.scale;
   const spanX = preset.scale * (width / height);
   const flip = Boolean(preset.flipY);
+  if (fractal.id === "mandelbrot" && hasDeepCenter(preset)) {
+    perturbBand(preset, width, height, cap, start, rows, iterations, spanX, spanY, flip);
+    return { iterations, basins };
+  }
   const cursorC = fractal.id === "burning" && ("cx" in preset || "cy" in preset);
   const paramX = preset.cx || 0;
   const paramY = preset.cy || 0;
@@ -322,11 +328,42 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
   return { iterations, basins };
 }
 
+/**
+ * Mandelbrot pixels as offsets from a reference orbit at the plate's double-double center.
+ * Pixel offsets are small enough for a plain double, so the plate keeps its detail far below
+ * the depth at which absolute coordinates run out of digits.
+ */
+function perturbBand(preset, width, height, cap, start, rows, iterations, spanX, spanY, flip) {
+  const reference = referenceOrbit(preset.centerX, preset.centerXLo || 0, preset.centerY, preset.centerYLo || 0, cap);
+  for (let row = 0; row < rows; row += 1) {
+    const py = start + row;
+    const ny = flip ? (py + 0.5) / height - 0.5 : 0.5 - (py + 0.5) / height;
+    const dcy = ny * spanY;
+    const offset = row * width;
+    for (let px = 0; px < width; px += 1) {
+      const dcx = ((px + 0.5) / width - 0.5) * spanX;
+      iterations[offset + px] = perturbIterations(reference, dcx, dcy, cap);
+    }
+  }
+}
+
 const ANCHOR_CAP = 2400;
 
 const MINI_SHIP = { x: -1.86113, y: -0.00048 };
 
-const SEAHORSE_VALLEY = { x: -0.7436438870371587, y: 0.1318259042053120 };
+/**
+ * The center of a double spiral in the seahorse valley: a Misiurewicz point whose critical orbit
+ * lands on the repelling fixed point after 63 steps. The set is self-similar around it, and the
+ * escape time grows by about a hundred per doubling, so the edge stays in view at every depth
+ * and the iteration cap keeps up. Each coordinate is a double-double, hi + lo, found by Newton's
+ * method in that arithmetic: about −0.74369654654391224602677650092828 + 0.13172167175968114661019334859519i.
+ */
+const SEAHORSE_SPIRAL = {
+  x: -0.7436965465439123,
+  xLo: 1.6423472316984958e-17,
+  y: 0.13172167175968114,
+  yLo: 1.0660999617601176e-17,
+};
 
 function boundaryClass(fractalId, preset, x, y, cap) {
   const value = escapeValue(fractalId, preset, x, y, cap);
@@ -386,12 +423,12 @@ export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CA
 
 /**
  * The one point auto zoom dives toward for a fractal.
- * Mandelbrot dives into the seahorse valley, and a Julia set into its repelling fixed point.
- * Each lands on the edge of the set to double precision, so a boundary stays in the frame at every depth.
- * The others search for an edge near a known feature.
+ * Mandelbrot dives into a spiral center in the seahorse valley, held to double-double precision,
+ * and a Julia set into its repelling fixed point. Each is on the edge of the set, so a boundary
+ * stays in the frame at every depth. The others search for an edge near a known feature.
  */
 export function autoZoomTarget(fractalId, preset) {
-  if (fractalId === "mandelbrot") return boundaryAnchor("mandelbrot", preset, SEAHORSE_VALLEY, 2e-9);
+  if (fractalId === "mandelbrot") return { ...SEAHORSE_SPIRAL };
   if (fractalId === "julia") {
     const cx = preset.cx || 0;
     const cy = preset.cy || 0;
@@ -413,9 +450,12 @@ export function autoZoomTarget(fractalId, preset) {
 
 /**
  * How small a view auto zoom may reach for a fractal, as a multiple of the target's distance from the origin.
+ * The Mandelbrot dive is drawn in double-double, so it runs until a plate pixel nears the 32nd digit.
+ * Julia and Newton stop where a double can no longer tell pixels apart.
  * The burning ship breaks into dust a few thousand times in, so it turns back sooner than the rest.
  */
 export function autoZoomFloor(fractalId) {
+  if (fractalId === "mandelbrot") return 1e-28;
   return fractalId === "burning" ? 2.5e-5 : 5e-12;
 }
 
