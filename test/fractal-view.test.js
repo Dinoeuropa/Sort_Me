@@ -5,6 +5,7 @@ import { fitTransform } from "../src/palettes.js";
 import {
   AUTO_RAMP_MS,
   AUTO_ZOOM_STEP,
+  MANUAL_MAGNIFICATION,
   PLATE_EDGE_MIN,
   PLATE_SCALE,
   PLATE_SCALE_SETTLED,
@@ -53,6 +54,18 @@ test("zooming an escape window keeps the point under the cursor", () => {
   assert.ok(Math.abs(before.x - after.x) < 1e-9);
   assert.ok(Math.abs(before.y - after.y) < 1e-9);
   assert.ok(Math.abs(escapeMagnification(homeEscape, next) - 2) < 1e-9);
+});
+
+test("manual zoom holds a view the auto zoom left past the manual limit", () => {
+  const deep = { ...homeEscape, scale: homeEscape.scale / 1e16 };
+  const zoomedIn = zoomEscape(deep, 2, 60, 40, 200, 100, homeEscape.scale);
+  assert.equal(zoomedIn.scale, deep.scale);
+  assert.equal(zoomedIn.centerX, deep.centerX);
+  const zoomedOut = zoomEscape(deep, 0.5, 60, 40, 200, 100, homeEscape.scale);
+  assert.ok(Math.abs(zoomedOut.scale / deep.scale - 2) < 1e-9);
+  const shallow = { ...homeEscape, scale: homeEscape.scale / 8e5 };
+  const capped = zoomEscape(shallow, 4, 60, 40, 200, 100, homeEscape.scale);
+  assert.ok(Math.abs(escapeMagnification(homeEscape, capped) - MANUAL_MAGNIFICATION) < 1e-3);
 });
 
 test("dragging an escape window follows the pointer", () => {

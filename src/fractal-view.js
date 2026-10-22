@@ -155,6 +155,8 @@ export function autoZoomRamp(elapsedMs) {
 /** Smallest long edge of an auto-zoom plate. A late plate is stretched further than a small one is blurred. */
 export const PLATE_EDGE_MIN = 400;
 
+export const MANUAL_MAGNIFICATION = 1e6;
+
 /**
  * Long edge for the next plate, from how long the last one took.
  * A slow machine, or a deep view where every pixel runs thousands of iterations, gets smaller
@@ -494,9 +496,14 @@ function worldToPixel(view, width, height, dx, dy) {
   };
 }
 
+/**
+ * Manual zoom stops at a million times; a view already deeper than that (left there by the auto
+ * zoom) holds still instead of snapping back out.
+ */
 function appliedFactor(magnification, factor) {
   const safe = Number.isFinite(factor) && factor > 0 ? factor : 1;
-  const next = Math.min(1e6, Math.max(0.25, magnification * safe));
+  const ceiling = Math.max(MANUAL_MAGNIFICATION, magnification);
+  const next = Math.min(ceiling, Math.max(0.25, magnification * safe));
   return next / Math.max(1e-12, magnification);
 }
 

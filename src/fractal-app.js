@@ -811,8 +811,10 @@ function zoomNote(fractal) {
   if (!state.finished || !state.home || !state.view) return fractal.note;
   const magnification = currentMagnification();
   if (magnification < 1.05 && magnification > 0.95) return fractal.note;
-  const rounded = magnification >= 10 ? Math.round(magnification) : Math.round(magnification * 10) / 10;
-  return `${fractal.note} View is ${rounded}× closer, drawn at level ${exploredLevel().toLocaleString()}.`;
+  const shown = magnification >= 1e9
+    ? formatMag(magnification)
+    : `${magnification >= 10 ? Math.round(magnification) : Math.round(magnification * 10) / 10}×`;
+  return `${fractal.note} View is ${shown} closer, drawn at level ${exploredLevel().toLocaleString()}.`;
 }
 
 function canExplore() {
@@ -1119,7 +1121,7 @@ function requestDetail(idle) {
     return;
   }
   const limit = idle ? 0.01 : Math.log(1.12);
-  if (!state.plate || viewMoved(state.plate, view, limit)) scheduleEscape();
+  if (!state.plate || state.plate.draft || viewMoved(state.plate, view, limit)) scheduleEscape();
 }
 
 function resetExplore() {
@@ -1214,7 +1216,11 @@ function renderJob(view = pictureView() || state.view) {
 
 let newestBand = 0;
 
-function scheduleEscape() {
+/**
+ * A quick plate is the moving raster and marks itself a draft, so the sharp picture follows once it
+ * is on screen. Stopping a deep dive takes this road: the full raster there runs for many seconds.
+ */
+function scheduleEscape(quick = false) {
   if (state.autoZoom) return;
   const targetView = pictureView() || state.view;
   if (!targetView) return;
@@ -1225,7 +1231,7 @@ function scheduleEscape() {
   const box = viewBox();
   const aspect = box.width / Math.max(1, box.height);
   let target = { ...targetView };
-  let longEdge = 0;
+  let longEdge = quick ? DRAW_RASTER_EDGE : 0;
   let cap = exploredLevel();
   if (viewIsMoving() && state.home) {
     const dest = glideDestination(targetView);
@@ -1259,7 +1265,8 @@ function scheduleEscape() {
     }
     if (state.epoch !== epoch || state.fractalId !== fractalAt || state.autoZoom) return;
     if (result.jobId < newestBand || result.jobId <= state.shownJob) return;
-    applyEscapeResult(result);
+    const adopted = applyEscapeResult(result);
+    if (state.plate) state.plate.draft = adopted && longEdge > 0;
     state.cursorDirty = false;
     requestDetail(glide.factor === 1 && glide.panX === 0 && glide.panY === 0);
   }).catch(() => {
@@ -1299,8 +1306,13 @@ function applyEscapeResult(result) {
   const box = viewBox();
   const aspect = box.width / Math.max(1, box.height);
   const finished = plateFrame(result.view, width, height);
-  if (current && state.plate && !plateCovers(finished, current, aspect) && plateCovers(state.plate, current, aspect)) {
-    return;
+  if (
+    current
+    && state.plate
+    && !plateCovers(finished, current, aspect, COVER_SLACK)
+    && plateCovers(state.plate, current, aspect)
+  ) {
+    return false;
   }
   const plate = document.createElement("canvas");
   plate.width = width;
@@ -1317,6 +1329,7 @@ function applyEscapeResult(result) {
     ctx.drawImage(plate, 0, 0);
   }
   renderChrome();
+  return true;
 }
 
 /** Rows per strip when pixels are copied in on the main thread, about a megabyte at a time. */
@@ -1360,7 +1373,7 @@ function haltAutoZoom() {
 function stopAutoZoom() {
   const was = state.autoZoom;
   haltAutoZoom();
-  if (was && state.finished && state.home && state.view) scheduleEscape();
+  if (was && state.finished && state.home && state.view) scheduleEscape(true);
   renderChrome();
 }
 
