@@ -377,7 +377,7 @@ test("each reactive fractal has a fixed point to dive into", () => {
   const x2 = beta.x * beta.x - beta.y * beta.y + preset.cx;
   const y2 = 2 * beta.x * beta.y + preset.cy;
   assert.ok(Math.hypot(x2 - beta.x, y2 - beta.y) < 1e-12);
-  for (const [id, base] of [["mandelbrot", {}], ["burning", { centerX: -1.76, centerY: -0.03, scale: 0.1 }], ["newton", {}]]) {
+  for (const [id, base] of [["mandelbrot", {}], ["newton", {}]]) {
     const point = autoZoomTarget(id, base);
     assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
     const classes = new Set();
@@ -389,7 +389,17 @@ test("each reactive fractal has a fixed point to dive into", () => {
     }
     assert.ok(classes.size >= 2, id + " target sits on an edge");
   }
-  assert.ok(autoZoomFloor("burning") > autoZoomFloor("mandelbrot"));
+  const ship = autoZoomTarget("burning", { centerX: -1.76, centerY: -0.03, scale: 0.1 });
+  let previous = 0;
+  for (const d of [1e-4, 1e-6, 1e-8, 1e-10]) {
+    const escape = escapeValue("burning", {}, ship.x + d, ship.y, 2400).iteration;
+    assert.ok(escape > previous && escape < 2400, `the ship's escape time rises toward its target at ${d}`);
+    previous = escape;
+  }
+  const cursorShip = autoZoomTarget("burning", { cx: -1.76, cy: -0.03, centerX: 0, centerY: 0, scale: 3 });
+  assert.ok(Number.isFinite(cursorShip.x) && Number.isFinite(cursorShip.y));
+  assert.equal(autoZoomFloor("burning", { cx: -1.76, cy: -0.03 }), 2.5e-5);
+  assert.equal(autoZoomFloor("burning"), autoZoomFloor("mandelbrot"));
   assert.ok(autoZoomFloor("mandelbrot") > 0);
 });
 

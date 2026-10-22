@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoZoomFloor, autoZoomTarget, escapeBand, escapeFloor, escapeValue, presetById } from "../src/fractals.js";
-import { paintEscape } from "../src/palettes.js";
+import { autoZoomFloor, autoZoomTarget, escapeBand, escapeValue, paletteRange, presetById } from "../src/fractals.js";
+import { paintEscape, paletteWindow } from "../src/palettes.js";
 import {
   autoZoomIterations,
   autoZoomPath,
@@ -15,15 +15,23 @@ import {
 } from "../src/fractal-view.js";
 import {
   ddAdd,
+  ddDiv,
+  ddEscapeIterations,
+  ddJuliaBeta,
   ddMandelbrotIterations,
   ddMul,
+  ddNewtonPole,
+  ddNewtonStart,
   ddSub,
   deepCenter,
   hasDeepCenter,
+  juliaReference,
   perturbIterations,
   referenceOrbit,
   seriesSkip,
   shiftView,
+  shipJuliaReference,
+  shipReference,
   viewOffset,
 } from "../src/precision.js";
 
@@ -149,22 +157,24 @@ test("the linear skip only reaches far when the plate is small next to the refer
 test("a deep plate spreads the palette over the iterations it holds, and a shallow one is unchanged", () => {
   const target = autoZoomTarget("mandelbrot", {});
   const seahorse = presetById("mandelbrot", "seahorse");
-  assert.equal(escapeFloor("mandelbrot", seahorse, 64, 36, 300), 0);
-  assert.equal(escapeFloor("mandelbrot", { ...seahorse, centerXLo: 0, centerYLo: 0 }, 64, 36, 300), 0);
-  assert.equal(escapeFloor("julia", { ...seahorse, cx: 0.3, cy: 0.5, centerXLo: 0 }, 64, 36, 300), 0);
+  assert.deepEqual(paletteRange("mandelbrot", seahorse, 64, 36, 300), { floor: 0, top: 300 });
+  assert.deepEqual(paletteRange("mandelbrot", { ...seahorse, centerXLo: 0, centerYLo: 0 }, 64, 36, 300), { floor: 0, top: 300 });
+  assert.deepEqual(paletteRange("julia", { ...seahorse, cx: 0.3, cy: 0.5, centerXLo: 0 }, 64, 36, 300), { floor: 0, top: 300 });
   const scale = 1e-24;
   const cap = autoZoomIterations(48, 2.6 / scale);
   const deep = { ...deepCenter(target, 0, 0), scale, flipY: false };
-  const floor = escapeFloor("mandelbrot", deep, 64, 36, cap);
+  const range = paletteRange("mandelbrot", deep, 64, 36, cap);
+  const floor = range.floor;
   assert.ok(floor > cap * 0.6, `floor ${floor} sits well above zero for a cap of ${cap}`);
   assert.ok(floor < cap * 0.95);
-  assert.equal(escapeFloor("mandelbrot", deep, 64, 36, cap), floor);
+  assert.ok(range.top > cap * 0.97 && range.top <= cap, `the ramp of a Mandelbrot plate runs nearly to the cap: ${range.top} of ${cap}`);
+  assert.deepEqual(paletteRange("mandelbrot", deep, 64, 36, cap), range);
   const band = escapeBand("mandelbrot", deep, 64, 36, cap, 0, 36);
   const lowest = band.iterations.reduce((low, value) => Math.min(low, value), cap);
   assert.ok(lowest > floor * 0.9, `the lowest pixel ${lowest} is near the floor ${floor}`);
   const flat = paintEscape("ink", band.iterations, band.basins, 64, 36, cap, 36, cap);
   const spread = paintEscape("ink", band.iterations, band.basins, 64, 36, cap, 36, cap, floor);
-  const range = (pixels) => {
+  const inkRange = (pixels) => {
     let low = 255;
     let high = 0;
     for (let i = 0; i < pixels.length; i += 4) {
@@ -174,7 +184,7 @@ test("a deep plate spreads the palette over the iterations it holds, and a shall
     }
     return high - low;
   };
-  assert.ok(range(spread) > range(flat) * 3, `windowed range ${range(spread)} vs flat ${range(flat)}`);
+  assert.ok(inkRange(spread) > inkRange(flat) * 3, `windowed range ${inkRange(spread)} vs flat ${inkRange(flat)}`);
   const inside = band.iterations.findIndex((value) => value >= cap);
   if (inside >= 0) assert.deepEqual([...spread.subarray(inside * 4, inside * 4 + 3)], [...flat.subarray(inside * 4, inside * 4 + 3)]);
   const plain = paintEscape("ink", Uint16Array.from([0, 5, 10]), Int8Array.from([-1, -1, -1]), 3, 1, 10, 1, 10);
@@ -223,7 +233,248 @@ test("the Mandelbrot dive target is a spiral center on the edge, held to double-
   assert.ok(steps[63] < 1e-26);
   assert.ok(steps[69] < 1e-24);
   assert.ok(autoZoomFloor("mandelbrot") <= 1e-28);
-  assert.ok(autoZoomFloor("julia") > autoZoomFloor("mandelbrot"));
+  assert.equal(autoZoomFloor("julia"), autoZoomFloor("mandelbrot"));
+  assert.equal(autoZoomFloor("newton"), autoZoomFloor("mandelbrot"));
+});
+
+test("double-double division carries the quotient's second double", () => {
+  const [hi, lo] = ddDiv(1, 0, 3, 0);
+  assert.equal(hi, 1 / 3);
+  assert.ok(Math.abs(lo) > 1e-18 && Math.abs(lo) < 1e-16);
+  const [back, rest] = ddMul(hi, lo, 3, 0);
+  assert.equal(back, 1);
+  assert.ok(Math.abs(rest) < 1e-31);
+  const [qhi, qlo] = ddDiv(1, 1e-20, 1, 0);
+  assert.equal(qhi, 1);
+  assert.ok(Math.abs(qlo - 1e-20) < 1e-35);
+});
+
+test("the double-double fold iteration agrees with the plain burning ship where doubles suffice", () => {
+  let same = 0;
+  let total = 0;
+  for (let j = 0; j < 20; j += 1) {
+    for (let i = 0; i < 20; i += 1) {
+      const cx = -2.2 + (i / 19) * 3;
+      const cy = -1.8 + (j / 19) * 2.6;
+      const plain = escapeValue("burning", { flipY: true }, cx, cy, 300).iteration;
+      const deep = ddEscapeIterations(0, 0, 0, 0, cx, 0, cy, 0, 300, true);
+      total += 1;
+      if (plain === deep) same += 1;
+    }
+  }
+  assert.ok(same / total > 0.97, `${same} of ${total} agree`);
+  assert.equal(ddEscapeIterations(0.3, 0, 0.5, 0, -0.123, 0, 0.745, 0, 100), escapeValue("julia", { cx: -0.123, cy: 0.745 }, 0.3, 0.5, 100).iteration);
+});
+
+test("every set's deep plate matches its plain plate in the shallow regime", () => {
+  const cases = [
+    ["julia", "rabbit", {}],
+    ["julia", "siegel", {}],
+    ["burning", "wreck", {}],
+    ["burning", "ship", { cx: -1.76, cy: -0.03 }],
+    ["newton", "pinch", {}],
+    ["newton", "offset", { px: 0.1, py: -0.05 }],
+  ];
+  for (const [id, presetId, extra] of cases) {
+    const preset = { ...presetById(id, presetId), ...extra };
+    const width = 96;
+    const height = 54;
+    const cap = 300;
+    const plain = escapeBand(id, preset, width, height, cap, 0, height);
+    const deep = escapeBand(id, { ...preset, centerXLo: 0, centerYLo: 0 }, width, height, cap, 0, height);
+    let same = 0;
+    let sameBasin = 0;
+    let inside = 0;
+    for (let k = 0; k < plain.iterations.length; k += 1) {
+      if (plain.iterations[k] === deep.iterations[k]) same += 1;
+      if (plain.basins[k] === deep.basins[k]) sameBasin += 1;
+      if (plain.iterations[k] >= cap) inside += 1;
+    }
+    const total = plain.iterations.length;
+    assert.ok(same / total > 0.985, `${id} ${presetId}: ${same} of ${total} iterations agree`);
+    assert.ok(sameBasin / total > 0.995, `${id} ${presetId}: ${sameBasin} of ${total} basins agree`);
+    if (id === "julia" || presetId === "wreck") assert.ok(inside > 0, `${id} ${presetId} has an inside`);
+    if (id === "newton") assert.ok(new Set(deep.basins).size === 3, `${id} ${presetId} shows three basins`);
+  }
+});
+
+test("Julia perturbation rebases onto the critical orbit and matches double-double at depth", () => {
+  const preset = presetById("julia", "rabbit");
+  const near = juliaReference(1, 0, 1, 0, preset.cx, preset.cy, 200);
+  assert.ok(near.count < 10);
+  assert.notEqual(near.rebase, near);
+  assert.equal(near.rebase.orbit[0], 0);
+  assert.equal(perturbIterations(near, 2, 2, 200), 0);
+  assert.equal(perturbIterations(near, -1, -1, 200), escapeValue("julia", preset, 0, 0, 200).iteration);
+  const target = autoZoomTarget("julia", preset);
+  const scale = 1e-20;
+  const cap = autoZoomIterations(48, 3.2 / scale);
+  const reference = juliaReference(target.x, target.xLo, target.y, target.yLo, preset.cx, preset.cy, cap);
+  assert.equal(reference.inC, false);
+  const skip = seriesSkip(reference, scale * Math.SQRT1_2);
+  assert.ok(skip > 10 && skip < reference.count, `skips ${skip}`);
+  let same = 0;
+  let sameSkipped = 0;
+  const distinct = new Set();
+  for (let j = 0; j < 6; j += 1) {
+    for (let i = 0; i < 6; i += 1) {
+      const dx = ((i + 0.5) / 6 - 0.5) * scale;
+      const dy = ((j + 0.5) / 6 - 0.5) * scale;
+      const fast = perturbIterations(reference, dx, dy, cap);
+      const skipped = perturbIterations(reference, dx, dy, cap, skip);
+      const [zx, zxLo] = ddAdd(target.x, target.xLo, dx, 0);
+      const [zy, zyLo] = ddAdd(target.y, target.yLo, dy, 0);
+      const exact = ddEscapeIterations(zx, zxLo, zy, zyLo, preset.cx, 0, preset.cy, 0, cap);
+      if (fast === exact) same += 1;
+      if (skipped === exact) sameSkipped += 1;
+      distinct.add(fast);
+    }
+  }
+  assert.ok(same >= 34, `${same} of 36 agree`);
+  assert.ok(sameSkipped >= 34, `${sameSkipped} of 36 agree after the linear skip`);
+  assert.ok(distinct.size > 4, "the frame still has structure");
+});
+
+test("burning ship perturbation folds exactly and matches double-double at depth", () => {
+  const target = autoZoomTarget("burning", presetById("burning", "ship"));
+  assert.ok(hasDeepCenter({ centerXLo: target.xLo }));
+  for (const scale of [1e-12, 1e-20]) {
+    const cap = autoZoomIterations(48, 3.3 / scale);
+    const reference = shipReference(target.x, target.xLo, target.y, target.yLo, cap);
+    assert.equal(reference.fold, true);
+    assert.equal(reference.series, null);
+    assert.equal(seriesSkip(reference, scale), 0);
+    let same = 0;
+    const distinct = new Set();
+    for (let j = 0; j < 6; j += 1) {
+      for (let i = 0; i < 6; i += 1) {
+        const dx = ((i + 0.5) / 6 - 0.5) * scale;
+        const dy = ((j + 0.5) / 6 - 0.5) * scale;
+        const fast = perturbIterations(reference, dx, dy, cap);
+        const [cx, cxLo] = ddAdd(target.x, target.xLo, dx, 0);
+        const [cy, cyLo] = ddAdd(target.y, target.yLo, dy, 0);
+        if (fast === ddEscapeIterations(0, 0, 0, 0, cx, cxLo, cy, cyLo, cap, true)) same += 1;
+        distinct.add(fast);
+      }
+    }
+    assert.ok(same >= 35, `${same} of 36 agree at ${scale}`);
+    assert.ok(distinct.size > 6, `the frame still has structure at ${scale}`);
+  }
+  const cursor = shipJuliaReference(0.2, 0, -0.3, 0, -1.76, -0.03, 300);
+  assert.equal(cursor.inC, false);
+  assert.equal(perturbIterations(cursor, 0.1, 0.1, 300), escapeValue("burning", { cx: -1.76, cy: -0.03 }, 0.3, -0.2, 300).iteration);
+});
+
+test("each dive target is held to double-double precision and sits where it should", () => {
+  const rabbit = presetById("julia", "rabbit");
+  const beta = ddJuliaBeta(rabbit.cx, rabbit.cy);
+  assert.ok(Math.abs(beta.xLo) > 0 && Math.abs(beta.xLo) < 1e-15);
+  const xx = ddMul(beta.x, beta.xLo, beta.x, beta.xLo);
+  const yy = ddMul(beta.y, beta.yLo, beta.y, beta.yLo);
+  const xy = ddMul(beta.x, beta.xLo, beta.y, beta.yLo);
+  const re = ddSub(xx[0], xx[1], yy[0], yy[1]);
+  const fx = ddAdd(...ddSub(re[0], re[1], beta.x, beta.xLo), rabbit.cx, 0);
+  const fy = ddAdd(...ddSub(2 * xy[0], 2 * xy[1], beta.y, beta.yLo), rabbit.cy, 0);
+  assert.ok(Math.abs(fx[0] + fx[1]) < 1e-30, `beta residual ${fx[0] + fx[1]}`);
+  assert.ok(Math.abs(fy[0] + fy[1]) < 1e-30, `beta residual ${fy[0] + fy[1]}`);
+  assert.deepEqual(ddJuliaBeta(0, 0), { x: 1, xLo: 0, y: 0, yLo: 0 });
+  let previous = 0;
+  for (const exponent of [8, 14, 20, 26]) {
+    const [zx, zxLo] = ddAdd(beta.x, beta.xLo, 10 ** -exponent, 0);
+    const escape = ddEscapeIterations(zx, zxLo, beta.y, beta.yLo, rabbit.cx, 0, rabbit.cy, 0, 5000);
+    assert.ok(escape > previous && escape < 5000, `escape time rises toward beta at 1e-${exponent}`);
+    previous = escape;
+  }
+  assert.deepEqual(ddNewtonPole(0, 0), { x: 0, xLo: 0, y: 0, yLo: 0 });
+  const pole = ddNewtonPole(0.1, -0.05);
+  const px = ddMul(pole.x, pole.xLo, pole.x, pole.xLo);
+  const py = ddMul(pole.y, pole.yLo, pole.y, pole.yLo);
+  const pxy = ddMul(pole.x, pole.xLo, pole.y, pole.yLo);
+  const gx = ddAdd(...ddMul(...ddSub(px[0], px[1], py[0], py[1]), 3, 0), 0.1, 0);
+  const gy = ddAdd(...ddMul(pxy[0], pxy[1], 6, 0), -0.05, 0);
+  assert.ok(Math.abs(gx[0] + gx[1]) < 1e-30 && Math.abs(gy[0] + gy[1]) < 1e-30, "the pole is a root of 3z² + p");
+  assert.deepEqual(autoZoomTarget("newton", { px: 0.1, py: -0.05 }), pole);
+  assert.deepEqual(autoZoomTarget("julia", rabbit), beta);
+});
+
+test("a deep Newton pixel starts in double-double only while doubles could not tell it apart", () => {
+  const origin = ddNewtonStart(1e-20, 0, 2e-20, 0, 0, 0, 1e-22, 48);
+  assert.equal(origin.steps, 0, "offsets from an exact zero are already plain doubles");
+  const far = ddNewtonStart(0.5, 0, 0.5, 0, 0, 0, 1e-3, 48);
+  assert.equal(far.steps, 0);
+  assert.deepEqual([far.x, far.y], [0.5, 0.5]);
+  const bent = autoZoomTarget("newton", { px: 0.1, py: -0.05 });
+  const [bx, bxLo] = ddAdd(bent.x, bent.xLo, 3e-21, 0);
+  const near = ddNewtonStart(bx, bxLo, bent.y, bent.yLo, 0.1, -0.05, 1e-22, 48);
+  assert.equal(near.steps, 1);
+  assert.ok(Math.hypot(near.x, near.y) > 1e17, "one step near the pole throws the orbit far out");
+  const [nx, nxLo] = ddAdd(bent.x, bent.xLo, 3.1e-21, 0);
+  const next = ddNewtonStart(nx, nxLo, bent.y, bent.yLo, 0.1, -0.05, 1e-22, 48);
+  assert.ok(Math.hypot(next.x - near.x, next.y - near.y) > 1e15, "neighboring pixels land apart");
+  const pole = autoZoomTarget("newton", {});
+  const scale = 1e-20;
+  const cap = autoZoomIterations(16, 3.4 / scale);
+  const deep = { ...deepCenter(pole, 0, 0), scale, flipY: false };
+  const band = escapeBand("newton", deep, 48, 27, cap, 0, 27);
+  assert.deepEqual([...new Set(band.basins)].sort(), [0, 1, 2]);
+  assert.ok(band.iterations.every((value) => value > 60 && value < cap));
+  const plain = escapeBand("newton", { centerX: bent.x + bent.xLo, centerY: bent.y + bent.yLo, scale: 1e-8, flipY: false, px: 0.1, py: -0.05 }, 64, 36, 400, 0, 36);
+  const dd = escapeBand("newton", { ...deepCenter(bent, 0, 0), scale: 1e-8, flipY: false, px: 0.1, py: -0.05 }, 64, 36, 400, 0, 36);
+  assert.deepEqual([...dd.basins], [...plain.basins]);
+  assert.deepEqual([...dd.iterations], [...plain.iterations]);
+});
+
+test("the palette window fits a crowded plate and leaves a wide or shallow one alone", () => {
+  assert.deepEqual(paletteWindow([0, 50, 100, 150, 200], 200), { floor: 0, top: 200 });
+  assert.deepEqual(paletteWindow([], 200), { floor: 0, top: 200 });
+  const crowded = [];
+  for (let i = 0; i < 100; i += 1) crowded.push(40 + (i % 10));
+  const fitted = paletteWindow(crowded, 6000);
+  assert.ok(fitted.floor > 20 && fitted.floor < 40, `floor ${fitted.floor}`);
+  assert.ok(fitted.top > 49 && fitted.top < 70, `top ${fitted.top}`);
+  const withInside = paletteWindow([...crowded, 6000, 6000, 6000, 6000, 6000, 6000, 6000, 6000, 6000, 6000], 6000);
+  assert.deepEqual(withInside, fitted);
+  assert.deepEqual(paletteWindow(crowded, 6000, 0), { floor: 0, top: 6000 });
+  const half = paletteWindow(crowded, 6000, 0.5);
+  assert.ok(half.floor > 0 && half.floor < fitted.floor);
+  assert.ok(half.top > fitted.top && half.top < 6000);
+  const nearCap = [];
+  for (let i = 0; i < 100; i += 1) nearCap.push(5000 + i * 8);
+  assert.equal(paletteWindow(nearCap, 6000).top, 6000);
+  assert.ok(paletteWindow(nearCap, 6000).floor > 4000);
+  const rabbit = presetById("julia", "rabbit");
+  const beta = autoZoomTarget("julia", rabbit);
+  assert.deepEqual(paletteRange("julia", { ...rabbit, ...deepCenter(beta, 0, 0) }, 64, 36, 48), { floor: 0, top: 48 });
+  const deep = paletteRange("julia", { ...rabbit, ...deepCenter(beta, 0, 0), scale: 1e-20 }, 64, 36, 6000);
+  assert.ok(deep.floor > 10 && deep.top < 200, `deep Julia window ${deep.floor}..${deep.top}`);
+  const painted = paintEscape("ink", Uint16Array.from([30, 50, 70, 6000]), Int8Array.from([-1, -1, -1, -1]), 4, 1, 6000, 1, 6000, deep.floor, deep.top);
+  const flat = paintEscape("ink", Uint16Array.from([30, 50, 70, 6000]), Int8Array.from([-1, -1, -1, -1]), 4, 1, 6000, 1, 6000);
+  assert.notDeepEqual([...painted.subarray(4, 7)], [...flat.subarray(4, 7)]);
+  assert.deepEqual([...painted.subarray(12, 15)], [...flat.subarray(12, 15)]);
+  const capped = paintEscape("ink", Uint16Array.from([70, 200, 300]), Int8Array.from([-1, -1, -1]), 3, 1, 6000, 1, 6000, 0, 200);
+  assert.deepEqual([...capped.subarray(4, 7)], [...capped.subarray(8, 11)]);
+});
+
+test("the auto zoom path lands on the Julia, Newton, and burning ship targets", () => {
+  const cases = [
+    ["julia", presetById("julia", "siegel")],
+    ["newton", { ...presetById("newton", "pinch"), px: 0.1, py: -0.05 }],
+    ["burning", presetById("burning", "wreck")],
+  ];
+  for (const [id, preset] of cases) {
+    const target = autoZoomTarget(id, preset);
+    const path = autoZoomPath(preset, target, autoZoomFloor(id, preset));
+    assert.ok(path.maxOctave > 85, `${id} dives past 85 octaves`);
+    const deep = autoZoomView(path, 80);
+    assert.ok(hasDeepCenter(deep));
+    const miss = viewOffset(deep, deepCenter(target, 0, 0));
+    assert.ok(Math.abs(miss.dx) < 1e-31 && Math.abs(miss.dy) < 1e-31, `${id} lands on its target`);
+  }
+  const cursor = { ...presetById("burning", "ship"), cx: -1.76, cy: -0.03 };
+  const edge = autoZoomTarget("burning", cursor);
+  assert.equal(hasDeepCenter({ centerXLo: edge.xLo }), false);
+  const shallow = autoZoomPath(cursor, edge, autoZoomFloor("burning", cursor));
+  assert.ok(shallow.maxOctave < 20);
 });
 
 test("a double-double camera keeps its offset from a plate below the double floor", () => {
