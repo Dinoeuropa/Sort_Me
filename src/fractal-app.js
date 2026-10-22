@@ -30,8 +30,10 @@ import {
   mapPointsInto,
   panBounds,
   panEscape,
+  AUTO_ZOOM_RASTER_EDGE,
   plateCovers,
   plateRasterEdge,
+  steadyAim,
   pointBudget,
   rasterSize,
   recursionLevel,
@@ -127,6 +129,8 @@ const state = {
   epoch: 0,
   shownJob: 0,
   plateFlight: 0,
+  flightJob: 0,
+  flightView: null,
   autoZoom: false,
   zoomPatternId: "seahorse",
   autoToken: 0,
@@ -1056,7 +1060,8 @@ function viewMoved(a, b, tolerance) {
 
 function blitPlate() {
   const box = viewBox();
-  const dest = rasterSize(box.width, box.height, box.dpr, true);
+  const moving = glide.factor !== 1 || glide.panX !== 0 || glide.panY !== 0;
+  const dest = moving ? motionRaster(box) : rasterSize(box.width, box.height, box.dpr, true);
   if (canvas.width !== dest.width || canvas.height !== dest.height) {
     canvas.width = dest.width;
     canvas.height = dest.height;
@@ -1104,10 +1109,34 @@ function rememberPlate(raster, pixels, view) {
   };
 }
 
+function glideDestination(view) {
+  const box = viewBox();
+  let next = { ...view };
+  const homeScale = usingReactiveFrame() ? 3.2 : state.home?.scale || view.scale;
+  if (glide.factor !== 1) {
+    next = zoomEscape(next, glide.factor, glide.px, glide.py, box.width, box.height, homeScale);
+  }
+  if (glide.panX || glide.panY) next = panEscape(next, glide.panX, glide.panY, box.width, box.height);
+  return next;
+}
+
+function viewIsMoving() {
+  return glide.factor !== 1 || glide.panX !== 0 || glide.panY !== 0;
+}
+
 function requestDetail(idle) {
-  if (state.autoZoom || !canExplore() || currentFractal().kind !== "escape" || state.exploring) return;
+  if (state.autoZoom || !canExplore() || currentFractal().kind !== "escape") return;
   const view = pictureView();
   if (!view) return;
+  const box = viewBox();
+  const aspect = box.width / Math.max(1, box.height);
+  if (viewIsMoving()) {
+    const dest = glideDestination(view);
+    const covered = state.plate && plateCovers(state.plate, dest, aspect);
+    const inflight = state.flightView && plateCovers(state.flightView, dest, aspect);
+    if (!covered && !inflight) scheduleEscape();
+    return;
+  }
   const limit = idle ? 0.01 : Math.log(1.12);
   if (!state.plate || viewMoved(state.plate, view, limit)) scheduleEscape();
 }
@@ -1210,9 +1239,19 @@ function scheduleEscape() {
   state.exploreToken += 1;
   state.cursorRedraw = Boolean(state.cursorParam);
   const box = viewBox();
-  const raster = rasterSize(box.width, box.height, box.dpr, true);
-  const cap = exploredLevel();
-  const target = { ...targetView };
+  const aspect = box.width / Math.max(1, box.height);
+  let target = { ...targetView };
+  let longEdge = 0;
+  let cap = exploredLevel();
+  if (viewIsMoving() && state.home) {
+    const dest = glideDestination(targetView);
+    const cover = coverViews([dest, targetView], aspect);
+    target = { ...cover, flipY: Boolean(targetView.flipY) };
+    longEdge = AUTO_ZOOM_RASTER_EDGE;
+    const homeScale = usingReactiveFrame() ? 3.2 : state.home.scale;
+    cap = iterationCap(state.baseDepth || depthValue(), homeScale / Math.max(1e-12, target.scale));
+  }
+  const raster = rasterSize(box.width, box.height, box.dpr, true, longEdge);
   const job = renderJob(target);
   const task = renderEscape({
     fractalId: job.fractalId,
@@ -1223,8 +1262,24 @@ function scheduleEscape() {
     paletteId: state.paletteId,
     view: target,
   });
+  state.flightJob = task.jobId;
+  state.flightView = {
+    centerX: target.centerX,
+    centerY: target.centerY,
+    scale: target.scale,
+    flipY: Boolean(target.flipY),
+    width: raster.width,
+    height: raster.height,
+  };
   task.then((result) => {
-    if (!result || result.dropped) return;
+    if (state.flightJob === result?.jobId) {
+      state.flightJob = 0;
+      state.flightView = null;
+    }
+    if (!result || result.dropped) {
+      if (viewIsMoving() && state.flightJob === 0) requestDetail(false);
+      return;
+    }
     if (state.epoch !== epoch || state.fractalId !== fractalAt || state.autoZoom) return;
     if (result.jobId < newestBand || result.jobId <= state.shownJob) return;
     applyEscapeResult(result);
@@ -1253,18 +1308,10 @@ function applyEscapeResult(result) {
   const pixels = result.paletteId === state.paletteId
     ? result.pixels
     : paintEscape(state.paletteId, result.iterations, result.basins, width, height, result.cap, height, result.cap);
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
-  const plate = document.createElement("canvas");
-  plate.width = width;
-  plate.height = height;
-  plate.getContext("2d").drawImage(canvas, 0, 0);
-  state.plate = {
-    canvas: plate,
+  const current = pictureView();
+  const box = viewBox();
+  const aspect = box.width / Math.max(1, box.height);
+  const finished = {
     centerX: result.view.centerX,
     centerY: result.view.centerY,
     scale: result.view.scale,
@@ -1272,6 +1319,31 @@ function applyEscapeResult(result) {
     width,
     height,
   };
+  if (current && state.plate && !plateCovers(finished, current, aspect) && plateCovers(state.plate, current, aspect)) {
+    return;
+  }
+  const plate = document.createElement("canvas");
+  plate.width = width;
+  plate.height = height;
+  plate.getContext("2d").putImageData(new ImageData(pixels, width, height), 0, 0);
+  state.plate = {
+    canvas: plate,
+    centerX: finished.centerX,
+    centerY: finished.centerY,
+    scale: finished.scale,
+    flipY: finished.flipY,
+    width,
+    height,
+  };
+  if (current && viewMoved(finished, current, 0.004)) blitPlate();
+  else {
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(plate, 0, 0);
+  }
   renderChrome();
 }
 
@@ -1482,7 +1554,7 @@ function adoptAutoPlate(result, token) {
       width: snap.width,
       height: snap.height,
     };
-    state.zoomTarget = detailTarget(
+    const picked = detailTarget(
       result.iterations,
       result.basins,
       result.width,
@@ -1491,6 +1563,7 @@ function adoptAutoPlate(result, token) {
       result.cap,
       result.fractalId === "newton" ? "newton" : "escape",
     );
+    state.zoomTarget = steadyAim(state.zoomTarget, picked, state.view);
   });
 }
 

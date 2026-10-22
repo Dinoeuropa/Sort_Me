@@ -142,6 +142,31 @@ export function steerZoomTarget(detail, view, options = {}) {
   return { x, y, score: detail.score || 0 };
 }
 
+/** Keep the next aim near the camera so a new plate cannot yank the view to another filament. */
+export function steadyAim(previous, picked, camera) {
+  const span = Math.max(1e-12, camera?.scale || 1);
+  let x = Number.isFinite(picked?.x) ? picked.x : camera.centerX;
+  let y = Number.isFinite(picked?.y) ? picked.y : camera.centerY;
+  const lead = Math.hypot(x - camera.centerX, y - camera.centerY);
+  const reach = span * 0.18;
+  if (lead > reach) {
+    const keep = reach / lead;
+    x = camera.centerX + (x - camera.centerX) * keep;
+    y = camera.centerY + (y - camera.centerY) * keep;
+  }
+  if (previous && Number.isFinite(previous.x) && Number.isFinite(previous.y)) {
+    const step = span * 0.08;
+    const dx = x - previous.x;
+    const dy = y - previous.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > step) {
+      x = previous.x + (dx / dist) * step;
+      y = previous.y + (dy / dist) * step;
+    }
+  }
+  return { x, y, score: picked?.score || 0 };
+}
+
 export function easeZoom(view, target, factor = AUTO_ZOOM_STEP, pull = AUTO_ZOOM_PULL) {
   const zoom = Number.isFinite(factor) && factor > 1 ? factor : AUTO_ZOOM_STEP;
   const t = Number.isFinite(pull) ? Math.min(1, Math.max(0, pull)) : AUTO_ZOOM_PULL;
@@ -255,12 +280,9 @@ export function plateCovers(plate, view, aspect = 1) {
   return marginX >= -1e-9 && marginY >= -1e-9;
 }
 
-/** Long edge for an auto-zoom plate. Deep iteration counts use a smaller plate so a new one still arrives. */
-export function plateRasterEdge(cap) {
-  const iterations = Number(cap) || 0;
-  if (iterations > 140) return AUTO_ZOOM_RASTER_EDGE;
-  if (iterations > 64) return 2560;
-  return SHARP_RASTER_EDGE;
+/** Long edge of every auto-zoom plate. One size, so the picture does not step while the zoom runs. */
+export function plateRasterEdge() {
+  return 2560;
 }
 
 /** Zoom factor for one frame. Brisk by default, and only slower when the last plate was too slow to keep up. */

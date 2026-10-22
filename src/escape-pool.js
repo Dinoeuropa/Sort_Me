@@ -1,10 +1,19 @@
 import { renderPart } from "./escape-worker.js";
 
+const CHUNK_ROWS = 80;
+
 let workers = null;
 let failed = false;
 let nextJobId = 1;
 let active = null;
 let pending = null;
+
+/** A zoom-out replaces a closer plate already on the workers. Zooming in keeps its place in line. */
+function widerView(next, current) {
+  const from = current?.view?.scale;
+  const to = next?.view?.scale;
+  return Number.isFinite(from) && Number.isFinite(to) && to > from * 1.08;
+}
 
 function poolSize() {
   const cores = typeof navigator === "undefined" ? 2 : navigator.hardwareConcurrency || 2;
@@ -18,7 +27,7 @@ function boot() {
     const group = [];
     for (let index = 0; index < count; index += 1) {
       const worker = new Worker(new URL("./escape-worker.js", import.meta.url), { type: "module" });
-      worker.onmessage = (event) => onPart(event.data);
+      worker.onmessage = (event) => onPart(event.data, worker);
       worker.onerror = () => failPool();
       group.push(worker);
     }
@@ -61,15 +70,79 @@ export function renderEscape(request) {
   });
   promise.jobId = task.jobId;
   if (!boot()) {
-    fallback(task);
+    enqueueFallback(task);
     return promise;
   }
-  if (!active) dispatch(task);
-  else {
-    if (pending) pending.resolve({ dropped: true, jobId: pending.jobId });
-    pending = task;
-  }
+  enqueue(task);
   return promise;
+}
+
+function dropTask(task) {
+  if (!task || task.settled) return;
+  task.settled = true;
+  task.cancelled = true;
+  task.resolve({ dropped: true, jobId: task.jobId });
+}
+
+function enqueue(task) {
+  if (!active) {
+    dispatch(task);
+    return;
+  }
+  if (widerView(task, active)) {
+    dropTask(active);
+    active = null;
+    dropTask(pending);
+    pending = null;
+    dispatch(task);
+    return;
+  }
+  dropTask(pending);
+  pending = task;
+}
+
+function enqueueFallback(task) {
+  if (active && active.fallback && widerView(task, active)) {
+    dropTask(active);
+    active = null;
+    dropTask(pending);
+    pending = null;
+    fallback(task);
+    return;
+  }
+  if (active && active.fallback) {
+    dropTask(pending);
+    pending = task;
+    return;
+  }
+  fallback(task);
+}
+
+function allocate(task) {
+  task.remaining = task.height;
+  task.nextY = 0;
+  task.iterations = new Uint16Array(task.width * task.height);
+  task.basins = new Int8Array(task.iterations.length);
+  task.basins.fill(-1);
+  task.pixels = new Uint8ClampedArray(task.iterations.length * 4);
+}
+
+function postChunk(task, worker) {
+  if (task !== active || task.cancelled || task.nextY >= task.height) return;
+  const y0 = task.nextY;
+  const rows = Math.min(CHUNK_ROWS, task.height - y0);
+  task.nextY += rows;
+  worker.postMessage({
+    jobId: task.jobId,
+    fractalId: task.fractalId,
+    preset: task.preset,
+    width: task.width,
+    height: task.height,
+    cap: task.cap,
+    y0,
+    rows,
+    paletteId: task.paletteId,
+  });
 }
 
 function dispatch(task) {
@@ -82,33 +155,13 @@ function dispatch(task) {
     finish(task);
     return;
   }
-  const parts = Math.min(group.length, Math.max(1, task.height));
-  task.remaining = task.height;
-  task.iterations = new Uint16Array(task.width * task.height);
-  task.basins = new Int8Array(task.iterations.length);
-  task.basins.fill(-1);
-  task.pixels = new Uint8ClampedArray(task.iterations.length * 4);
-  let y = 0;
-  for (let part = 0; part < parts; part += 1) {
-    const rows = Math.floor(task.height / parts) + (part < task.height % parts ? 1 : 0);
-    group[part].postMessage({
-      jobId: task.jobId,
-      fractalId: task.fractalId,
-      preset: task.preset,
-      width: task.width,
-      height: task.height,
-      cap: task.cap,
-      y0: y,
-      rows,
-      paletteId: task.paletteId,
-    });
-    y += rows;
-  }
+  allocate(task);
+  for (const worker of group) postChunk(task, worker);
 }
 
-function onPart(message) {
+function onPart(message, worker) {
   const job = active;
-  if (!job || message.jobId !== job.jobId || job.fallback) return;
+  if (!job || message.jobId !== job.jobId || job.cancelled || job.fallback) return;
   if (message.rows > 0 && message.iterations && message.pixels) {
     job.iterations.set(message.iterations, message.y0 * job.width);
     job.basins.set(message.basins, message.y0 * job.width);
@@ -122,7 +175,10 @@ function onPart(message) {
     }
   }
   job.remaining -= message.rows || 0;
-  if (job.remaining > 0) return;
+  if (job.remaining > 0) {
+    postChunk(job, worker);
+    return;
+  }
   finish(job);
 }
 
@@ -144,6 +200,7 @@ function finish(job) {
     paletteId: job.paletteId,
   };
   if (active === job) active = null;
+  job.settled = true;
   resolve(result);
   const next = pending;
   pending = null;
@@ -168,6 +225,7 @@ function fallback(task) {
   let y = 0;
   const slice = Math.max(1, Math.ceil(height / 8) || 1);
   const step = () => {
+    if (task.cancelled || task.settled) return;
     if (active !== task) return;
     const rows = Math.min(slice, height - y);
     if (rows <= 0) {
