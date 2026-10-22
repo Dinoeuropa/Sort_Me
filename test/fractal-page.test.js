@@ -92,4 +92,6 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractals, /id="zoom-pattern"/);
   assert.match(fractalApp, /zoomPatterns/);
   assert.match(fractalApp, /clampViewToPlate/);
+  assert.match(fractalApp, /renderEscape/);
+  assert.match(fractalApp, /aheadView/);
 });
