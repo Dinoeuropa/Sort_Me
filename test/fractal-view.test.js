@@ -17,6 +17,7 @@ import {
   easeFactor,
   easeZoom,
   escapeBlitRect,
+  fitZoomOut,
   escapeMagnification,
   glidePull,
   iterationCap,
@@ -28,6 +29,7 @@ import {
   plateHasRoom,
   plateRasterEdge,
   plateWindow,
+  steadyAim,
   pointBudget,
   rasterSize,
   recursionLevel,
@@ -160,6 +162,10 @@ test("Mandelbrot auto zoom homes on the nautilus, then follows detail", () => {
   const local = { x: NAUTILUS.x, y: NAUTILUS.y, score: 5 };
   const biased = steerZoomTarget(local, deep, { anchor: NAUTILUS, bias: { x: 1, y: 0.5 }, aspect: 1 });
   assert.ok(biased.x > local.x);
+  const drifted = { centerX: NAUTILUS.x + 0.05, centerY: NAUTILUS.y, scale: 0.001 };
+  const stayed = steerZoomTarget(detail, drifted, { anchor: NAUTILUS });
+  assert.ok(Math.abs(stayed.x - detail.x) < 1e-12);
+  assert.ok(Math.abs(stayed.y - detail.y) < 1e-12);
 });
 
 test("each auto zoom step magnifies and eases toward the target", () => {
@@ -221,6 +227,17 @@ test("each reactive fractal offers a choice of zoom patterns", () => {
   assert.equal(zoomPatterns("koch").length, 0);
 });
 
+test("zooming out stays inside the plate until a wider one exists", () => {
+  const from = { centerX: 0, centerY: 0, scale: 0.4, flipY: false };
+  const plate = { ...from, width: 960, height: 540 };
+  const proposed = { ...from, scale: 1.2 };
+  const held = fitZoomOut(plate, from, proposed, 960 / 540);
+  assert.ok(Math.abs(held.scale - from.scale) < 1e-9);
+  const wide = { ...from, scale: 2.4, width: 960, height: 540 };
+  const opened = fitZoomOut(wide, from, proposed, 960 / 540);
+  assert.ok(Math.abs(opened.scale - proposed.scale) < 1e-9);
+});
+
 test("zooming in is not paused while the next plate is still drawing", () => {
   const camera = { centerX: 0, centerY: 0, scale: 2, flipY: false };
   const ahead = aheadView(camera, { x: 1, y: 0 }, 0.35);
@@ -236,9 +253,23 @@ test("zooming in is not paused while the next plate is still drawing", () => {
   const held = clampViewToPlate(plate, { centerX: 0.1, centerY: -0.05, scale: 0.4, flipY: false }, 1.5);
   assert.ok(Math.abs(held.scale - 0.4) < 1e-9);
   assert.ok(Math.abs(held.centerX - 0.1) < 1e-9);
-  assert.equal(plateRasterEdge(32), SHARP_RASTER_EDGE);
-  assert.equal(plateRasterEdge(96), 2560);
-  assert.equal(plateRasterEdge(180), 1920);
+  assert.equal(plateRasterEdge(32), 2560);
+  assert.equal(plateRasterEdge(180), 2560);
+  const close = { centerX: 0, centerY: 0, scale: 0.2, flipY: false };
+  const wide = { centerX: 0.05, centerY: -0.02, scale: 0.8, flipY: false };
+  const outward = coverViews([wide, close], 1.5);
+  assert.ok(plateCovers(outward, wide, 1.5));
+  assert.ok(plateCovers(outward, close, 1.5));
+  assert.ok(outward.scale >= wide.scale * 1.65 - 1e-9);
+  const deep = { centerX: -0.74, centerY: 0.13, scale: 0.01, flipY: false };
+  const jumped = steadyAim(
+    { x: deep.centerX, y: deep.centerY, score: 1 },
+    { x: deep.centerX + 0.2, y: deep.centerY - 0.2, score: 4 },
+    deep,
+  );
+  assert.ok(Math.hypot(jumped.x - deep.centerX, jumped.y - deep.centerY) < deep.scale * 0.1);
+  const far = steadyAim(null, { x: 5, y: -5, score: 2 }, deep);
+  assert.ok(Math.hypot(far.x - deep.centerX, far.y - deep.centerY) <= deep.scale * 0.18 + 1e-9);
 });
 
 test("auto zoom creeps so the picture can keep up", () => {
