@@ -43,6 +43,8 @@ function boot() {
 function failPool() {
   if (failed) return;
   failed = true;
+  for (const resolve of bitmapWaits.values()) resolve(null);
+  bitmapWaits.clear();
   const group = workers;
   workers = null;
   if (group) {
@@ -63,6 +65,7 @@ export function renderEscape(request) {
     view: request.view,
     jobId: nextJobId++,
     onBand: request.onBand,
+    bitmap: Boolean(request.bitmap),
     fallback: false,
   };
   const promise = new Promise((resolve) => {
@@ -121,6 +124,10 @@ function enqueueFallback(task) {
 function allocate(task) {
   task.remaining = task.height;
   task.nextY = 0;
+  if (task.bitmap) {
+    task.parts = [];
+    return;
+  }
   task.iterations = new Uint16Array(task.width * task.height);
   task.basins = new Int8Array(task.iterations.length);
   task.basins.fill(-1);
@@ -159,10 +166,39 @@ function dispatch(task) {
   for (const worker of group) postChunk(task, worker);
 }
 
+let nextBitmapId = 1;
+const bitmapWaits = new Map();
+
+/** Send a finished plate's bands to a worker and get back one ImageBitmap, or null if it cannot. */
+function composeOnWorker(job) {
+  const group = workers;
+  if (!group || !group.length) return Promise.resolve(null);
+  const id = nextBitmapId++;
+  const worker = group[id % group.length];
+  const buffers = job.parts.map((part) => part.pixels.buffer);
+  return new Promise((resolve) => {
+    bitmapWaits.set(id, resolve);
+    try {
+      worker.postMessage({ kind: "compose", id, width: job.width, height: job.height, parts: job.parts }, buffers);
+    } catch {
+      bitmapWaits.delete(id);
+      resolve(null);
+    }
+  });
+}
+
 function onPart(message, worker) {
+  if (message.kind === "bitmap") {
+    const resolve = bitmapWaits.get(message.id);
+    bitmapWaits.delete(message.id);
+    if (resolve) resolve(message.bitmap || null);
+    return;
+  }
   const job = active;
   if (!job || message.jobId !== job.jobId || job.cancelled || job.fallback) return;
-  if (message.rows > 0 && message.iterations && message.pixels) {
+  if (job.bitmap && message.rows > 0 && message.pixels) {
+    job.parts.push({ y0: message.y0, rows: message.rows, pixels: message.pixels });
+  } else if (message.rows > 0 && message.iterations && message.pixels) {
     job.iterations.set(message.iterations, message.y0 * job.width);
     job.basins.set(message.basins, message.y0 * job.width);
     job.pixels.set(message.pixels, message.y0 * job.width * 4);
@@ -183,6 +219,25 @@ function onPart(message, worker) {
 }
 
 function finish(job) {
+  if (job.bitmap && job.parts && !job.fallback) {
+    const parts = job.parts;
+    job.parts = null;
+    if (active === job) active = null;
+    job.settled = true;
+    composeOnWorker({ width: job.width, height: job.height, parts }).then((bitmap) => {
+      if (bitmap) {
+        job.resolve(plateResult(job, { bitmap }));
+        return;
+      }
+      const pixels = new Uint8ClampedArray(job.width * job.height * 4);
+      for (const part of parts) {
+        if (part.pixels.byteLength) pixels.set(part.pixels, part.y0 * job.width * 4);
+      }
+      job.resolve(plateResult(job, { pixels }));
+    });
+    startNext();
+    return;
+  }
   const resolve = job.resolve;
   const result = {
     dropped: false,
@@ -202,6 +257,27 @@ function finish(job) {
   if (active === job) active = null;
   job.settled = true;
   resolve(result);
+  startNext();
+}
+
+function plateResult(job, picture) {
+  return {
+    dropped: false,
+    stale: false,
+    jobId: job.jobId,
+    width: job.width,
+    height: job.height,
+    bitmap: picture.bitmap || null,
+    pixels: picture.pixels || null,
+    fractalId: job.fractalId,
+    preset: job.preset,
+    view: job.view,
+    cap: job.cap,
+    paletteId: job.paletteId,
+  };
+}
+
+function startNext() {
   const next = pending;
   pending = null;
   if (!next) return;

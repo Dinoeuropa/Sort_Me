@@ -58,6 +58,51 @@ export function colorSample(paletteId, iteration, maxIter, basin = -1) {
   return palette.paint(iter, max);
 }
 
+/** A plate whose sampled iterations span less than this share of the cap gets a fitted palette. */
+const WINDOW_SPREAD = 0.25;
+
+/**
+ * The iteration range to spread a palette over, from a grid of sampled iterations and the cap.
+ * Samples at the cap are inside and keep their own color, so only the escaped ones count. The
+ * range runs from a little under their fifth percentile to a little over their ninety-fifth, and
+ * on to the cap when that is no farther than twice the samples' width, so the pixels closest to
+ * the set keep their own shades. It eases in as they crowd together: a plate whose escapes cover a quarter of the cap or more keeps
+ * the whole cap, so an ordinary picture is colored exactly as before, and one whose escapes cover
+ * an eighth or less is fitted in full. The top comes down geometrically, so the brightening it
+ * brings is even. `weight` scales the fit down, so a dive can begin with the palette it had
+ * before diving and fit it as it goes.
+ */
+export function paletteWindow(samples, cap, weight = 1) {
+  const max = Math.max(1, cap | 0);
+  const whole = { floor: 0, top: max };
+  if (!samples || samples.length === 0 || !(weight > 0)) return whole;
+  const escaped = [];
+  for (const value of samples) {
+    const iter = Math.max(0, value | 0);
+    if (iter < max) escaped.push(iter);
+  }
+  if (escaped.length < 3) return whole;
+  escaped.sort((a, b) => a - b);
+  const low = escaped[Math.floor(escaped.length * 0.05)];
+  const high = escaped[Math.min(escaped.length - 1, Math.floor(escaped.length * 0.95))];
+  const spread = (high - low) / max;
+  if (spread >= WINDOW_SPREAD) return whole;
+  const ease = Math.min(1, (WINDOW_SPREAD - spread) / (WINDOW_SPREAD / 2)) * Math.min(1, weight);
+  const pad = Math.max(1, (high - low) * 0.1, max * 0.002);
+  const fittedFloor = Math.max(0, low - pad);
+  const gap = max - (high + pad);
+  const hold = Math.min(1, Math.max(0, 2 - gap / (2 * Math.max(1, high - low, pad))));
+  const fittedTop = high + pad + gap * hold;
+  const floor = Math.round(fittedFloor * ease);
+  const top = Math.round(max * (fittedTop / max) ** ease);
+  return { floor: Math.min(floor, max - 1), top: Math.max(floor + 1, Math.min(max, top)) };
+}
+
+/**
+ * Color an iteration grid. `floorIter` is where the palette starts: iterations at or below it take
+ * the first color. The ramp runs from there to `topIter`, or to `shownIter` when no top is given,
+ * and iterations past the top take its last color. Pixels at `shownIter` are inside.
+ */
 export function paintEscape(
   paletteId,
   iterations,
@@ -67,17 +112,26 @@ export function paintEscape(
   shownIter,
   rowLimit = height,
   revealIter = null,
+  floorIter = 0,
+  topIter = null,
 ) {
   paletteById(paletteId);
   const data = new Uint8ClampedArray(width * height * 4);
   const limit = Math.max(0, Math.min(height, rowLimit));
   const max = Math.max(1, shownIter);
   const span = max + 1;
+  const floor = Math.min(Math.max(0, floorIter | 0), max - 1);
+  const top = topIter == null ? max : Math.min(max, Math.max(floor + 1, topIter | 0));
+  const range = top - floor;
   const lut = new Uint8ClampedArray(4 * span * 3);
   for (let iter = 0; iter < span; iter += 1) {
-    writeLut(lut, span, 3, iter, colorSample(paletteId, iter, shownIter, -1));
+    const lifted = Math.max(0, iter - floor);
+    const inside = iter >= max;
+    const value = inside ? lifted : Math.min(lifted, range);
+    const over = inside ? lifted : top < max ? range + 1 : range;
+    writeLut(lut, span, 3, iter, colorSample(paletteId, value, over, -1));
     for (let basin = 0; basin < 3; basin += 1) {
-      writeLut(lut, span, basin, iter, colorSample(paletteId, iter, shownIter, basin));
+      writeLut(lut, span, basin, iter, colorSample(paletteId, value, over, basin));
     }
   }
   const revealing = revealIter != null;

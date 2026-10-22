@@ -336,22 +336,6 @@ output {
   gap: 0.45rem;
 }
 
-.zoom-pattern {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.zoom-pattern select {
-  width: auto;
-  min-width: 11.5rem;
-  border-radius: 999px;
-  padding: 0.5rem 0.75rem;
-}
-
 button {
   background: var(--panel-2);
   border: 1px solid var(--line);
@@ -536,7 +520,8 @@ canvas.pixelated { image-rendering: pixelated; }
 .note {
   margin: 0.35rem 0 0;
   color: var(--muted);
-  min-height: 1.3rem;
+  min-height: 2.75rem;
+  min-height: 2lh;
 }
 
 @media (max-width: 900px) {

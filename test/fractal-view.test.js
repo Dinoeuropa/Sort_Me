@@ -1,48 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planePoint } from "../src/fractals.js";
+import { autoZoomFloor, autoZoomTarget, boundaryAnchor, escapeValue, planePoint } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
-  AUTO_ZOOM_PULL,
+  AUTO_RAMP_MS,
   AUTO_ZOOM_STEP,
+  MANUAL_MAGNIFICATION,
+  PLATE_EDGE_MIN,
+  PLATE_SCALE,
+  PLATE_SCALE_SETTLED,
+  PLATE_TARGET_MS,
   FIT_PAD,
-  NAUTILUS,
   SHARP_RASTER_EDGE,
+  advanceAutoZoom,
   autoZoomIterations,
-  aheadView,
+  autoZoomPath,
+  autoZoomRamp,
+  autoZoomView,
   boundsMagnification,
   clampViewToPlate,
   coverViews,
-  detailTarget,
   easeFactor,
-  easeZoom,
   escapeBlitRect,
   escapeSourceBlit,
   fitZoomOut,
-  limitZoomDepth,
-  recoverZoomTarget,
   escapeMagnification,
-  glidePull,
   iterationCap,
   levelBlend,
   mapPointsInto,
   panBounds,
   panEscape,
   plateCovers,
-  plateHasRoom,
+  pickPlate,
+  plateBudget,
+  plateMargin,
   plateRasterEdge,
-  plateWindow,
-  steadyAim,
   pointBudget,
   rasterSize,
   recursionLevel,
-  steerZoomTarget,
   unproject,
   wheelZoomFactor,
   zoomBounds,
   zoomEscape,
-  zoomPatterns,
-  zoomStepForPlate,
 } from "../src/fractal-view.js";
 
 const homeEscape = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
@@ -55,6 +54,18 @@ test("zooming an escape window keeps the point under the cursor", () => {
   assert.ok(Math.abs(before.x - after.x) < 1e-9);
   assert.ok(Math.abs(before.y - after.y) < 1e-9);
   assert.ok(Math.abs(escapeMagnification(homeEscape, next) - 2) < 1e-9);
+});
+
+test("manual zoom holds a view the auto zoom left past the manual limit", () => {
+  const deep = { ...homeEscape, scale: homeEscape.scale / 1e16 };
+  const zoomedIn = zoomEscape(deep, 2, 60, 40, 200, 100, homeEscape.scale);
+  assert.equal(zoomedIn.scale, deep.scale);
+  assert.equal(zoomedIn.centerX, deep.centerX);
+  const zoomedOut = zoomEscape(deep, 0.5, 60, 40, 200, 100, homeEscape.scale);
+  assert.ok(Math.abs(zoomedOut.scale / deep.scale - 2) < 1e-9);
+  const shallow = { ...homeEscape, scale: homeEscape.scale / 8e5 };
+  const capped = zoomEscape(shallow, 4, 60, 40, 200, 100, homeEscape.scale);
+  assert.ok(Math.abs(escapeMagnification(homeEscape, capped) - MANUAL_MAGNIFICATION) < 1e-3);
 });
 
 test("dragging an escape window follows the pointer", () => {
@@ -118,119 +129,6 @@ test("auto zoom raises iterations with the log of magnification", () => {
   assert.ok(autoZoomIterations(48, 2e8) > 1600);
 });
 
-test("zoom targeting prefers a boundary over the empty interior", () => {
-  const width = 5;
-  const height = 5;
-  const iterations = new Uint16Array(width * height);
-  const basins = new Int8Array(iterations.length);
-  basins.fill(-1);
-  iterations.fill(4);
-  iterations[12] = 40;
-  iterations[6] = 30;
-  iterations[7] = 12;
-  iterations[5] = 18;
-  iterations[1] = 22;
-  iterations[11] = 8;
-  const view = { centerX: 0, centerY: 0, scale: 2 };
-  const target = detailTarget(iterations, basins, width, height, view, 40, "escape");
-  const interior = planePoint(view, width, height, 2, 2);
-  assert.ok(target.score > 0);
-  assert.ok(Math.hypot(target.x - interior.x, target.y - interior.y) > 0.2);
-});
-
-test("Newton zoom targeting sits on a basin boundary", () => {
-  const width = 6;
-  const height = 4;
-  const iterations = new Uint16Array(width * height);
-  const basins = new Int8Array(iterations.length);
-  iterations.fill(3);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) basins[y * width + x] = x < 3 ? 0 : 1;
-  }
-  const view = { centerX: 0, centerY: 0, scale: 2 };
-  const target = detailTarget(iterations, basins, width, height, view, 12, "newton");
-  assert.ok(target.score > 0);
-  assert.ok(Math.abs(target.x) < 0.8);
-});
-
-test("Mandelbrot auto zoom homes on the nautilus, then follows detail", () => {
-  const detail = { x: 0.3, y: -0.4, score: 5 };
-  const wide = { centerX: -0.75, centerY: 0, scale: 2.6 };
-  const early = steerZoomTarget(detail, wide, { anchor: NAUTILUS });
-  assert.ok(Math.abs(early.x - NAUTILUS.x) < 1e-12);
-  assert.ok(Math.abs(early.y - NAUTILUS.y) < 1e-12);
-  const deep = { centerX: NAUTILUS.x, centerY: NAUTILUS.y, scale: 0.001 };
-  const later = steerZoomTarget(detail, deep, { anchor: NAUTILUS });
-  assert.ok(Math.abs(later.x - detail.x) < 1e-12);
-  assert.ok(Math.abs(later.y - detail.y) < 1e-12);
-  const local = { x: NAUTILUS.x, y: NAUTILUS.y, score: 5 };
-  const biased = steerZoomTarget(local, deep, { anchor: NAUTILUS, bias: { x: 1, y: 0.5 }, aspect: 1 });
-  assert.ok(biased.x > local.x);
-  const drifted = { centerX: NAUTILUS.x + 0.05, centerY: NAUTILUS.y, scale: 0.001 };
-  const stayed = steerZoomTarget(detail, drifted, { anchor: NAUTILUS });
-  assert.ok(Math.abs(stayed.x - detail.x) < 1e-12);
-  assert.ok(Math.abs(stayed.y - detail.y) < 1e-12);
-});
-
-test("each auto zoom step magnifies and eases toward the target", () => {
-  const view = { centerX: 0, centerY: 0, scale: 2, flipY: false };
-  const next = easeZoom(view, { x: 1, y: -1 }, 1.02, 0.5);
-  assert.ok(Math.abs(view.scale / next.scale - 1.02) < 1e-9);
-  assert.ok(next.centerX > view.centerX);
-  assert.ok(next.centerY < view.centerY);
-});
-
-test("an auto-zoom plate covers the camera and a camera cannot leave it", () => {
-  const camera = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
-  const plate = plateWindow(camera, { x: NAUTILUS.x, y: NAUTILUS.y }, 1.6);
-  assert.ok(plate.scale > camera.scale);
-  assert.ok(plate.scale <= camera.scale * 1.7);
-  const halfY = plate.scale / 2;
-  const halfX = plate.scale * 1.6 / 2;
-  assert.ok(Math.abs(camera.centerX - plate.centerX) + camera.scale * 1.6 / 2 < halfX);
-  assert.ok(Math.abs(camera.centerY - plate.centerY) + camera.scale / 2 < halfY);
-  const rushed = { ...camera, centerX: 2, centerY: 2, scale: camera.scale / 2 };
-  const held = clampViewToPlate({ ...plate, width: 160, height: 100 }, rushed, 1.6);
-  assert.ok(Math.abs(held.centerX - plate.centerX) < halfX);
-  assert.ok(Math.abs(held.centerY - plate.centerY) < halfY);
-  assert.ok(held.scale <= plate.scale);
-  assert.equal(plateHasRoom(plate, camera, 1.6), true);
-  assert.equal(plateHasRoom(camera, camera, 1.6), false);
-});
-
-test("auto zoom doubles about once a second", () => {
-  const gentle = zoomStepForPlate(1.65, 4000, 16.7);
-  const brisk = zoomStepForPlate(1.65, 300, 16.7);
-  assert.ok(gentle >= 1.006);
-  assert.ok(brisk > gentle);
-  assert.ok(brisk <= AUTO_ZOOM_STEP);
-  const mag = AUTO_ZOOM_STEP ** 60;
-  assert.ok(mag > 1.8);
-  assert.ok(mag < 2.6);
-  let view = { centerX: 0, centerY: 0, scale: 2, flipY: false };
-  for (let i = 0; i < 60; i += 1) {
-    view = easeZoom(view, { x: 1, y: 1 }, AUTO_ZOOM_STEP, AUTO_ZOOM_PULL);
-  }
-  assert.ok(2 / view.scale > 1.8);
-  assert.ok(view.centerX > 0.5);
-});
-
-test("each reactive fractal offers a choice of zoom patterns", () => {
-  const mandelbrot = zoomPatterns("mandelbrot");
-  const names = mandelbrot.map((pattern) => pattern.name);
-  assert.ok(names.includes("Seahorse spiral"));
-  assert.ok(names.includes("Mini Mandelbrot"));
-  assert.ok(names.includes("Elephant valley"));
-  const seahorse = mandelbrot.find((pattern) => pattern.id === "seahorse");
-  const mini = mandelbrot.find((pattern) => pattern.id === "mini");
-  assert.ok(Math.hypot(seahorse.x - mini.x, seahorse.y - mini.y) > 0.5);
-  assert.ok(zoomPatterns("julia").length >= 2);
-  assert.ok(zoomPatterns("julia").some((pattern) => pattern.bias));
-  assert.ok(zoomPatterns("burning").length >= 2);
-  assert.ok(zoomPatterns("newton").some((pattern) => pattern.name === "Triple point"));
-  assert.equal(zoomPatterns("koch").length, 0);
-});
-
 test("zooming out stays inside the plate until a wider one exists", () => {
   const from = { centerX: 0, centerY: 0, scale: 0.4, flipY: false };
   const plate = { ...from, width: 960, height: 540 };
@@ -244,14 +142,16 @@ test("zooming out stays inside the plate until a wider one exists", () => {
 
 test("zooming in is not paused while the next plate is still drawing", () => {
   const camera = { centerX: 0, centerY: 0, scale: 2, flipY: false };
-  const ahead = aheadView(camera, { x: 1, y: 0 }, 0.35);
-  const grown = camera.scale / ahead.scale;
+  const path = autoZoomPath(camera, { x: 1, y: 0 });
+  const look = advanceAutoZoom(path, 3, 36, 1);
+  const ahead = autoZoomView(path, look.octave);
+  const now = autoZoomView(path, 3);
+  const grown = now.scale / ahead.scale;
   assert.ok(grown > 1.2);
-  assert.ok(grown < 1.4);
-  assert.ok(ahead.centerX > camera.centerX);
-  const cover = coverViews([camera, ahead], 1.5);
-  assert.ok(cover.scale >= camera.scale * 1.65 - 1e-9);
-  assert.equal(plateCovers(cover, camera, 1.5), true);
+  assert.ok(grown < 2.2);
+  const cover = coverViews([now, ahead], 1.5);
+  assert.ok(cover.scale >= now.scale * 1.65 - 1e-9);
+  assert.equal(plateCovers(cover, now, 1.5), true);
   assert.equal(plateCovers(cover, ahead, 1.5), true);
   const plate = { centerX: 0, centerY: 0, scale: 2, width: 300, height: 200, flipY: false };
   const held = clampViewToPlate(plate, { centerX: 0.1, centerY: -0.05, scale: 0.4, flipY: false }, 1.5);
@@ -267,23 +167,6 @@ test("zooming in is not paused while the next plate is still drawing", () => {
   assert.ok(plateCovers(outward, wide, 1.5));
   assert.ok(plateCovers(outward, close, 1.5));
   assert.ok(outward.scale >= wide.scale * 1.65 - 1e-9);
-  const deep = { centerX: -0.74, centerY: 0.13, scale: 0.01, flipY: false };
-  const jumped = steadyAim(
-    { x: deep.centerX, y: deep.centerY, score: 1 },
-    { x: deep.centerX + 0.2, y: deep.centerY - 0.2, score: 4 },
-    deep,
-  );
-  const jump = Math.hypot(jumped.x - deep.centerX, jumped.y - deep.centerY);
-  assert.ok(jump < deep.scale);
-  assert.ok(jump > deep.scale * 0.5);
-  const far = steadyAim(null, { x: 5, y: -5, score: 2 }, deep);
-  assert.ok(Math.hypot(far.x - deep.centerX, far.y - deep.centerY) <= deep.scale * 0.95 + 1e-9);
-  const near = steadyAim(
-    { x: deep.centerX, y: deep.centerY, score: 1 },
-    { x: deep.centerX + deep.scale * 0.4, y: deep.centerY, score: 6 },
-    deep,
-  );
-  assert.ok(Math.abs(near.x - (deep.centerX + deep.scale * 0.4)) < deep.scale * 0.02);
 });
 
 test("a deep zoom still samples the plate instead of stretching it off the canvas", () => {
@@ -299,33 +182,6 @@ test("a deep zoom still samples the plate instead of stretching it off the canva
   assert.ok(blit.sh < 2);
   assert.ok(blit.sx >= 0 && blit.sx < width);
   assert.ok(blit.sy >= 0 && blit.sy < height);
-  const held = limitZoomDepth(plate, view, 10);
-  assert.ok(Math.abs(held.scale - plate.scale / 10) < 1e-12);
-  const lost = recoverZoomTarget({ x: plate.centerX, y: plate.centerY, score: 0 }, view, 1);
-  assert.ok(Math.hypot(lost.x - view.centerX, lost.y - view.centerY) > view.scale * 0.4);
-  assert.ok(Math.hypot(lost.x - view.centerX, lost.y - view.centerY) < view.scale * 0.7);
-});
-
-test("a thin filament still steers the zoom", () => {
-  const width = 90;
-  const height = 60;
-  const iterations = new Uint16Array(width * height);
-  const basins = new Int8Array(iterations.length);
-  basins.fill(-1);
-  iterations.fill(4);
-  for (let y = 0; y < height; y += 1) iterations[y * width + 7] = 20;
-  const view = { centerX: 0, centerY: 0, scale: 2, flipY: false };
-  const target = detailTarget(iterations, basins, width, height, view, 40, "escape");
-  assert.ok(target.score > 0);
-  const point = planePoint(view, width, height, 7, height / 2);
-  assert.ok(Math.abs(target.x - point.x) < 0.05);
-});
-
-test("auto zoom creeps so the picture can keep up", () => {
-  assert.ok(AUTO_ZOOM_STEP >= 1.01);
-  assert.ok(AUTO_ZOOM_STEP <= 1.02);
-  assert.ok(AUTO_ZOOM_PULL >= 0.04);
-  assert.ok(AUTO_ZOOM_PULL <= 0.08);
 });
 
 test("a finished escape picture is sampled at 4K", () => {
@@ -400,4 +256,161 @@ test("a curve mapped into its own bounds stays put", () => {
   assert.ok(Math.abs(points[1]) < 1e-9);
   assert.ok(Math.abs(points[2] - 4) < 1e-9);
   assert.ok(Math.abs(points[3] - 4) < 1e-9);
+});
+
+test("auto zoom follows one fixed path into its target", () => {
+  const start = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
+  const target = { x: -0.7436, y: 0.1318 };
+  const path = autoZoomPath(start, target);
+  const first = autoZoomView(path, 0);
+  assert.ok(Math.abs(first.centerX - start.centerX) < 1e-12);
+  assert.ok(Math.abs(first.centerY - start.centerY) < 1e-12);
+  assert.ok(Math.abs(first.scale - start.scale) < 1e-12);
+  const deep = autoZoomView(path, 20);
+  assert.ok(Math.abs(deep.centerX - target.x) < deep.scale * 1e-6);
+  assert.ok(Math.abs(deep.centerY - target.y) < deep.scale * 1e-6);
+  assert.ok(Math.abs(start.scale / deep.scale - 2 ** 20) < 1);
+  assert.ok(path.maxOctave > 30);
+  let previous = autoZoomView(path, 0);
+  let biggest = 0;
+  for (let o = 0.01; o <= 12; o += 0.01) {
+    const view = autoZoomView(path, o);
+    const step = Math.hypot(view.centerX - previous.centerX, view.centerY - previous.centerY) / view.scale;
+    biggest = Math.max(biggest, step);
+    previous = view;
+  }
+  assert.ok(biggest < 0.05);
+});
+
+test("auto zoom keeps one steady pace and only reports passing the deepest point", () => {
+  const path = autoZoomPath({ centerX: 0, centerY: 0, scale: 2, flipY: false }, { x: 0, y: 0 });
+  const early = advanceAutoZoom(path, 0, 1, 1);
+  const middle = advanceAutoZoom(path, 10, 1, 1);
+  const late = advanceAutoZoom(path, path.maxOctave - 0.5, 1, 1);
+  const step = Math.log2(AUTO_ZOOM_STEP);
+  assert.ok(Math.abs(early.octave - step) < 1e-9);
+  assert.ok(Math.abs(middle.octave - 10 - step) < 1e-9);
+  assert.ok(Math.abs(late.octave - (path.maxOctave - 0.5) - step) < 1e-9);
+  assert.equal(middle.done, false);
+  const past = advanceAutoZoom(path, path.maxOctave - 0.001, 1, 1);
+  assert.equal(past.done, true);
+  assert.ok(past.octave > path.maxOctave);
+  const beyond = autoZoomView(path, path.maxOctave + 1);
+  assert.ok(Math.abs(beyond.scale - autoZoomView(path, path.maxOctave).scale / 2) < 1e-15);
+  assert.equal(advanceAutoZoom(path, 5, 1, 0).octave, 5);
+});
+
+test("auto zoom starts from rest and the start is a smooth ramp", () => {
+  assert.equal(autoZoomRamp(0), 0);
+  assert.equal(autoZoomRamp(AUTO_RAMP_MS), 1);
+  assert.equal(autoZoomRamp(AUTO_RAMP_MS * 5), 1);
+  let previous = 0;
+  for (let ms = 10; ms <= AUTO_RAMP_MS; ms += 10) {
+    const pace = autoZoomRamp(ms);
+    assert.ok(pace >= previous);
+    assert.ok(pace - previous < 0.02);
+    previous = pace;
+  }
+  assert.ok(autoZoomRamp(AUTO_RAMP_MS / 2) > 0.45 && autoZoomRamp(AUTO_RAMP_MS / 2) < 0.55);
+});
+
+test("plates shrink on a slow machine and grow back when they arrive early", () => {
+  const slow = plateBudget(2560, PLATE_TARGET_MS * 4);
+  assert.ok(slow < 2560);
+  assert.ok(slow >= 2560 * 0.6 - 1);
+  const crawl = plateBudget(500, PLATE_TARGET_MS * 100);
+  assert.equal(crawl, PLATE_EDGE_MIN);
+  assert.ok(PLATE_EDGE_MIN >= 400);
+  const quick = plateBudget(1200, PLATE_TARGET_MS / 4);
+  assert.ok(quick > 1200);
+  assert.ok(quick <= 1500);
+  assert.equal(plateBudget(2560, PLATE_TARGET_MS / 10), 2560);
+  assert.equal(plateBudget(2000, PLATE_TARGET_MS / 10, 1600), 1600);
+  assert.equal(plateBudget(NaN, NaN), 2560);
+});
+
+test("the finest plate that covers the frame is drawn, and none means every plate", () => {
+  const wide = { view: { centerX: 0, centerY: 0, scale: 4, width: 400, height: 300, flipY: false } };
+  const mid = { view: { centerX: 0.1, centerY: 0.1, scale: 1, width: 400, height: 300, flipY: false } };
+  const fine = { view: { centerX: 0.2, centerY: 0.1, scale: 0.2, width: 400, height: 300, flipY: false } };
+  const plates = [wide, mid, fine];
+  assert.equal(pickPlate(plates, { centerX: 0.2, centerY: 0.1, scale: 0.1, flipY: false }, 4 / 3), 2);
+  assert.equal(pickPlate(plates, { centerX: 0.2, centerY: 0.1, scale: 0.5, flipY: false }, 4 / 3), 1);
+  assert.equal(pickPlate(plates, { centerX: 0, centerY: 0, scale: 3, flipY: false }, 4 / 3), 0);
+  assert.equal(pickPlate(plates, { centerX: 0, centerY: 0, scale: 5, flipY: false }, 4 / 3), -1);
+  assert.equal(pickPlate([], { centerX: 0, centerY: 0, scale: 1, flipY: false }), -1);
+  const shot = { view: { centerX: 0, centerY: 0, scale: 2, width: 1279, height: 720, flipY: false } };
+  const frame = { centerX: 0, centerY: 0, scale: 2, flipY: false };
+  assert.equal(plateCovers(shot.view, frame, 1280 / 720), false);
+  assert.equal(pickPlate([shot], frame, 1280 / 720), 0);
+  assert.equal(pickPlate([shot], { ...frame, centerX: 0.05 }, 1280 / 720), -1);
+});
+
+test("plates lose their wide margin once the target sits in the middle of the frame", () => {
+  assert.equal(plateMargin(0), PLATE_SCALE);
+  assert.equal(plateMargin(5.9), PLATE_SCALE);
+  assert.equal(plateMargin(6), PLATE_SCALE_SETTLED);
+  assert.equal(plateMargin(80), PLATE_SCALE_SETTLED);
+  assert.ok(PLATE_SCALE_SETTLED > 1 && PLATE_SCALE_SETTLED < PLATE_SCALE);
+  const camera = { centerX: -0.74, centerY: 0.13, scale: 1e-10, flipY: false };
+  const ahead = { ...camera, scale: 1e-11 };
+  const wide = coverViews([camera, ahead], 1.5);
+  const snug = coverViews([camera, ahead], 1.5, plateMargin(40));
+  assert.ok(Math.abs(wide.scale - camera.scale * PLATE_SCALE) < 1e-20);
+  assert.ok(Math.abs(snug.scale - camera.scale * PLATE_SCALE_SETTLED) < 1e-20);
+  assert.ok(plateCovers(snug, camera, 1.5));
+  assert.ok(plateCovers(snug, ahead, 1.5));
+  assert.equal(coverViews([camera], 1.5, 0).scale, wide.scale);
+});
+
+test("auto zoom doubles about once a second", () => {
+  const mag = AUTO_ZOOM_STEP ** 60;
+  assert.ok(mag > 1.8);
+  assert.ok(mag < 2.6);
+});
+
+test("each reactive fractal has a fixed point to dive into", () => {
+  const mandelbrot = autoZoomTarget("mandelbrot", {});
+  assert.ok(Math.hypot(mandelbrot.x + 0.7436, mandelbrot.y - 0.1318) < 1e-3);
+  const preset = { cx: -0.8, cy: 0.156 };
+  const beta = autoZoomTarget("julia", preset);
+  const x2 = beta.x * beta.x - beta.y * beta.y + preset.cx;
+  const y2 = 2 * beta.x * beta.y + preset.cy;
+  assert.ok(Math.hypot(x2 - beta.x, y2 - beta.y) < 1e-12);
+  for (const [id, base] of [["mandelbrot", {}], ["newton", {}]]) {
+    const point = autoZoomTarget(id, base);
+    assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
+    const classes = new Set();
+    for (let j = -3; j <= 3; j += 1) {
+      for (let i = -3; i <= 3; i += 1) {
+        const value = escapeValue(id, base, point.x + i * 1e-9, point.y + j * 1e-9, 2400);
+        classes.add(id === "newton" ? value.basin : value.iteration >= 2400 ? 1 : 0);
+      }
+    }
+    assert.ok(classes.size >= 2, id + " target sits on an edge");
+  }
+  const ship = autoZoomTarget("burning", { centerX: -1.76, centerY: -0.03, scale: 0.1 });
+  let previous = 0;
+  for (const d of [1e-4, 1e-6, 1e-8, 1e-10]) {
+    const escape = escapeValue("burning", {}, ship.x + d, ship.y, 2400).iteration;
+    assert.ok(escape > previous && escape < 2400, `the ship's escape time rises toward its target at ${d}`);
+    previous = escape;
+  }
+  const cursorShip = autoZoomTarget("burning", { cx: -1.76, cy: -0.03, centerX: 0, centerY: 0, scale: 3 });
+  assert.ok(Number.isFinite(cursorShip.x) && Number.isFinite(cursorShip.y));
+  assert.equal(autoZoomFloor("burning", { cx: -1.76, cy: -0.03 }), 2.5e-5);
+  assert.equal(autoZoomFloor("burning"), autoZoomFloor("mandelbrot"));
+  assert.ok(autoZoomFloor("mandelbrot") > 0);
+});
+
+test("a boundary anchor lands on the edge of the set", () => {
+  const point = boundaryAnchor("mandelbrot", {}, { x: 0.3, y: 0 }, 0.1);
+  const classes = new Set();
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const value = escapeValue("mandelbrot", {}, point.x + dx * 1e-9, point.y + dy * 1e-9, 2400);
+    classes.add(value.iteration >= 2400);
+  }
+  assert.ok(Math.hypot(point.x - 0.3, point.y) < 0.15);
+  assert.equal(classes.size, 2);
+  assert.deepEqual(boundaryAnchor("mandelbrot", {}, { x: 5, y: 5 }, 0.01), { x: 5, y: 5 });
 });
