@@ -520,7 +520,8 @@ canvas.pixelated { image-rendering: pixelated; }
 .note {
   margin: 0.35rem 0 0;
   color: var(--muted);
-  min-height: 1.3rem;
+  min-height: 2.75rem;
+  min-height: 2lh;
 }
 
 @media (max-width: 900px) {

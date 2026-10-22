@@ -56,10 +56,19 @@ export const AUTO_OCTAVES_PER_FRAME = Math.log2(AUTO_ZOOM_STEP);
 export const PLATE_SCALE = 1.65;
 
 /** Octaves over which the target slides from where it started to the middle of the frame. */
-const AUTO_ENTER_OCTAVES = 4;
+const AUTO_ENTER_OCTAVES = 6;
 
-/** Octaves at either end of the path over which the pace eases to a crawl. */
-const AUTO_TURN_OCTAVES = 2.5;
+/** Milliseconds over which auto zoom builds from rest to full pace when it starts. */
+export const AUTO_RAMP_MS = 1400;
+
+/** Milliseconds a freshly finished plate takes to blend over the stretched one beneath it. */
+export const PLATE_BLEND_MS = 320;
+
+/** How long a plate should take to draw, so the next one is ready before the view has stretched far. */
+export const PLATE_TARGET_MS = 650;
+
+/** Long edge of the largest auto-zoom plate. */
+export const PLATE_EDGE_MAX = 2560;
 
 /**
  * A fixed path from the starting view into a target point.
@@ -80,9 +89,9 @@ export function autoZoomPath(start, target, floor = 5e-12) {
   };
 }
 
-/** The camera at a point on the path. */
+/** The camera at a point on the path. Octaves past the deepest point keep diving, for the dissolve. */
 export function autoZoomView(path, octave) {
-  const o = Math.min(path.maxOctave, Math.max(0, Number.isFinite(octave) ? octave : 0));
+  const o = Math.max(0, Number.isFinite(octave) ? octave : 0);
   const p = Math.min(1, o / AUTO_ENTER_OCTAVES);
   const keep = 1 - p * p * (3 - 2 * p);
   const scale = path.start.scale * 2 ** -o;
@@ -94,17 +103,35 @@ export function autoZoomView(path, octave) {
   };
 }
 
-/** Next position on the path. The pace eases down near both ends, and `done` marks the deepest point. */
+/** Next position on the path at a steady pace. `done` marks passing the deepest point. */
 export function advanceAutoZoom(path, octave, frames, pace = 1) {
-  const left = path.maxOctave - octave;
-  const ease = Math.min(
-    1,
-    0.1 + 0.9 * Math.min(1, left / AUTO_TURN_OCTAVES),
-    0.1 + 0.9 * Math.min(1, octave / AUTO_TURN_OCTAVES),
-  );
-  const next = octave + AUTO_OCTAVES_PER_FRAME * Math.max(0, frames) * pace * ease;
-  if (next >= path.maxOctave) return { octave: path.maxOctave, done: true };
-  return { octave: next, done: false };
+  const next = octave + AUTO_OCTAVES_PER_FRAME * Math.max(0, frames) * Math.max(0, pace);
+  return { octave: next, done: next >= path.maxOctave };
+}
+
+/** Pace from rest to full over the first moments, so the start is a glide rather than a lurch. */
+export function autoZoomRamp(elapsedMs) {
+  const t = Math.min(1, Math.max(0, elapsedMs / AUTO_RAMP_MS));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Long edge for the next plate, from how long the last one took.
+ * A slow machine gets smaller plates so they keep arriving before the view has stretched far.
+ */
+export function plateBudget(edge, durationMs, ceiling = PLATE_EDGE_MAX) {
+  const current = Number.isFinite(edge) && edge > 0 ? edge : ceiling;
+  const took = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : PLATE_TARGET_MS;
+  const factor = Math.min(1.25, Math.max(0.6, Math.sqrt(PLATE_TARGET_MS / took)));
+  return Math.round(Math.max(600, Math.min(ceiling, current * factor)));
+}
+
+/** Index of the finest plate that covers the camera whole, or -1 when none does. */
+export function pickPlate(plates, view, aspect = 1) {
+  for (let index = plates.length - 1; index >= 0; index -= 1) {
+    if (plateCovers(plates[index].view, view, aspect, COVER_SLACK)) return index;
+  }
+  return -1;
 }
 
 /**
@@ -214,8 +241,12 @@ export function coverViews(views, aspect = 1) {
   };
 }
 
-/** True when the camera rectangle sits inside the plate, including a zoomed-in camera. */
-export function plateCovers(plate, view, aspect = 1) {
+/**
+ * True when the camera rectangle sits inside the plate, including a zoomed-in camera.
+ * `slack` is a fraction of the camera height the plate may fall short by, for a picture whose
+ * pixel grid rounds to a slightly different aspect than the frame.
+ */
+export function plateCovers(plate, view, aspect = 1, slack = 0) {
   if (!plate || !view || !(plate.scale > 0) || !(view.scale > 0)) return false;
   const safeAspect = aspect > 0 ? aspect : 1;
   const plateAspect = plate.width > 0 && plate.height > 0 ? plate.width / plate.height : safeAspect;
@@ -225,8 +256,12 @@ export function plateCovers(plate, view, aspect = 1) {
   const camHalfY = view.scale * 0.5;
   const marginX = plateHalfX - camHalfX - Math.abs(view.centerX - plate.centerX);
   const marginY = plateHalfY - camHalfY - Math.abs(view.centerY - plate.centerY);
-  return marginX >= -1e-9 && marginY >= -1e-9;
+  const allowed = Math.max(1e-9, slack * view.scale);
+  return marginX >= -allowed && marginY >= -allowed;
 }
+
+/** Fraction of the frame a plate may fall short by and still count as covering it: under a pixel. */
+export const COVER_SLACK = 0.003;
 
 /**
  * Long edge of an auto-zoom plate.

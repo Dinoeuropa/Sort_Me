@@ -91,7 +91,14 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /"burning"/);
   assert.match(fractalApp, /advanceAutoZoom/);
   assert.match(fractalApp, /autoZoomView/);
+  assert.match(fractalApp, /autoZoomRamp/);
+  assert.match(fractalApp, /pickPlate/);
+  assert.match(fractalApp, /plateBudget/);
+  assert.doesNotMatch(fractalApp, /autoPace/);
   assert.match(fractalApp, /renderEscape/);
   assert.doesNotMatch(fractals, /zoom-pattern/);
+  assert.match(fractalApp, /if \(state\.autoZoom\) return fractal\.note;/);
+  assert.match(css, /\.note \{[^}]*min-height: 2lh;/);
+  assert.match(fractalApp, /bitmap: true/);
   assert.doesNotMatch(fractalApp, /zoomPattern|detailTarget|steadyAim/);
 });

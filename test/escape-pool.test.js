@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { renderEscape } from "../src/escape-pool.js";
+import { composeBitmap } from "../src/escape-worker.js";
 import { escapeBand } from "../src/fractals.js";
 import { paintEscape } from "../src/palettes.js";
 
@@ -27,6 +28,22 @@ test("a pooled picture matches one escape band", async () => {
   assert.equal(result.pixels.length, pixels.length);
   for (let i = 0; i < band.iterations.length; i += 1) assert.equal(result.iterations[i], band.iterations[i]);
   for (let i = 0; i < pixels.length; i += 1) assert.equal(result.pixels[i], pixels[i]);
+});
+
+test("a plate asked for as a bitmap still arrives as pixels where nothing can make bitmaps", async () => {
+  const result = await renderEscape({
+    fractalId: "julia",
+    preset,
+    width: 20,
+    height: 12,
+    cap: 12,
+    paletteId: "classic",
+    view: { centerX: 0, centerY: 0, scale: 3.2, flipY: false },
+    bitmap: true,
+  });
+  assert.equal(result.dropped, false);
+  assert.equal(result.pixels.length, 20 * 12 * 4);
+  assert.equal(await composeBitmap({ width: 2, height: 1, parts: [] }), null);
 });
 
 test("zooming out replaces a closer plate that is still drawing", async () => {

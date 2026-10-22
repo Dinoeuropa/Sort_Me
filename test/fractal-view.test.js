@@ -3,12 +3,15 @@ import test from "node:test";
 import { autoZoomFloor, autoZoomTarget, boundaryAnchor, escapeValue, planePoint } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
+  AUTO_RAMP_MS,
   AUTO_ZOOM_STEP,
+  PLATE_TARGET_MS,
   FIT_PAD,
   SHARP_RASTER_EDGE,
   advanceAutoZoom,
   autoZoomIterations,
   autoZoomPath,
+  autoZoomRamp,
   autoZoomView,
   boundsMagnification,
   clampViewToPlate,
@@ -24,6 +27,8 @@ import {
   panBounds,
   panEscape,
   plateCovers,
+  pickPlate,
+  plateBudget,
   plateRasterEdge,
   pointBudget,
   rasterSize,
@@ -260,25 +265,67 @@ test("auto zoom follows one fixed path into its target", () => {
   assert.ok(biggest < 0.05);
 });
 
-test("auto zoom paces itself into a crawl at both ends and reports the deepest point", () => {
+test("auto zoom keeps one steady pace and only reports passing the deepest point", () => {
   const path = autoZoomPath({ centerX: 0, centerY: 0, scale: 2, flipY: false }, { x: 0, y: 0 });
   const early = advanceAutoZoom(path, 0, 1, 1);
   const middle = advanceAutoZoom(path, 10, 1, 1);
-  assert.ok(early.octave > 0);
-  assert.ok(early.octave < (middle.octave - 10));
-  assert.ok(Math.abs(middle.octave - 10 - Math.log2(AUTO_ZOOM_STEP)) < 1e-9);
+  const late = advanceAutoZoom(path, path.maxOctave - 0.5, 1, 1);
+  const step = Math.log2(AUTO_ZOOM_STEP);
+  assert.ok(Math.abs(early.octave - step) < 1e-9);
+  assert.ok(Math.abs(middle.octave - 10 - step) < 1e-9);
+  assert.ok(Math.abs(late.octave - (path.maxOctave - 0.5) - step) < 1e-9);
   assert.equal(middle.done, false);
-  const late = advanceAutoZoom(path, path.maxOctave - 1, 1, 1);
-  assert.ok(late.octave - (path.maxOctave - 1) < middle.octave - 10);
-  let octave = path.maxOctave - 0.001;
-  let done = false;
-  for (let i = 0; i < 60 && !done; i += 1) {
-    const step = advanceAutoZoom(path, octave, 1, 1);
-    octave = step.octave;
-    done = step.done;
+  const past = advanceAutoZoom(path, path.maxOctave - 0.001, 1, 1);
+  assert.equal(past.done, true);
+  assert.ok(past.octave > path.maxOctave);
+  const beyond = autoZoomView(path, path.maxOctave + 1);
+  assert.ok(Math.abs(beyond.scale - autoZoomView(path, path.maxOctave).scale / 2) < 1e-15);
+  assert.equal(advanceAutoZoom(path, 5, 1, 0).octave, 5);
+});
+
+test("auto zoom starts from rest and the start is a smooth ramp", () => {
+  assert.equal(autoZoomRamp(0), 0);
+  assert.equal(autoZoomRamp(AUTO_RAMP_MS), 1);
+  assert.equal(autoZoomRamp(AUTO_RAMP_MS * 5), 1);
+  let previous = 0;
+  for (let ms = 10; ms <= AUTO_RAMP_MS; ms += 10) {
+    const pace = autoZoomRamp(ms);
+    assert.ok(pace >= previous);
+    assert.ok(pace - previous < 0.02);
+    previous = pace;
   }
-  assert.equal(done, true);
-  assert.equal(octave, path.maxOctave);
+  assert.ok(autoZoomRamp(AUTO_RAMP_MS / 2) > 0.45 && autoZoomRamp(AUTO_RAMP_MS / 2) < 0.55);
+});
+
+test("plates shrink on a slow machine and grow back when they arrive early", () => {
+  const slow = plateBudget(2560, PLATE_TARGET_MS * 4);
+  assert.ok(slow < 2560);
+  assert.ok(slow >= 2560 * 0.6 - 1);
+  const crawl = plateBudget(900, PLATE_TARGET_MS * 100);
+  assert.equal(crawl, 600);
+  const quick = plateBudget(1200, PLATE_TARGET_MS / 4);
+  assert.ok(quick > 1200);
+  assert.ok(quick <= 1500);
+  assert.equal(plateBudget(2560, PLATE_TARGET_MS / 10), 2560);
+  assert.equal(plateBudget(2000, PLATE_TARGET_MS / 10, 1600), 1600);
+  assert.equal(plateBudget(NaN, NaN), 2560);
+});
+
+test("the finest plate that covers the frame is drawn, and none means every plate", () => {
+  const wide = { view: { centerX: 0, centerY: 0, scale: 4, width: 400, height: 300, flipY: false } };
+  const mid = { view: { centerX: 0.1, centerY: 0.1, scale: 1, width: 400, height: 300, flipY: false } };
+  const fine = { view: { centerX: 0.2, centerY: 0.1, scale: 0.2, width: 400, height: 300, flipY: false } };
+  const plates = [wide, mid, fine];
+  assert.equal(pickPlate(plates, { centerX: 0.2, centerY: 0.1, scale: 0.1, flipY: false }, 4 / 3), 2);
+  assert.equal(pickPlate(plates, { centerX: 0.2, centerY: 0.1, scale: 0.5, flipY: false }, 4 / 3), 1);
+  assert.equal(pickPlate(plates, { centerX: 0, centerY: 0, scale: 3, flipY: false }, 4 / 3), 0);
+  assert.equal(pickPlate(plates, { centerX: 0, centerY: 0, scale: 5, flipY: false }, 4 / 3), -1);
+  assert.equal(pickPlate([], { centerX: 0, centerY: 0, scale: 1, flipY: false }), -1);
+  const shot = { view: { centerX: 0, centerY: 0, scale: 2, width: 1279, height: 720, flipY: false } };
+  const frame = { centerX: 0, centerY: 0, scale: 2, flipY: false };
+  assert.equal(plateCovers(shot.view, frame, 1280 / 720), false);
+  assert.equal(pickPlate([shot], frame, 1280 / 720), 0);
+  assert.equal(pickPlate([shot], { ...frame, centerX: 0.05 }, 1280 / 720), -1);
 });
 
 test("auto zoom doubles about once a second", () => {

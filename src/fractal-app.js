@@ -14,9 +14,14 @@ import {
 } from "./fractals.js";
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
+  AUTO_OCTAVES_PER_FRAME,
+  COVER_SLACK,
+  PLATE_BLEND_MS,
+  PLATE_TARGET_MS,
   advanceAutoZoom,
   autoZoomIterations,
   autoZoomPath,
+  autoZoomRamp,
   autoZoomView,
   boundsMagnification,
   coverViews,
@@ -31,6 +36,9 @@ import {
   panBounds,
   panEscape,
   DRAW_RASTER_EDGE,
+  PLATE_EDGE_MAX,
+  pickPlate,
+  plateBudget,
   plateCovers,
   plateRasterEdge,
   pointBudget,
@@ -133,11 +141,13 @@ const state = {
   cursorRedraw: false,
   autoPath: null,
   autoOctave: 0,
-  autoPace: 1,
   autoStart: null,
   autoFade: null,
-  snapshot: null,
-  snapshotView: null,
+  autoPlates: [],
+  autoDeep: null,
+  autoRampAt: null,
+  plateEdge: 2560,
+  plateTook: 0,
   plate: null,
   reactiveView: null,
   autoHold: false,
@@ -791,10 +801,9 @@ function exploredLevel() {
   return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth);
 }
 
+/** The note never changes during auto zoom, so the frame above it keeps its size while the view moves. */
 function zoomNote(fractal) {
-  if (state.autoZoom && state.home && state.view) {
-    return `${fractal.note} Auto zoom is ${formatMag(currentMagnification())} deep, at ${exploredLevel().toLocaleString()} iterations.`;
-  }
+  if (state.autoZoom) return fractal.note;
   if (!state.finished || !state.home || !state.view) return fractal.note;
   const magnification = currentMagnification();
   if (magnification < 1.05 && magnification > 0.95) return fractal.note;
@@ -824,10 +833,12 @@ function formatComplex(x, y) {
   return `${real} ${y < 0 ? "−" : "+"} ${imag}i`;
 }
 
+function autoZoomBadge() {
+  return `Auto zoom ${formatMag(currentMagnification())} · ${exploredLevel().toLocaleString()} iterations`;
+}
+
 function formatParam() {
-  if (state.autoZoom) {
-    return `Auto zoom ${formatMag(currentMagnification())}`;
-  }
+  if (state.autoZoom) return autoZoomBadge();
   if (!state.cursorParam) return "";
   if (state.fractalId === "newton") return `p = ${formatComplex(state.cursorParam.px, state.cursorParam.py)}`;
   const name = state.fractalId === "mandelbrot" ? "Julia c" : "c";
@@ -1315,12 +1326,18 @@ function applyEscapeResult(result) {
   renderChrome();
 }
 
+/** Rows per strip when pixels are copied in on the main thread, about a megabyte at a time. */
+const STRIP_BYTES = 1 << 20;
+
+/**
+ * Finished pixels become a canvas in short strips, one task each, when a worker could not make a bitmap.
+ */
 function installPixels(pixels, width, height, done) {
   const snap = document.createElement("canvas");
   snap.width = width;
   snap.height = height;
   const context = snap.getContext("2d");
-  const strip = Math.max(1, Math.ceil(height / 8));
+  const strip = Math.max(1, Math.floor(STRIP_BYTES / (width * 4)));
   let y = 0;
   const step = () => {
     const rows = Math.min(strip, height - y);
@@ -1340,10 +1357,10 @@ function haltAutoZoom() {
   state.autoPath = null;
   state.autoStart = null;
   state.autoFade = null;
+  state.autoPlates = [];
+  state.autoDeep = null;
   state.autoToken += 1;
   state.plateFlight = 0;
-  state.snapshot = null;
-  state.snapshotView = null;
   state.frozenParam = null;
 }
 
@@ -1351,7 +1368,7 @@ function stopAutoZoom() {
   const was = state.autoZoom;
   haltAutoZoom();
   if (was && state.finished && state.home && state.view) scheduleEscape();
-  else renderChrome();
+  renderChrome();
 }
 
 function freezeCursor() {
@@ -1363,14 +1380,18 @@ function freezeCursor() {
   return null;
 }
 
-function captureSnapshot(view) {
-  if (!canvas.width || !canvas.height || !view) return;
+/** The picture on screen becomes the first plate, so the glide starts from exactly what is shown. */
+function capturePlate(view) {
+  if (!canvas.width || !canvas.height || !view) return null;
   const snap = document.createElement("canvas");
   snap.width = canvas.width;
   snap.height = canvas.height;
   snap.getContext("2d").drawImage(canvas, 0, 0);
-  state.snapshot = snap;
-  state.snapshotView = { ...view, width: snap.width, height: snap.height };
+  return {
+    canvas: snap,
+    view: { ...view, width: snap.width, height: snap.height },
+    born: -Infinity,
+  };
 }
 
 function startAutoZoom() {
@@ -1383,21 +1404,18 @@ function startAutoZoom() {
   state.cursorRedraw = false;
   state.plateFlight = 0;
   state.autoHold = Boolean(hoveringMandelbrot);
-  if (hoveringMandelbrot) {
-    state.snapshot = null;
-    state.snapshotView = null;
-  } else {
-    captureSnapshot(state.view);
-  }
+  const first = hoveringMandelbrot ? null : capturePlate(state.view);
+  state.autoPlates = first ? [first] : [];
+  state.autoStart = first;
+  state.autoDeep = null;
   state.autoZoom = true;
   const job = renderJob(state.view);
   state.autoPath = autoZoomPath(state.view, autoZoomTarget(job.fractalId, job.preset), autoZoomFloor(job.fractalId));
   state.autoOctave = 0;
-  state.autoPace = 1;
   state.autoFade = null;
-  state.autoStart = state.snapshot && state.snapshotView
-    ? { canvas: state.snapshot, view: state.snapshotView }
-    : null;
+  state.autoRampAt = null;
+  state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(autoZoomIterations(state.baseDepth || depthValue(), 1)));
+  state.plateTook = 0;
   state.exploring = false;
   state.zoomStamp = performance.now();
   const token = ++state.autoToken;
@@ -1415,89 +1433,74 @@ const AUTO_FADE_MS = 1400;
 
 let plateSerial = 1;
 
+/**
+ * One frame of auto zoom. The camera advances at a steady pace along the fixed path and never
+ * waits for a plate: a late plate only means the one beneath it is stretched a little further.
+ */
 function stepAutoZoom(token) {
-  const box = viewBox();
-  const aspect = box.width / Math.max(1, box.height);
-  const path = state.autoPath;
   const now = performance.now();
   const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
   state.zoomStamp = now;
   const frames = elapsed / 16.7;
-  if (path && state.autoFade) {
-    stepAutoFade(elapsed);
-    renderChrome();
-    return;
-  }
-  if (path && !state.autoHold && state.snapshot && state.snapshotView) {
-    const next = advanceAutoZoom(path, state.autoOctave, frames, state.autoPace);
-    const candidate = autoZoomView(path, next.octave);
-    const stretch = state.snapshotView.scale / candidate.scale;
-    if (plateCovers(state.snapshotView, candidate, aspect) && stretch < 6) {
-      state.autoOctave = next.octave;
-      state.view = candidate;
-      state.autoPace = Math.min(1, state.autoPace * 1.012 ** frames);
-      if (next.done && state.autoStart) beginAutoFade();
-    } else {
-      state.autoPace = Math.max(0.3, state.autoPace * 0.97 ** frames);
+  const path = state.autoPath;
+  if (path && !state.autoHold && state.autoPlates.length) {
+    if (state.autoRampAt === null) state.autoRampAt = now;
+    const pace = autoZoomRamp(now - state.autoRampAt);
+    const next = advanceAutoZoom(path, state.autoOctave, frames, pace);
+    state.autoOctave = next.octave;
+    if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
+    if (state.autoFade) {
+      state.autoFade.t = Math.min(1, state.autoFade.t + elapsed / AUTO_FADE_MS);
+      if (state.autoFade.t >= 1) {
+        state.autoFade = null;
+        state.autoDeep = null;
+      }
     }
+    state.view = autoZoomView(path, state.autoOctave);
   }
-  if (!state.autoFade) ensureAutoPlate(token, box);
-  if (!state.autoHold && state.snapshot && state.snapshotView) drawScaledSnapshot();
-  renderChrome();
-}
-
-/** At the deepest point the picture dissolves into the first one and the dive starts again. */
-function beginAutoFade() {
-  state.autoFade = {
-    t: 0,
-    deep: { canvas: state.snapshot, view: state.snapshotView },
-    deepCamera: { ...state.view },
-  };
-}
-
-function stepAutoFade(elapsed) {
-  const fade = state.autoFade;
-  const start = state.autoStart;
-  fade.t = Math.min(1, fade.t + elapsed / AUTO_FADE_MS);
   const box = viewBox();
-  const dest = motionRaster(box);
-  if (canvas.width !== dest.width || canvas.height !== dest.height) {
-    canvas.width = dest.width;
-    canvas.height = dest.height;
-  }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.fillStyle = PAPER;
-  ctx.fillRect(0, 0, dest.width, dest.height);
-  drawEscapePlate(fade.deep.canvas, fade.deep.view, fade.deepCamera, dest.width, dest.height);
-  const alpha = fade.t * fade.t * (3 - 2 * fade.t);
-  ctx.globalAlpha = alpha;
-  drawEscapePlate(start.canvas, start.view, autoZoomView(state.autoPath, 0), dest.width, dest.height);
-  ctx.globalAlpha = 1;
-  if (fade.t < 1) return;
-  state.view = autoZoomView(state.autoPath, 0);
-  state.snapshot = start.canvas;
-  state.snapshotView = start.view;
-  state.autoOctave = 0;
-  state.autoPace = 1;
-  state.autoFade = null;
+  ensureAutoPlate(token, box);
+  if (!state.autoHold && state.autoPlates.length) drawAutoFrame(box, now);
+  renderAutoChrome();
+}
+
+/**
+ * Past the deepest point the picture dissolves into the first one while both keep moving,
+ * and the dive starts again from where the dissolve began.
+ */
+function beginAutoFade() {
+  const path = state.autoPath;
+  state.autoDeep = state.autoPlates;
+  state.autoPlates = [state.autoStart];
+  state.autoOctave -= path.maxOctave;
+  state.autoFade = { t: 0 };
+}
+
+/** Octaves the view is expected to travel before the plate now being requested is ready. */
+function plateLookahead() {
+  const seconds = Math.max(1, (state.plateTook || PLATE_TARGET_MS) * 1.8 / 1000);
+  return Math.min(4, seconds * AUTO_OCTAVES_PER_FRAME * 60);
 }
 
 function ensureAutoPlate(token, box) {
   if (state.plateFlight || !state.autoPath) return;
   const aspect = box.width / Math.max(1, box.height);
-  const look = advanceAutoZoom(state.autoPath, state.autoOctave, 36, 1);
-  const ahead = autoZoomView(state.autoPath, look.octave);
-  const cover = coverViews([state.view, ahead], aspect);
-  const deepest = Math.min(state.view.scale, ahead.scale);
+  const path = state.autoPath;
+  const from = state.autoOctave;
+  const to = from + plateLookahead();
+  const samples = [];
+  for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(path, from + ((to - from) * i) / 4));
+  const cover = coverViews(samples, aspect);
+  const deepest = samples[samples.length - 1].scale;
   const cap = autoZoomIterations(state.baseDepth || depthValue(), (state.home?.scale || deepest) / deepest);
-  const raster = rasterSize(box.width, box.height, box.dpr, true, plateRasterEdge(cap));
-  const view = { ...cover, flipY: Boolean(state.view.flipY) };
+  const edge = Math.min(state.plateEdge || plateRasterEdge(cap), PLATE_EDGE_MAX);
+  const raster = rasterSize(box.width, box.height, box.dpr, true, edge);
+  const view = { ...cover, flipY: Boolean(path.start.flipY) };
   const job = renderJob(view);
   const flightId = plateSerial++;
   const epoch = state.epoch;
   const fractalAt = state.fractalId;
+  const requested = performance.now();
   state.plateFlight = flightId;
   renderEscape({
     fractalId: job.fractalId,
@@ -1507,11 +1510,14 @@ function ensureAutoPlate(token, box) {
     cap,
     paletteId: state.paletteId,
     view,
+    bitmap: true,
   }).then((result) => {
     if (state.plateFlight === flightId) state.plateFlight = 0;
     if (!result || result.dropped) return;
     if (!state.autoZoom || token !== state.autoToken || state.epoch !== epoch) return;
     if (state.fractalId !== fractalAt) return;
+    state.plateTook = performance.now() - requested;
+    state.plateEdge = plateBudget(edge, state.plateTook, PLATE_EDGE_MAX);
     adoptAutoPlate(result, token);
     if (state.autoZoom && token === state.autoToken) {
       ensureAutoPlate(token, viewBox());
@@ -1521,21 +1527,11 @@ function ensureAutoPlate(token, box) {
   });
 }
 
+const AUTO_PLATES_KEPT = 4;
+
 function adoptAutoPlate(result, token) {
   if (!state.autoZoom || token !== state.autoToken || !result.view) return;
-  const pixels = result.paletteId === state.paletteId
-    ? result.pixels
-    : paintEscape(
-      state.paletteId,
-      result.iterations,
-      result.basins,
-      result.width,
-      result.height,
-      result.cap,
-      result.height,
-      result.cap,
-    );
-  installPixels(pixels, result.width, result.height, (snap) => {
+  const place = (snap) => {
     if (!state.autoZoom || token !== state.autoToken || result.jobId < state.shownJob) return;
     const box = viewBox();
     const aspect = box.width / Math.max(1, box.height);
@@ -1547,19 +1543,20 @@ function adoptAutoPlate(result, token) {
       width: result.width,
       height: result.height,
     };
-    if (!plateCovers(finished, state.view, aspect)) return;
+    if (!plateCovers(finished, state.view, aspect, COVER_SLACK)) return;
     state.shownJob = result.jobId;
-    state.snapshot = snap;
-    state.snapshotView = finished;
-    if (!state.autoStart) state.autoStart = { canvas: snap, view: finished };
+    const plate = { canvas: snap, view: finished, born: performance.now() };
+    const plates = state.autoPlates.filter((item) => item.view.scale > finished.scale);
+    plates.push(plate);
+    while (plates.length > AUTO_PLATES_KEPT) {
+      const index = plates[0] === state.autoStart ? 1 : 0;
+      plates.splice(index, 1);
+    }
+    state.autoPlates = plates;
+    if (!state.autoStart) state.autoStart = plate;
     state.autoHold = false;
-    state.raster = { width: result.width, height: result.height };
-    state.iterations = result.iterations;
-    state.basins = result.basins;
-    state.nextRow = result.height;
-    state.revealIter = result.cap;
+    state.samples = result.width * result.height;
     state.shownCap = result.cap;
-    state.samples = result.iterations.length;
     state.finished = true;
     state.exploring = false;
     state.plate = {
@@ -1571,8 +1568,11 @@ function adoptAutoPlate(result, token) {
       width: snap.width,
       height: snap.height,
     };
-  });
+  };
+  if (result.bitmap) place(result.bitmap);
+  else if (result.pixels) installPixels(result.pixels, result.width, result.height, place);
 }
+
 
 function drawEscapePlate(source, plate, view, width, height) {
   const blit = escapeSourceBlit(plate, view, width, height);
@@ -1588,14 +1588,36 @@ function motionRaster(box) {
   };
 }
 
-function drawScaledSnapshot() {
-  const from = state.snapshotView;
-  const source = state.snapshot;
-  const to = state.view;
-  const box = viewBox();
+/**
+ * Draw one layer of plates for a camera. The finest plate that covers the frame is used, blended in
+ * over the plate beneath it while it is new. When no plate covers the whole frame every plate that
+ * touches it is drawn, widest first, so the paper never shows through.
+ */
+function drawPlateLayer(plates, view, width, height, aspect, alpha, now) {
+  const index = pickPlate(plates, view, aspect);
+  if (index < 0) {
+    ctx.globalAlpha = alpha;
+    for (const plate of plates) drawEscapePlate(plate.canvas, plate.view, view, width, height);
+    return;
+  }
+  const top = plates[index];
+  const age = now - top.born;
+  const blend = age < PLATE_BLEND_MS && index > 0 ? age / PLATE_BLEND_MS : 1;
+  if (blend < 1) {
+    ctx.globalAlpha = alpha;
+    drawEscapePlate(plates[index - 1].canvas, plates[index - 1].view, view, width, height);
+    ctx.globalAlpha = alpha * blend * blend * (3 - 2 * blend);
+  } else {
+    ctx.globalAlpha = alpha;
+  }
+  drawEscapePlate(top.canvas, top.view, view, width, height);
+}
+
+function drawAutoFrame(box, now) {
   const dest = motionRaster(box);
   const width = dest.width;
   const height = dest.height;
+  const aspect = box.width / Math.max(1, box.height);
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
@@ -1603,10 +1625,34 @@ function drawScaledSnapshot() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
+  ctx.globalAlpha = 1;
   ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, width, height);
-  drawEscapePlate(source, from, to, width, height);
+  const fade = state.autoFade;
+  if (fade && state.autoDeep) {
+    const deepView = autoZoomView(state.autoPath, state.autoOctave + state.autoPath.maxOctave);
+    drawPlateLayer(state.autoDeep, deepView, width, height, aspect, 1, now);
+    const t = fade.t;
+    drawPlateLayer(state.autoPlates, state.view, width, height, aspect, t * t * (3 - 2 * t), now);
+  } else {
+    drawPlateLayer(state.autoPlates, state.view, width, height, aspect, 1, now);
+  }
+  ctx.globalAlpha = 1;
 }
+
+/** The parts of the page that change every frame of auto zoom, written only when their text changes. */
+function renderAutoChrome() {
+  const mag = formatMag(currentMagnification());
+  if (depthStat.textContent !== mag) depthStat.textContent = mag;
+  const badge = autoZoomBadge();
+  if (paramEl.textContent !== badge) {
+    paramEl.hidden = false;
+    paramEl.textContent = badge;
+  }
+  const samples = state.samples.toLocaleString();
+  if (samplesEl.textContent !== samples) samplesEl.textContent = samples;
+}
+
 
 const pointers = new Map();
 
