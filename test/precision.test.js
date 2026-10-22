@@ -159,7 +159,7 @@ test("a deep plate spreads the palette over the iterations it holds, and a shall
   const seahorse = presetById("mandelbrot", "seahorse");
   assert.deepEqual(paletteRange("mandelbrot", seahorse, 64, 36, 300), { floor: 0, top: 300 });
   assert.deepEqual(paletteRange("mandelbrot", { ...seahorse, centerXLo: 0, centerYLo: 0 }, 64, 36, 300), { floor: 0, top: 300 });
-  assert.deepEqual(paletteRange("julia", { ...seahorse, cx: 0.3, cy: 0.5, centerXLo: 0 }, 64, 36, 300), { floor: 0, top: 300 });
+  assert.deepEqual(paletteRange("julia", { ...presetById("julia", "rabbit"), centerXLo: 0 }, 64, 36, 300), { floor: 0, top: 300 });
   const scale = 1e-24;
   const cap = autoZoomIterations(48, 2.6 / scale);
   const deep = { ...deepCenter(target, 0, 0), scale, flipY: false };

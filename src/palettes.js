@@ -68,8 +68,9 @@ const WINDOW_SPREAD = 0.25;
  * on to the cap when that is no farther than the samples are wide, so the pixels closest to the
  * set keep their own shades. It eases in as they crowd together: a plate whose escapes cover a quarter of the cap or more keeps
  * the whole cap, so an ordinary picture is colored exactly as before, and one whose escapes cover
- * an eighth or less is fitted in full. `weight` scales the fit down, so a dive can begin with the
- * palette it had before diving and fit it as it goes.
+ * an eighth or less is fitted in full. The top comes down geometrically, so the brightening it
+ * brings is even. `weight` scales the fit down, so a dive can begin with the palette it had
+ * before diving and fit it as it goes.
  */
 export function paletteWindow(samples, cap, weight = 1) {
   const max = Math.max(1, cap | 0);
@@ -93,7 +94,7 @@ export function paletteWindow(samples, cap, weight = 1) {
   const hold = Math.min(1, Math.max(0, 1.5 - gap / (2 * Math.max(1, high - low, pad))));
   const fittedTop = high + pad + gap * hold;
   const floor = Math.round(fittedFloor * ease);
-  const top = Math.round(max + (fittedTop - max) * ease);
+  const top = Math.round(max * (fittedTop / max) ** ease);
   return { floor: Math.min(floor, max - 1), top: Math.max(floor + 1, Math.min(max, top)) };
 }
 

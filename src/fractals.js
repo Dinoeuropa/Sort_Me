@@ -420,13 +420,13 @@ let cachedWindow = null;
  * which leaves its colors as they are. A deep plate's pixels all land within a few percent of one
  * another, far below the cap for a Julia set or Newton's method and just under it for the
  * Mandelbrot set, so there the palette is fitted to what the plate holds, judged from a grid of
- * samples. The fit comes in between a tenth and a thousandth of the full view, so a dive begins
+ * samples. The fit comes in as the view narrows from one unit to a hundredth, so a dive begins
  * colored exactly like the picture it left. Every band of a plate asks, so the last answer is kept.
  */
 export function paletteRange(fractalId, preset, width, height, maxIter) {
   const cap = clampIter(maxIter);
   if (!hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return { floor: 0, top: cap };
-  const depth = Math.min(1, Math.max(0, (-Math.log10(preset.scale) - 1) / 2));
+  const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
   if (!(depth > 0)) return { floor: 0, top: cap };
   const key = [
     fractalId, preset.centerX, preset.centerXLo, preset.centerY, preset.centerYLo, preset.scale,
