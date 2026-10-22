@@ -17,6 +17,7 @@ import {
   easeFactor,
   easeZoom,
   escapeBlitRect,
+  fitZoomOut,
   escapeMagnification,
   glidePull,
   iterationCap,
@@ -161,6 +162,10 @@ test("Mandelbrot auto zoom homes on the nautilus, then follows detail", () => {
   const local = { x: NAUTILUS.x, y: NAUTILUS.y, score: 5 };
   const biased = steerZoomTarget(local, deep, { anchor: NAUTILUS, bias: { x: 1, y: 0.5 }, aspect: 1 });
   assert.ok(biased.x > local.x);
+  const drifted = { centerX: NAUTILUS.x + 0.05, centerY: NAUTILUS.y, scale: 0.001 };
+  const stayed = steerZoomTarget(detail, drifted, { anchor: NAUTILUS });
+  assert.ok(Math.abs(stayed.x - detail.x) < 1e-12);
+  assert.ok(Math.abs(stayed.y - detail.y) < 1e-12);
 });
 
 test("each auto zoom step magnifies and eases toward the target", () => {
@@ -220,6 +225,17 @@ test("each reactive fractal offers a choice of zoom patterns", () => {
   assert.ok(zoomPatterns("burning").length >= 2);
   assert.ok(zoomPatterns("newton").some((pattern) => pattern.name === "Triple point"));
   assert.equal(zoomPatterns("koch").length, 0);
+});
+
+test("zooming out stays inside the plate until a wider one exists", () => {
+  const from = { centerX: 0, centerY: 0, scale: 0.4, flipY: false };
+  const plate = { ...from, width: 960, height: 540 };
+  const proposed = { ...from, scale: 1.2 };
+  const held = fitZoomOut(plate, from, proposed, 960 / 540);
+  assert.ok(Math.abs(held.scale - from.scale) < 1e-9);
+  const wide = { ...from, scale: 2.4, width: 960, height: 540 };
+  const opened = fitZoomOut(wide, from, proposed, 960 / 540);
+  assert.ok(Math.abs(opened.scale - proposed.scale) < 1e-9);
 });
 
 test("zooming in is not paused while the next plate is still drawing", () => {

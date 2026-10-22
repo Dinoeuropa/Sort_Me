@@ -23,6 +23,7 @@ import {
   easeFactor,
   easeZoom,
   escapeBlitRect,
+  fitZoomOut,
   escapeMagnification,
   escapeWindow,
   iterationCap,
@@ -30,7 +31,7 @@ import {
   mapPointsInto,
   panBounds,
   panEscape,
-  AUTO_ZOOM_RASTER_EDGE,
+  DRAW_RASTER_EDGE,
   plateCovers,
   plateRasterEdge,
   steadyAim,
@@ -904,6 +905,15 @@ function queueZoom(px, py, factor) {
   startGlide();
 }
 
+function zoomInsidePlate(view, factor, px, py, box, homeScale) {
+  const proposed = zoomEscape(view, factor, px, py, box.width, box.height, homeScale);
+  if (!(factor < 1) || !state.plate) return proposed;
+  const aspect = box.width / Math.max(1, box.height);
+  const fitted = fitZoomOut(state.plate, view, proposed, aspect);
+  if (fitted.scale < proposed.scale * (1 - 1e-9)) glide.factor *= fitted.scale / proposed.scale;
+  return fitted;
+}
+
 function shiftPicture(px, py, factor, dx, dy) {
   if (!canExplore()) return;
   const box = viewBox();
@@ -913,14 +923,10 @@ function shiftPicture(px, py, factor, dx, dy) {
       if (!state.reactiveView) {
         state.reactiveView = { centerX: 0, centerY: 0, scale: 3.2, flipY: false };
       }
-      if (factor !== 1) {
-        state.reactiveView = zoomEscape(state.reactiveView, factor, px, py, box.width, box.height, 3.2);
-      }
+      if (factor !== 1) state.reactiveView = zoomInsidePlate(state.reactiveView, factor, px, py, box, 3.2);
       if (dx || dy) state.reactiveView = panEscape(state.reactiveView, dx, dy, box.width, box.height);
     } else {
-      if (factor !== 1) {
-        state.view = zoomEscape(state.view, factor, px, py, box.width, box.height, state.home.scale);
-      }
+      if (factor !== 1) state.view = zoomInsidePlate(state.view, factor, px, py, box, state.home.scale);
       if (dx || dy) state.view = panEscape(state.view, dx, dy, box.width, box.height);
     }
     if (state.plate && pictureView() && viewMoved(state.plate, pictureView(), 0.004)) blitPlate();
@@ -1247,7 +1253,7 @@ function scheduleEscape() {
     const dest = glideDestination(targetView);
     const cover = coverViews([dest, targetView], aspect);
     target = { ...cover, flipY: Boolean(targetView.flipY) };
-    longEdge = AUTO_ZOOM_RASTER_EDGE;
+    longEdge = DRAW_RASTER_EDGE;
     const homeScale = usingReactiveFrame() ? 3.2 : state.home.scale;
     cap = iterationCap(state.baseDepth || depthValue(), homeScale / Math.max(1e-12, target.scale));
   }

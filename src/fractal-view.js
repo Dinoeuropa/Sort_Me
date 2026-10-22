@@ -120,12 +120,9 @@ export function steerZoomTarget(detail, view, options = {}) {
   const anchor = options.anchor || null;
   let x = detail.x;
   let y = detail.y;
-  if (anchor) {
-    const dist = Math.hypot(view.centerX - anchor.x, view.centerY - anchor.y);
-    if (view.scale >= 0.02 || dist > view.scale * 2) {
-      x = anchor.x;
-      y = anchor.y;
-    }
+  if (anchor && view.scale >= 0.02) {
+    x = anchor.x;
+    y = anchor.y;
   }
   const bias = options.bias;
   if (bias && Number.isFinite(bias.x) && Number.isFinite(bias.y)) {
@@ -193,6 +190,29 @@ export function plateWindow(camera, aim, aspect = 1) {
     scale: camera.scale * PLATE_SCALE,
     flipY: Boolean(camera.flipY),
   };
+}
+
+/**
+ * Zoom out only as far as the plate still covers.
+ * A closer plate must not shrink away and leave the paper color around it.
+ */
+export function fitZoomOut(plate, from, proposed, aspect = 1) {
+  if (!plate || !from || !proposed || !(proposed.scale > from.scale)) return proposed;
+  if (plateCovers(plate, proposed, aspect)) return proposed;
+  const safeAspect = aspect > 0 ? aspect : 1;
+  const plateAspect = plate.width > 0 && plate.height > 0 ? plate.width / plate.height : safeAspect;
+  const fullX = plate.scale * plateAspect;
+  const fullY = plate.scale;
+  const maxScale = Math.min(fullY, fullX / safeAspect);
+  const scale = Math.min(proposed.scale, Math.max(from.scale, maxScale));
+  if (!(scale > from.scale * (1 + 1e-9))) return { ...from };
+  const t = (scale - from.scale) / (proposed.scale - from.scale);
+  return clampViewToPlate(plate, {
+    ...proposed,
+    centerX: from.centerX + (proposed.centerX - from.centerX) * t,
+    centerY: from.centerY + (proposed.centerY - from.centerY) * t,
+    scale,
+  }, safeAspect);
 }
 
 /** Keep a camera inside the world rectangle a plate actually covers. */
