@@ -4,7 +4,7 @@ A visualiser with a home page and two tools, published like any other site. Sort
 
 Every generated array is a permutation of **1, 2, 3, …, n**. Length stops at **250**, so a finished chart always rises by 1 from one position to the next. Compare runs two to four programs on that same array. Changing the length or a preset rebuilds the array and keeps the comparison running.
 
-No page calls an API, loads a remote font, or sends the picture anywhere. KaTeX stays in this repository. The public addresses are `/` for home, `/sorting` for sorting, and `/fractals` for fractals. A visit to `/home.html`, `/index.html`, or `/fractals.html` redirects to those paths, so the address bar does not end in `.html`.
+No page calls an API, loads a remote font, or sends the picture anywhere. KaTeX stays in this repository. The public addresses are `/` for home, `/sorting` for sorting, and `/fractals` for fractals. A visit to `/home.html`, `/sorting.html`, `/index.html`, or `/fractals.html` redirects to those paths, so the address bar does not end in `.html`. The sorting document is `sorting.html`. A file named `index.html` would be served for `/` before the home rewrite, so that name is not used.
 
 ## Run
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-const sorting = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const sorting = fs.readFileSync(new URL("../sorting.html", import.meta.url), "utf8");
 const fractals = fs.readFileSync(new URL("../fractals.html", import.meta.url), "utf8");
 const fractalApp = fs.readFileSync(new URL("../src/fractal-app.js", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");

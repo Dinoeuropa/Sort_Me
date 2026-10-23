@@ -5,7 +5,7 @@ import test from "node:test";
 const home = fs.readFileSync(new URL("../home.html", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const app = fs.readFileSync(new URL("../src/home-app.js", import.meta.url), "utf8");
-const sorting = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const sorting = fs.readFileSync(new URL("../sorting.html", import.meta.url), "utf8");
 const fractals = fs.readFileSync(new URL("../fractals.html", import.meta.url), "utf8");
 
 test("the home page is a quiet chooser over the screensaver", () => {
