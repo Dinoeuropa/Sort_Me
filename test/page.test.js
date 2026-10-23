@@ -77,10 +77,18 @@ test("public paths replace the html addresses", async () => {
     });
     assert.equal(address.host, "0.0.0.0");
 
-    const sorting = await request(address.port, "/");
+    const home = await request(address.port, "/");
+    assert.equal(home.status, 200);
+    assert.match(home.body, /href="\/sorting"/);
+    assert.match(home.body, /href="\/fractals"/);
+    assert.match(home.body, /<h1>Sort Me<\/h1>/);
+    assert.doesNotMatch(home.body, /\.html"/);
+
+    const sorting = await request(address.port, "/sorting");
     assert.equal(sorting.status, 200);
+    assert.match(sorting.body, /id="program"/);
+    assert.match(sorting.body, /href="\/sorting" aria-current="page"/);
     assert.match(sorting.body, /href="\/fractals"/);
-    assert.doesNotMatch(sorting.body, /\.html"/);
 
     const fractals = await request(address.port, "/fractals");
     assert.equal(fractals.status, 200);
@@ -93,7 +101,11 @@ test("public paths replace the html addresses", async () => {
 
     const indexEnding = await request(address.port, "/index.html");
     assert.equal(indexEnding.status, 308);
-    assert.equal(indexEnding.location, "/");
+    assert.equal(indexEnding.location, "/sorting");
+
+    const homeEnding = await request(address.port, "/home.html");
+    assert.equal(homeEnding.status, 308);
+    assert.equal(homeEnding.location, "/");
   } finally {
     child.kill();
   }

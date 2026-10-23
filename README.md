@@ -1,10 +1,10 @@
 # Sort Me
 
-A visualiser with two pages, published like any other site. Sorting watches a program run against the comparison lower bound ⌈log₂(n!)⌉. Fractals watches an escape-time set, a curve, a gasket, or an iterated function system resolve under a coloring you pick.
+A visualiser with a home page and two tools, published like any other site. Sorting watches a program run against the comparison lower bound ⌈log₂(n!)⌉. Fractals watches an escape-time set, a curve, a gasket, or an iterated function system resolve under a coloring you pick.
 
 Every generated array is a permutation of **1, 2, 3, …, n**. Length stops at **250**, so a finished chart always rises by 1 from one position to the next. Compare runs two to four programs on that same array. Changing the length or a preset rebuilds the array and keeps the comparison running.
 
-Neither page calls an API, loads a remote font, or sends the picture anywhere. KaTeX stays in this repository. The public addresses are `/` for sorting and `/fractals` for fractals. A visit to `/index.html` or `/fractals.html` redirects to those paths, so the address bar does not end in `.html`.
+No page calls an API, loads a remote font, or sends the picture anywhere. KaTeX stays in this repository. The public addresses are `/` for home, `/sorting` for sorting, and `/fractals` for fractals. A visit to `/home.html`, `/index.html`, or `/fractals.html` redirects to those paths, so the address bar does not end in `.html`.
 
 ## Run
 
@@ -12,7 +12,11 @@ Neither page calls an API, loads a remote font, or sends the picture anywhere. K
 npm start
 ```
 
-The server listens on every interface and prints its address. Sorting is `/`. Fractals are `/fractals`. The brass links at the top of either page switch between them.
+The server listens on every interface and prints its address. Home is `/`. Sorting is `/sorting`. Fractals are `/fractals`. The links at the top of a tool page switch between home, sorting, and fractals.
+
+## Home
+
+`/` opens on a full-frame screensaver and a short panel: Sorting and Fractals. The picture alternates a fractal flight with a sorting run. The Mandelbrot flight starts on the classic view, then pans and zooms up to the bulb on top of the cardioid. A Julia set and the burning ship do the same kind of move, using the classic and heat colorings from the fractal page. Between them, quicksort, mergesort, and heapsort play in the bar, slope, and radial views. The panel uses the same ink as the rest of the site, so the title stays readable over every frame. When the system asks for reduced motion, the page holds the opening Mandelbrot frame instead of flying.
 
 `vercel.json` hosts the same files. Clean URLs drop the `.html` suffix, and the response headers match the page policy.
 

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; img-src 'self' data:"
+    />
+    <title>Sort Me</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="home">
+    <canvas id="home-canvas" class="home-canvas" aria-hidden="true"></canvas>
+    <div class="home-veil" aria-hidden="true"></div>
+    <main class="home-card">
+      <p class="eyebrow">Visualiser</p>
+      <h1>Sort Me</h1>
+      <p class="lede">Sorting algorithms and fractals.</p>
+      <nav class="home-nav" aria-label="Choose a visualiser">
+        <a class="home-link" href="/sorting">Sorting</a>
+        <a class="home-link" href="/fractals">Fractals</a>
+      </nav>
+    </main>
+    <script type="module" src="/src/home-app.js"></script>
+  </body>
+</html>
