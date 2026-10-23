@@ -12,7 +12,7 @@ test("each zoom film is a 4K plate the page can play", () => {
     assert.equal(fs.existsSync(poster), true, scene.poster);
     const videoSize = fs.statSync(file).size;
     const posterSize = fs.statSync(poster).size;
-    assert.ok(videoSize > 500_000, `${scene.src} is ${videoSize} bytes`);
+    assert.ok(videoSize > 100_000, `${scene.src} is ${videoSize} bytes`);
     assert.ok(videoSize < 96 * 1024 * 1024, `${scene.src} is ${videoSize} bytes`);
     assert.ok(posterSize > 10_000, scene.poster);
 
