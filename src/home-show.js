@@ -204,6 +204,18 @@ export function sceneAt(elapsedMs) {
 }
 
 /**
+ * Paint order for one film. The incoming picture is in front, so a blend is visible even when
+ * that film is earlier in the document than the one it replaces. The spiral is last in the page,
+ * and this is what lets Mandelbrot fade in over it. `fade` is the opacity actually shown.
+ */
+export function filmLayer(filmId, schedule, fade = schedule.fade) {
+  const outgoing = SCENES[(schedule.index - 1 + SCENES.length) % SCENES.length].id;
+  if (filmId === schedule.id) return 2;
+  if (filmId === outgoing && fade < 1) return 1;
+  return 0;
+}
+
+/**
  * One zoom frame. The center, and any Julia or burning-ship parameter, is the same at every
  * progress. Only the scale changes, geometrically, and the iteration cap rises with the zoom so a
  * closer frame keeps its edge.

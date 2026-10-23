@@ -13,6 +13,7 @@ import {
   SCENES,
   SORTS,
   fadeAmount,
+  filmLayer,
   sceneAt,
   showMode,
   sortFrames,
@@ -109,6 +110,10 @@ test("a crossfade eases in instead of cutting", () => {
   assert.ok(Math.abs(wrap.outgoingLeft - FADE_MS / 2) < 1);
 
   assert.equal(sceneAt(-5).id, "heap");
+
+  assert.ok(filmLayer("mandelbrot", wrap) > filmLayer("heap", wrap));
+  assert.equal(filmLayer("julia", wrap), 0);
+  assert.equal(filmLayer("quick", wrap), 0);
 });
 
 test("each film zooms on a fixed center", () => {
