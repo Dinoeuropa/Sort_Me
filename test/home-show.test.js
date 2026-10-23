@@ -73,15 +73,40 @@ test("a crossfade eases in instead of cutting", () => {
   assert.equal(shown.fade, 1);
   assert.equal(shown.kind, "zoom");
 
-  const following = sceneAt(SCENES[0].duration + 20);
+  const slot = FILM_MS - FADE_MS;
+  const beforeHandoff = sceneAt(slot - 20);
+  assert.equal(beforeHandoff.id, "mandelbrot");
+  assert.equal(beforeHandoff.fade, 1);
+  assert.ok(beforeHandoff.progress < 1);
+
+  const following = sceneAt(slot + 20);
   assert.equal(following.id, "julia");
   assert.equal(following.kind, "zoom");
   assert.ok(following.fade < 0.2);
+  assert.ok(following.outgoingLeft > FADE_MS - 40);
 
-  const sorts = sceneAt(SCENES[0].duration * 3 + 20);
+  const overlap = sceneAt(slot + FADE_MS / 2);
+  assert.equal(overlap.id, "julia");
+  assert.ok(overlap.fade > 0.45 && overlap.fade < 0.55);
+  assert.ok(Math.abs(overlap.outgoingLeft - FADE_MS / 2) < 1);
+
+  const sorts = sceneAt(slot * 3 + FADE_MS / 2);
   assert.equal(sorts.id, "quick");
   assert.equal(sorts.kind, "sort");
-  assert.ok(sorts.fade < 0.2);
+  assert.ok(sorts.fade > 0.45 && sorts.fade < 0.55);
+  assert.ok(Math.abs(sorts.outgoingLeft - FADE_MS / 2) < 1);
+
+  const cycle = slot * SCENES.length;
+  const stillLast = sceneAt(cycle - 5);
+  assert.equal(stillLast.id, "heap");
+  assert.equal(stillLast.fade, 1);
+  assert.ok(stillLast.progress < 1);
+
+  const wrap = sceneAt(cycle + FADE_MS / 2);
+  assert.equal(wrap.id, "mandelbrot");
+  assert.equal(wrap.kind, "zoom");
+  assert.ok(wrap.fade > 0.45 && wrap.fade < 0.55);
+  assert.ok(Math.abs(wrap.outgoingLeft - FADE_MS / 2) < 1);
 
   assert.equal(sceneAt(-5).id, "heap");
 });
