@@ -17,6 +17,7 @@ const types = {
 
 const redirects = new Map([
   ["/index.html", "/sorting"],
+  ["/sorting.html", "/sorting"],
   ["/home.html", "/"],
   ["/sorting/", "/sorting"],
   ["/fractals.html", "/fractals"],
@@ -25,7 +26,7 @@ const redirects = new Map([
 
 const pages = new Map([
   ["/", "/home.html"],
-  ["/sorting", "/index.html"],
+  ["/sorting", "/sorting.html"],
   ["/fractals", "/fractals.html"],
   ["/favicon.ico", "/favicon.svg"],
 ]);

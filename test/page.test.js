@@ -4,9 +4,21 @@ import fs from "node:fs";
 import http from "node:http";
 import test from "node:test";
 
-const page = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const page = fs.readFileSync(new URL("../sorting.html", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const server = fs.readFileSync(new URL("../scripts/serve.mjs", import.meta.url), "utf8");
+const vercel = fs.readFileSync(new URL("../vercel.json", import.meta.url), "utf8");
+
+test("the site root is not an index file a host would serve ahead of the home rewrite", () => {
+  assert.equal(fs.existsSync(new URL("../index.html", import.meta.url)), false);
+  assert.match(vercel, /"source": "\/"/);
+  assert.match(vercel, /"destination": "\/home.html"/);
+  assert.match(vercel, /"source": "\/sorting"/);
+  assert.match(vercel, /"destination": "\/sorting.html"/);
+  assert.match(server, /"\/sorting", "\/sorting.html"/);
+  assert.doesNotMatch(server, /"\/", "\/index.html"/);
+  assert.doesNotMatch(server, /"\/sorting", "\/index.html"/);
+});
 
 test("the page is a self-contained document with selectable programs", () => {
   assert.match(page, /Content-Security-Policy/);
@@ -82,6 +94,8 @@ test("public paths replace the html addresses", async () => {
     assert.match(home.body, /href="\/sorting"/);
     assert.match(home.body, /href="\/fractals"/);
     assert.match(home.body, /<h1>Sort Me<\/h1>/);
+    assert.match(home.body, /id="home-canvas"/);
+    assert.doesNotMatch(home.body, /id="program"/);
     assert.doesNotMatch(home.body, /\.html"/);
 
     const sorting = await request(address.port, "/sorting");
@@ -102,6 +116,10 @@ test("public paths replace the html addresses", async () => {
     const indexEnding = await request(address.port, "/index.html");
     assert.equal(indexEnding.status, 308);
     assert.equal(indexEnding.location, "/sorting");
+
+    const sortingFile = await request(address.port, "/sorting.html");
+    assert.equal(sortingFile.status, 308);
+    assert.equal(sortingFile.location, "/sorting");
 
     const homeEnding = await request(address.port, "/home.html");
     assert.equal(homeEnding.status, 308);

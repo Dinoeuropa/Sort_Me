@@ -3,6 +3,7 @@
   "trailingSlash": false,
   "redirects": [
     { "source": "/index.html", "destination": "/sorting", "permanent": true },
+    { "source": "/sorting.html", "destination": "/sorting", "permanent": true },
     { "source": "/home.html", "destination": "/", "permanent": true },
     { "source": "/sorting/", "destination": "/sorting", "permanent": true },
     { "source": "/fractals.html", "destination": "/fractals", "permanent": true },
@@ -10,7 +11,7 @@
   ],
   "rewrites": [
     { "source": "/", "destination": "/home.html" },
-    { "source": "/sorting", "destination": "/index.html" },
+    { "source": "/sorting", "destination": "/sorting.html" },
     { "source": "/fractals", "destination": "/fractals.html" }
   ],
   "headers": [
