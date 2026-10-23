@@ -406,6 +406,66 @@ export function levelBlend(fractalId, magnification) {
   return { extra, fade: fade < 1e-9 ? 0 : fade };
 }
 
+/**
+ * Where a plate drawn for `plate.bounds` lands on a canvas that shows `view`.
+ * Source and destination are in the same pixel space as that plate.
+ */
+export function curveBlitRect(plate, view, destWidth, destHeight) {
+  const source = fittedWindow(plate.bounds, view, plate.width, plate.height);
+  const dest = fittedWindow(view, view, destWidth, destHeight);
+  return clipBlit(source, dest, plate.width, plate.height);
+}
+
+/** A plate can stand in for another vector draw while it still covers the view sharply. */
+export function curvePlateHolds(plate, view, destWidth, destHeight, level) {
+  if (!plate || plate.level !== level) return false;
+  const bounds = plate.bounds;
+  if (!bounds || !view) return false;
+  if (view.minX < bounds.minX - 1e-8 || view.maxX > bounds.maxX + 1e-8) return false;
+  if (view.minY < bounds.minY - 1e-8 || view.maxY > bounds.maxY + 1e-8) return false;
+  const have = fitScale(bounds, plate.width, plate.height);
+  const need = fitScale(view, destWidth, destHeight);
+  return have >= need * 0.8;
+}
+
+function fittedWindow(bounds, window, width, height) {
+  const scale = fitScale(bounds, width, height);
+  const offset = fitOffset(bounds, width, height, scale);
+  const x = offset.x + (window.minX - bounds.minX) * scale;
+  const y = offset.y + (bounds.maxY - window.maxY) * scale;
+  return {
+    x,
+    y,
+    w: (window.maxX - window.minX) * scale,
+    h: (window.maxY - window.minY) * scale,
+  };
+}
+
+function clipBlit(source, dest, plateWidth, plateHeight) {
+  const sw = source.w;
+  const sh = source.h;
+  if (!(sw > 0) || !(sh > 0) || !(dest.w > 0) || !(dest.h > 0)) return null;
+  const left = Math.max(0, source.x);
+  const top = Math.max(0, source.y);
+  const right = Math.min(plateWidth, source.x + sw);
+  const bottom = Math.min(plateHeight, source.y + sh);
+  if (right - left < 0.5 || bottom - top < 0.5) return null;
+  const cutL = (left - source.x) / sw;
+  const cutT = (top - source.y) / sh;
+  const cutR = (source.x + sw - right) / sw;
+  const cutB = (source.y + sh - bottom) / sh;
+  return {
+    sx: left,
+    sy: top,
+    sw: right - left,
+    sh: bottom - top,
+    dx: dest.x + cutL * dest.w,
+    dy: dest.y + cutT * dest.h,
+    dw: dest.w * (1 - cutL - cutR),
+    dh: dest.h * (1 - cutT - cutB),
+  };
+}
+
 export function recursionLevel(fractalId, baseDepth, magnification, minDepth, maxDepth) {
   const ratio = RATIOS[fractalId];
   const extra = ratio

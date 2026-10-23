@@ -311,6 +311,58 @@ export function presetById(fractalId, presetId) {
   return preset;
 }
 
+/** One settled zoom may build up to this many segments. A denser level is left undrawn. */
+export const CURVE_SEGMENT_BUDGET = 48000;
+
+/** Segment or triangle count at a depth, without building the geometry. */
+export function geometrySegments(fractalId, presetId, depth) {
+  const fractal = fractalById(fractalId);
+  const preset = presetById(fractalId, presetId);
+  const level = Math.min(fractal.maxDepth, Math.max(fractal.minDepth, depth | 0));
+  if (fractal.kind === "gasket") return 3 ** level;
+  if (fractal.kind !== "curve") return 0;
+  if (fractal.id === "koch") return kochSegments(preset.mode, level);
+  if (fractal.id === "dragon") {
+    if (preset.mode === "terdragon") return 3 ** level;
+    if (preset.mode === "twin") return 2 ** (level + 1);
+    return 2 ** level;
+  }
+  if (fractal.id === "hilbert") return (preset.mode === "peano" ? 9 ** level : 4 ** level) - 1;
+  if (fractal.id === "gosper") return (preset.mode === "island" ? 8 : 7) ** level;
+  if (fractal.id === "levy") return (preset.mode === "tapestry" ? 4 : 1) * 2 ** level;
+  if (fractal.id === "tree") {
+    if (preset.mode === "ternary") return (3 ** (level + 1) - 1) / 2;
+    return 2 ** (level + 1) - 1;
+  }
+  return 0;
+}
+
+/**
+ * The depth a zoom may actually build. Zooming out follows the requested depth.
+ * Zooming in stops at the last depth whose segment count stays inside the budget,
+ * and never drops below the depth the picture was drawn at.
+ */
+export function affordableDepth(fractalId, presetId, baseDepth, wanted, budget = CURVE_SEGMENT_BUDGET) {
+  const fractal = fractalById(fractalId);
+  const goal = Math.min(fractal.maxDepth, Math.max(fractal.minDepth, wanted | 0));
+  const start = Math.min(fractal.maxDepth, Math.max(fractal.minDepth, baseDepth | 0));
+  if (goal <= start) return goal;
+  let level = start;
+  for (let depth = start + 1; depth <= goal; depth += 1) {
+    if (geometrySegments(fractalId, presetId, depth) > budget) break;
+    level = depth;
+  }
+  return level;
+}
+
+function kochSegments(mode, level) {
+  if (mode === "minkowski") return 8 ** level;
+  if (mode === "square") return 5 ** level;
+  if (mode === "island") return 4 * 4 ** level;
+  if (mode === "snowflake" || mode === "inward") return 3 * 4 ** level;
+  return 4 ** level;
+}
+
 /** Fixed c-window. Zoom must not shrink the cursor's parameter range. */
 export const CURSOR_WINDOW = { minX: -2, maxX: 1, minY: -1.2, maxY: 1.2 };
 
