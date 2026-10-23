@@ -11,8 +11,9 @@ export const FRAME_COUNT = 192;
 export const FILM_MS = Math.round((FRAME_COUNT / FRAME_RATE) * 1000);
 
 /**
- * Zoom films only. The center stays put for the whole film, and the scale moves in toward it.
+ * Zoom films. The center stays put for the whole film, and the scale moves in toward it.
  * Mandelbrot and the Julia set use the classic brass coloring. The burning ship uses heat.
+ * Three sorting films follow them. Every boundary eases across {@link FADE_MS}.
  */
 export const ZOOMS = [
   {
@@ -59,7 +60,44 @@ export const ZOOMS = [
   },
 ];
 
-export const SCENES = ZOOMS.map((zoom) => ({
+/**
+ * Sorting films. Recorded offline, same length and plate as the zooms.
+ * Quicksort uses bars, mergesort the slope, heapsort the radial view.
+ */
+export const SORTS = [
+  {
+    id: "quick",
+    programId: "quick",
+    viewId: "bars",
+    length: 64,
+    seed: 11,
+    src: "/media/quick-sort.mp4",
+    poster: "/media/quick-sort.jpg",
+    duration: FILM_MS,
+  },
+  {
+    id: "merge",
+    programId: "merge",
+    viewId: "slope",
+    length: 64,
+    seed: 29,
+    src: "/media/merge-sort.mp4",
+    poster: "/media/merge-sort.jpg",
+    duration: FILM_MS,
+  },
+  {
+    id: "heap",
+    programId: "heap",
+    viewId: "radial",
+    length: 48,
+    seed: 47,
+    src: "/media/heap-sort.mp4",
+    poster: "/media/heap-sort.jpg",
+    duration: FILM_MS,
+  },
+];
+
+const zoomScenes = ZOOMS.map((zoom) => ({
   id: zoom.id,
   kind: "zoom",
   fractalId: zoom.fractalId,
@@ -67,6 +105,66 @@ export const SCENES = ZOOMS.map((zoom) => ({
   poster: zoom.poster,
   duration: zoom.duration,
 }));
+
+const sortScenes = SORTS.map((sort) => ({
+  id: sort.id,
+  kind: "sort",
+  programId: sort.programId,
+  viewId: sort.viewId,
+  src: sort.src,
+  poster: sort.poster,
+  duration: sort.duration,
+}));
+
+export const SCENES = [...zoomScenes, ...sortScenes];
+
+function mulberry32(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function freezeFrame(frame, viewId) {
+  return {
+    array: frame.array.slice(),
+    indices: frame.indices.slice(),
+    mark: frame.mark,
+    sorted: new Set(frame.sorted),
+    pivot: frame.pivot,
+    maxValue: frame.array.length,
+    viewId,
+  };
+}
+
+/**
+ * One pre-recorded sort, sampled across {@link FRAME_COUNT} frames.
+ * The home page does not call this. The offline recorder does.
+ */
+export async function sortFrames(sortId) {
+  const sort = SORTS.find((item) => item.id === sortId);
+  if (!sort) throw new Error(`Unknown screensaver sort: ${sortId}`);
+  const { createRun } = await import("./algorithms.js");
+  const { randomArray } = await import("./arrays.js");
+  const values = randomArray(sort.length, mulberry32(sort.seed));
+  const run = createRun(sort.programId, values, mulberry32(sort.seed + 97));
+  const taken = [];
+  let step = run.next();
+  while (!step.done) {
+    taken.push(freezeFrame(step.value, sort.viewId));
+    step = run.next();
+  }
+  if (taken.length === 0) throw new Error(`Sort produced no frames: ${sortId}`);
+  const sampled = [];
+  for (let i = 0; i < FRAME_COUNT; i += 1) {
+    const index = Math.round((i / (FRAME_COUNT - 1)) * (taken.length - 1));
+    sampled.push(taken[index]);
+  }
+  return sampled;
+}
 
 function smoothstep(t) {
   const x = Math.min(1, Math.max(0, t));

@@ -15,7 +15,7 @@ function shownFade(schedule) {
 }
 
 function filmFor(id) {
-  return films.find((film) => film.dataset.zoom === id);
+  return films.find((film) => film.dataset.film === id);
 }
 
 function playFromStart(film) {
@@ -51,7 +51,7 @@ function apply(schedule) {
     if (incoming) playFromStart(incoming);
   }
   for (const film of films) {
-    const id = film.dataset.zoom;
+    const id = film.dataset.film;
     if (id === scene.id) {
       film.style.opacity = String(fade);
       if (showMode(reducedMotion.matches) === "play") resume(film);
@@ -69,7 +69,7 @@ function paintStill() {
   running = false;
   current = 0;
   for (const film of films) {
-    if (film.dataset.zoom === SCENES[0].id) {
+    if (film.dataset.film === SCENES[0].id) {
       film.style.opacity = "1";
       hold(film);
     } else {
