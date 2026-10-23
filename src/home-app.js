@@ -1,4 +1,4 @@
-import { FADE_MS, SCENES, sceneAt, showMode } from "./home-show.js";
+import { FADE_MS, SCENES, filmLayer, sceneAt, showMode } from "./home-show.js";
 
 const films = [...document.querySelectorAll(".home-film")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -52,6 +52,8 @@ function apply(schedule) {
   }
   for (const film of films) {
     const id = film.dataset.film;
+    const layer = filmLayer(id, schedule, fade);
+    film.style.zIndex = String(layer);
     if (id === scene.id) {
       film.style.opacity = String(fade);
       if (showMode(reducedMotion.matches) === "play") resume(film);
