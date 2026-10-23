@@ -12,7 +12,35 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="home">
-    <canvas id="home-canvas" class="home-canvas" aria-hidden="true"></canvas>
+    <div class="home-stage" aria-hidden="true">
+      <video
+        class="home-film"
+        data-zoom="mandelbrot"
+        src="/media/mandelbrot-zoom.mp4"
+        poster="/media/mandelbrot-zoom.jpg"
+        muted
+        playsinline
+        preload="auto"
+      ></video>
+      <video
+        class="home-film"
+        data-zoom="julia"
+        src="/media/julia-zoom.mp4"
+        poster="/media/julia-zoom.jpg"
+        muted
+        playsinline
+        preload="auto"
+      ></video>
+      <video
+        class="home-film"
+        data-zoom="burning"
+        src="/media/burning-zoom.mp4"
+        poster="/media/burning-zoom.jpg"
+        muted
+        playsinline
+        preload="auto"
+      ></video>
+    </div>
     <div class="home-veil" aria-hidden="true"></div>
     <main class="home-card">
       <p class="eyebrow">Visualiser</p>

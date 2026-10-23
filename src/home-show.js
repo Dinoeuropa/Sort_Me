@@ -1,48 +1,76 @@
-import { createRun } from "./algorithms.js";
-import { randomArray } from "./arrays.js";
+/** Crossfade at the start of each zoom, in milliseconds. */
+export const FADE_MS = 1800;
 
-/** Crossfade at the start of each screensaver scene, in milliseconds. */
-export const FADE_MS = 1400;
+/** Pre-recorded plate. The page plays these files; it does not draw them. */
+export const FRAME_WIDTH = 3840;
+export const FRAME_HEIGHT = 2160;
+export const FRAME_RATE = 24;
+export const FRAME_COUNT = 192;
+
+/** Length of one film, matching FRAME_COUNT frames at FRAME_RATE. */
+export const FILM_MS = Math.round((FRAME_COUNT / FRAME_RATE) * 1000);
 
 /**
- * Screensaver order. Fractal flights and sorting runs alternate, and the cycle opens on the
- * Mandelbrot set. Durations are long enough that a fade never eats the whole scene.
+ * Zoom films only. The center stays put for the whole film, and the scale moves in toward it.
+ * Mandelbrot and the Julia set use the classic brass coloring. The burning ship uses heat.
  */
-export const SCENES = [
-  { id: "mandelbrot", kind: "fractal", fractalId: "mandelbrot", duration: 18000 },
-  { id: "quick-bars", kind: "sort", programId: "quick", viewId: "bars", length: 48, seed: 11, duration: 12000 },
-  { id: "julia", kind: "fractal", fractalId: "julia", duration: 16000 },
-  { id: "merge-slope", kind: "sort", programId: "merge", viewId: "slope", length: 42, seed: 29, duration: 12000 },
-  { id: "burning", kind: "fractal", fractalId: "burning", duration: 16000 },
-  { id: "heap-radial", kind: "sort", programId: "heap", viewId: "radial", length: 36, seed: 47, duration: 12000 },
+export const ZOOMS = [
+  {
+    id: "mandelbrot",
+    fractalId: "mandelbrot",
+    paletteId: "classic",
+    centerX: -0.125,
+    centerY: 0.9,
+    startScale: 2.45,
+    endScale: 0.18,
+    baseIterations: 72,
+    src: "/media/mandelbrot-zoom.mp4",
+    poster: "/media/mandelbrot-zoom.jpg",
+    duration: FILM_MS,
+  },
+  {
+    id: "julia",
+    fractalId: "julia",
+    paletteId: "classic",
+    centerX: -0.32,
+    centerY: 0.42,
+    startScale: 3.05,
+    endScale: 0.5,
+    baseIterations: 64,
+    cx: -0.123,
+    cy: 0.745,
+    src: "/media/julia-zoom.mp4",
+    poster: "/media/julia-zoom.jpg",
+    duration: FILM_MS,
+  },
+  {
+    id: "burning",
+    fractalId: "burning",
+    paletteId: "heat",
+    centerX: -0.5537,
+    centerY: -0.8921,
+    startScale: 3.2,
+    endScale: 0.42,
+    baseIterations: 64,
+    flipY: true,
+    src: "/media/burning-zoom.mp4",
+    poster: "/media/burning-zoom.jpg",
+    duration: FILM_MS,
+  },
 ];
 
-const FLIGHTS = {
-  mandelbrot: [
-    { fractalId: "mandelbrot", paletteId: "classic", centerX: -0.75, centerY: 0, scale: 2.6, iterations: 56 },
-    { fractalId: "mandelbrot", paletteId: "classic", centerX: -0.42, centerY: 0.42, scale: 1.35, iterations: 64 },
-    { fractalId: "mandelbrot", paletteId: "classic", centerX: -0.16, centerY: 0.84, scale: 0.48, iterations: 80 },
-    { fractalId: "mandelbrot", paletteId: "classic", centerX: -0.11, centerY: 0.88, scale: 0.22, iterations: 100 },
-  ],
-  julia: [
-    { fractalId: "julia", paletteId: "classic", centerX: 0, centerY: 0, scale: 3.2, cx: -0.123, cy: 0.745, iterations: 56 },
-    { fractalId: "julia", paletteId: "classic", centerX: -0.18, centerY: 0.22, scale: 1.85, cx: -0.123, cy: 0.745, iterations: 68 },
-    { fractalId: "julia", paletteId: "classic", centerX: -0.35, centerY: 0.45, scale: 0.95, cx: -0.123, cy: 0.745, iterations: 84 },
-  ],
-  burning: [
-    { fractalId: "burning", paletteId: "heat", centerX: -0.45, centerY: -0.55, scale: 3.3, flipY: true, iterations: 56 },
-    { fractalId: "burning", paletteId: "heat", centerX: -0.72, centerY: -0.32, scale: 1.7, flipY: true, iterations: 72 },
-    { fractalId: "burning", paletteId: "heat", centerX: -1.05, centerY: -0.08, scale: 0.72, flipY: true, iterations: 92 },
-  ],
-};
+export const SCENES = ZOOMS.map((zoom) => ({
+  id: zoom.id,
+  kind: "zoom",
+  fractalId: zoom.fractalId,
+  src: zoom.src,
+  poster: zoom.poster,
+  duration: zoom.duration,
+}));
 
 function smoothstep(t) {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
 }
 
 function cycleLength() {
@@ -50,8 +78,15 @@ function cycleLength() {
 }
 
 /**
- * Scene playing at `elapsedMs`, measured from the start of the show. Time wraps, and a negative
- * value walks backward into the previous cycle. `fade` runs from 0 to 1 across {@link FADE_MS}.
+ * How far a crossfade has come, eased so it leaves slowly, moves through the middle, and settles.
+ * `linear` is 0 at the start of the blend and 1 when the incoming film is fully there.
+ */
+export function fadeAmount(linear) {
+  return smoothstep(linear);
+}
+
+/**
+ * Film playing at `elapsedMs`. Time wraps. `fade` is {@link fadeAmount} across {@link FADE_MS}.
  */
 export function sceneAt(elapsedMs) {
   const cycle = cycleLength();
@@ -66,7 +101,7 @@ export function sceneAt(elapsedMs) {
         id: scene.id,
         kind: scene.kind,
         progress: scene.duration === 0 ? 0 : local / scene.duration,
-        fade: Math.min(1, local / FADE_MS),
+        fade: fadeAmount(Math.min(1, local / FADE_MS)),
       };
     }
     time -= scene.duration;
@@ -76,103 +111,36 @@ export function sceneAt(elapsedMs) {
 }
 
 /**
- * Camera for one fractal flight. Progress 0 and 1 sit on the first and last keyframes. In between,
- * the center eases (a pan) and the scale moves geometrically (a zoom).
+ * One zoom frame. The center, and any Julia or burning-ship parameter, is the same at every
+ * progress. Only the scale changes, geometrically, and the iteration cap rises with the zoom so a
+ * closer frame keeps its edge.
  */
-export function fractalCamera(sceneId, progress) {
-  const path = FLIGHTS[sceneId];
-  if (!path) throw new Error(`Unknown screensaver flight: ${sceneId}`);
-  const span = path.length - 1;
-  const scaled = Math.min(1, Math.max(0, progress)) * span;
-  const index = Math.min(span - 1, Math.floor(scaled));
-  const local = span === 0 ? 0 : scaled - index;
-  return mixCamera(path[index], path[Math.min(span, index + 1)], local);
-}
-
-function mixCamera(a, b, t) {
-  const eased = smoothstep(t);
+export function zoomCamera(sceneId, progress) {
+  const zoom = ZOOMS.find((item) => item.id === sceneId);
+  if (!zoom) throw new Error(`Unknown screensaver zoom: ${sceneId}`);
+  const t = Math.min(1, Math.max(0, progress));
+  const scale = zoom.startScale * (zoom.endScale / zoom.startScale) ** t;
+  const magnification = zoom.startScale / scale;
+  const extra = Math.round(Math.log2(Math.max(1, magnification)) * 36);
   const preset = {
-    centerX: lerp(a.centerX, b.centerX, eased),
-    centerY: lerp(a.centerY, b.centerY, eased),
-    scale: a.scale * (b.scale / a.scale) ** eased,
+    centerX: zoom.centerX,
+    centerY: zoom.centerY,
+    scale,
   };
-  if (a.cx != null) {
-    preset.cx = a.cx;
-    preset.cy = a.cy;
+  if (zoom.cx != null) {
+    preset.cx = zoom.cx;
+    preset.cy = zoom.cy;
   }
-  if (a.flipY) preset.flipY = true;
+  if (zoom.flipY) preset.flipY = true;
   return {
-    fractalId: a.fractalId,
-    paletteId: a.paletteId,
-    iterations: Math.round(lerp(a.iterations, b.iterations, eased)),
+    fractalId: zoom.fractalId,
+    paletteId: zoom.paletteId,
+    iterations: Math.min(280, zoom.baseIterations + extra),
     preset,
   };
 }
 
-/** Raster size for a fractal plate. The long edge stops at `maxEdge`; the aspect matches the screen. */
-export function screensaverSize(cssWidth, cssHeight, maxEdge = 480) {
-  const width = Math.max(0, cssWidth);
-  const height = Math.max(0, cssHeight);
-  const long = Math.max(width, height, 1);
-  const scale = Math.min(1, maxEdge / long);
-  return {
-    width: Math.max(2, Math.round(width * scale) || 2),
-    height: Math.max(2, Math.round(height * scale) || 2),
-  };
-}
-
-/**
- * Index into a precomputed sort. The run finishes at 82% of the scene and the ordered array holds
- * until the next flight fades in.
- */
-export function frameIndex(progress, count) {
-  if (count <= 1) return 0;
-  const t = Math.min(1, Math.max(0, progress) / 0.82);
-  return Math.min(count - 1, Math.floor(t * (count - 1)));
-}
-
-function mulberry32(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function copyFrame(frame) {
-  return {
-    array: frame.array.slice(),
-    indices: frame.indices.slice(),
-    mark: frame.mark,
-    comparisons: frame.comparisons,
-    writes: frame.writes,
-    swaps: frame.swaps,
-    sorted: new Set(frame.sorted),
-    pivot: frame.pivot,
-    maxValue: frame.array.length,
-  };
-}
-
-/** Every frame of one seeded sorting run. The same seed replays the same shuffle. */
-export function sortFrames(programId, length, seed) {
-  const values = randomArray(length, mulberry32(seed));
-  const run = createRun(programId, values, mulberry32(seed + 1));
-  const limit = length * length * 12 + length * 80 + 100;
-  const frames = [];
-  let steps = 0;
-  while (steps < limit) {
-    const next = run.next();
-    if (next.done) break;
-    frames.push(copyFrame(next.value));
-    steps += 1;
-  }
-  if (frames.length === 0) throw new Error(`Program produced no frames: ${programId}`);
-  return frames;
-}
-
-/** `still` paints one Mandelbrot frame. `play` runs the screensaver. */
+/** `still` holds the opening frame. `play` runs the films. */
 export function showMode(reduced) {
   return reduced ? "still" : "play";
 }

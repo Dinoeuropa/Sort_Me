@@ -579,14 +579,27 @@ body.home {
   overflow: auto;
 }
 
-.home-canvas {
+.home-stage {
   position: fixed;
   inset: 0;
   z-index: 0;
-  width: 100%;
-  height: 100%;
   pointer-events: none;
   background: var(--paper);
+  overflow: hidden;
+}
+
+.home-film {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  background: var(--paper);
+}
+
+.home-film[data-zoom="mandelbrot"] {
+  opacity: 1;
 }
 
 .home-veil {
