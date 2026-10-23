@@ -65,6 +65,8 @@ test("the home page plays films and does not render them", () => {
   assert.match(app, /sceneAt\(/);
   assert.match(app, /FADE_MS/);
   assert.match(app, /opacity/);
+  assert.match(app, /filmLayer/);
+  assert.match(app, /zIndex/);
   assert.doesNotMatch(app, /escapeBand|paintEscape|getContext|sortFrames|fractalCamera|draw\(/);
   assert.doesNotMatch(app, /from "\.\/(?:fractals|palettes|views|algorithms)\.js"/);
 });
