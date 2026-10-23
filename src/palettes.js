@@ -169,14 +169,6 @@ export function paintEscape(
   return data;
 }
 
-function segmentHits(from, to, width, height, pad) {
-  const minX = Math.min(from.x, to.x);
-  const maxX = Math.max(from.x, to.x);
-  const minY = Math.min(from.y, to.y);
-  const maxY = Math.max(from.y, to.y);
-  return maxX >= -pad && minX <= width + pad && maxY >= -pad && minY <= height + pad;
-}
-
 function writeLut(lut, span, slot, iter, rgb) {
   const offset = (slot * span + iter) * 3;
   lut[offset] = rgb[0];
@@ -225,9 +217,7 @@ export function drawPaths(paletteId, ctx, paths, width, height, bounds, range) {
   const start = range?.from ?? 0;
   const stop = range?.until ?? Infinity;
   const clear = range?.clear !== undefined ? range.clear : start === 0;
-  const pad = range?.pad ?? 18;
-  const map = fitTransform(bounds || boundsOf(paths), width, height, pad);
-  const cull = range?.cull === true;
+  const map = fitTransform(bounds || boundsOf(paths), width, height, 18);
   if (clear) fillPaper(ctx, width, height);
   let index = 0;
   let total = 0;
@@ -238,18 +228,16 @@ export function drawPaths(paletteId, ctx, paths, width, height, bounds, range) {
   for (const path of paths) {
     const count = path.length / 2;
     for (let i = 0; i < count - 1; i += 1) {
+      const from = map(path[i * 2], path[i * 2 + 1]);
+      const to = map(path[i * 2 + 2], path[i * 2 + 3]);
       if (index >= start && index < stop) {
-        const from = map(path[i * 2], path[i * 2 + 1]);
-        const to = map(path[i * 2 + 2], path[i * 2 + 3]);
-        if (!cull || segmentHits(from, to, width, height, pad)) {
-          ctx.beginPath();
-          ctx.moveTo(from.x, from.y);
-          ctx.lineTo(to.x, to.y);
-          ctx.strokeStyle = rgb(colorSample(paletteId, index + 1, max, -1));
-          ctx.lineWidth = widthPx;
-          ctx.stroke();
-          tip = to;
-        }
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.strokeStyle = rgb(colorSample(paletteId, index + 1, max, -1));
+        ctx.lineWidth = widthPx;
+        ctx.stroke();
+        tip = to;
       }
       index += 1;
       if (index >= stop) break;

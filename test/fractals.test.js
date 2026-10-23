@@ -2,14 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   FRACTALS,
-  affordableDepth,
   buildGeometry,
   constructionOrder,
   cursorParameter,
   escapeBand,
   escapeValue,
   fractalById,
-  geometrySegments,
   iterateIfs,
   newtonCursor,
   planePoint,
@@ -392,46 +390,6 @@ test("fractal trees branch, and the h-tree stays on the axes", () => {
   }
 });
 
-test("zoom stops before a curve's segment count leaves the budget", () => {
-  const samples = [
-    ["koch", "snowflake", 2],
-    ["koch", "cesaro", 3],
-    ["koch", "island", 2],
-    ["koch", "minkowski", 3],
-    ["koch", "square", 3],
-    ["dragon", "heighway", 6],
-    ["dragon", "twin", 5],
-    ["dragon", "terdragon", 5],
-    ["sierpinski", "upright", 4],
-    ["sierpinski", "arrowhead", 4],
-    ["hilbert", "hilbert", 4],
-    ["hilbert", "moore", 3],
-    ["hilbert", "peano", 3],
-    ["gosper", "flowsnake", 2],
-    ["gosper", "island", 2],
-    ["levy", "curve", 8],
-    ["levy", "tapestry", 5],
-    ["tree", "binary", 5],
-    ["tree", "ternary", 4],
-    ["tree", "h", 4],
-  ];
-  for (const [fractal, preset, depth] of samples) {
-    assert.equal(geometrySegments(fractal, preset, depth), countedSegments(buildGeometry(fractal, preset, depth)), `${fractal} ${preset}`);
-  }
-  assert.equal(geometrySegments("hilbert", "peano", 6), 9 ** 6 - 1);
-  assert.equal(geometrySegments("koch", "minkowski", 6), 8 ** 6);
-  assert.equal(geometrySegments("dragon", "terdragon", 12), 3 ** 12);
-  assert.equal(affordableDepth("hilbert", "peano", 5, 7), 5);
-  assert.equal(affordableDepth("koch", "minkowski", 4, 6), 5);
-  assert.equal(affordableDepth("dragon", "terdragon", 10, 14), 10);
-  assert.equal(affordableDepth("levy", "tapestry", 10, 14), 13);
-  assert.equal(affordableDepth("koch", "square", 4, 6), 6);
-  assert.equal(affordableDepth("gosper", "flowsnake", 3, 4), 4);
-  assert.equal(affordableDepth("sierpinski", "arrowhead", 5, 7), 7);
-  assert.equal(affordableDepth("tree", "ternary", 6, 8), 8);
-  assert.equal(affordableDepth("hilbert", "peano", 5, 4), 4);
-});
-
 test("fern points stay inside the preset bounds and repeat for a seed", () => {
   const preset = presetById("fern", "classic");
   assert.deepEqual(
@@ -494,13 +452,6 @@ function centroids(flat) {
     points.push([(flat[i] + flat[i + 2] + flat[i + 4]) / 3, (flat[i + 1] + flat[i + 3] + flat[i + 5]) / 3]);
   }
   return points;
-}
-
-function countedSegments(geometry) {
-  if (geometry.mode === "triangles") return geometry.vertices.length / 6;
-  let count = 0;
-  for (const path of geometry.paths) count += Math.max(0, path.length / 2 - 1);
-  return count;
 }
 
 function pairs(flat) {
