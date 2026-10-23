@@ -598,7 +598,7 @@ body.home {
   background: var(--paper);
 }
 
-.home-film[data-zoom="mandelbrot"] {
+.home-film[data-film="mandelbrot"] {
   opacity: 1;
 }
 
