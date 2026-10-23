@@ -1,8 +1,6 @@
 import katex from "../vendor/katex/katex.js";
 import {
-  CURVE_SEGMENT_BUDGET,
   FRACTALS,
-  affordableDepth,
   autoZoomFloor,
   autoZoomTarget,
   buildGeometry,
@@ -11,7 +9,6 @@ import {
   escapeBand,
   paletteRange,
   fractalById,
-  geometrySegments,
   iterateIfs,
   newtonCursor,
   presetById,
@@ -27,11 +24,8 @@ import {
   autoZoomPath,
   autoZoomRamp,
   autoZoomView,
-  FIT_PAD,
   boundsMagnification,
   coverViews,
-  curveBlitRect,
-  curvePlateHolds,
   easeFactor,
   escapeSourceBlit,
   fitZoomOut,
@@ -159,8 +153,6 @@ const state = {
   plateEdge: 2560,
   plateTook: 0,
   plate: null,
-  curvePlate: null,
-  curveHomePlate: null,
   reactiveView: null,
   autoHold: false,
   cursorDirty: false,
@@ -356,8 +348,6 @@ function resetProgress() {
   state.cursorParam = null;
   state.reactiveView = null;
   state.plate = null;
-  state.curvePlate = null;
-  state.curveHomePlate = null;
   state.cursorDirty = false;
   state.cursorRedraw = false;
   levelCache.clear();
@@ -810,11 +800,7 @@ function exploredLevel() {
     return state.autoZoom ? autoZoomIterations(base, magnification) : iterationCap(base, magnification);
   }
   if (fractal.kind === "ifs") return pointBudget(base, magnification, 80000);
-  const wanted = recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth);
-  if (fractal.kind === "curve" || fractal.kind === "gasket") {
-    return affordableDepth(fractal.id, state.presetId, base, wanted);
-  }
-  return wanted;
+  return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth);
 }
 
 /** The note never changes during auto zoom, so the frame above it keeps its size while the view moves. */
@@ -965,7 +951,6 @@ function startGlide() {
       return;
     }
     requestDetail(true);
-    settleCurvePlate();
   };
   glide.raf = requestAnimationFrame(step);
 }
@@ -995,28 +980,17 @@ function paintSettled(box) {
     paintPoints(box);
     return;
   }
-  const baseDepth = state.baseDepth || depthValue();
   const blend = levelBlend(fractal.id, currentMagnification());
-  const wanted = clampNumber(baseDepth + blend.extra, fractal.minDepth, fractal.maxDepth);
-  const shown = affordableDepth(fractal.id, state.presetId, baseDepth, wanted);
-  const next = Math.min(fractal.maxDepth, shown + 1);
-  const fadeNext = next > shown
-    && blend.fade > 0.004
-    && geometrySegments(fractal.id, state.presetId, next) <= CURVE_SEGMENT_BUDGET;
-  const cover = coveringCurvePlate(box);
-  if (cover && (curveInteracting() || curvePlateHoldsView(cover, box, shown))) {
-    blitCurvePlate(box, cover);
-    rememberCurveReadout(shown);
-    return;
-  }
-  drawStored(geometryAt(shown), box, true, true);
-  if (fadeNext) {
+  const base = clampNumber((state.baseDepth || depthValue()) + blend.extra, fractal.minDepth, fractal.maxDepth);
+  const next = Math.min(fractal.maxDepth, base + 1);
+  drawStored(geometryAt(base), box, true);
+  if (next > base && blend.fade > 0.004) {
     ctx.save();
     ctx.globalAlpha = blend.fade;
-    drawStored(geometryAt(next), box, false, true);
+    drawStored(geometryAt(next), box, false);
     ctx.restore();
   }
-  const geometry = geometryAt(shown);
+  const geometry = geometryAt(base);
   if (geometry.mode === "triangles") {
     state.vertices = geometry.vertices;
     state.paths = null;
@@ -1030,7 +1004,6 @@ function paintSettled(box) {
   state.samples = state.total;
   state.frameBounds = { ...state.view };
   state.inked = state.total;
-  captureCurvePlate(box, shown);
 }
 
 function geometryAt(level) {
@@ -1044,120 +1017,7 @@ function geometryAt(level) {
   return geometry;
 }
 
-function curveInteracting() {
-  return pointers.size > 0 || glide.factor !== 1 || glide.panX !== 0 || glide.panY !== 0;
-}
-
-function curvePlateMatches(plate, box) {
-  if (!plate) return false;
-  const pixelWidth = Math.max(1, Math.floor(box.width * box.dpr));
-  const pixelHeight = Math.max(1, Math.floor(box.height * box.dpr));
-  return plate.fractalId === state.fractalId
-    && plate.presetId === state.presetId
-    && plate.paletteId === state.paletteId
-    && plate.canvas.width === pixelWidth
-    && plate.canvas.height === pixelHeight;
-}
-
-function curvePlateHoldsView(plate, box, level) {
-  if (!curvePlateMatches(plate, box)) return false;
-  return curvePlateHolds(
-    { bounds: plate.bounds, width: box.width, height: box.height, level: plate.level },
-    state.view,
-    box.width,
-    box.height,
-    level,
-  );
-}
-
-function coveringCurvePlate(box) {
-  if (curvePlateMatches(state.curvePlate, box) && viewInside(state.curvePlate.bounds, state.view)) return state.curvePlate;
-  if (curvePlateMatches(state.curveHomePlate, box) && viewInside(state.curveHomePlate.bounds, state.view)) return state.curveHomePlate;
-  return null;
-}
-
-function viewInside(bounds, view) {
-  if (!bounds || !view) return false;
-  return view.minX >= bounds.minX - 1e-8
-    && view.maxX <= bounds.maxX + 1e-8
-    && view.minY >= bounds.minY - 1e-8
-    && view.maxY <= bounds.maxY + 1e-8;
-}
-
-function rememberCurveReadout(level) {
-  const count = geometrySegments(state.fractalId, state.presetId, level);
-  state.total = count;
-  state.revealed = count;
-  state.samples = count;
-  state.frameBounds = { ...state.view };
-}
-
-function captureCurvePlate(box, level) {
-  const plate = document.createElement("canvas");
-  plate.width = canvas.width;
-  plate.height = canvas.height;
-  plate.getContext("2d").drawImage(canvas, 0, 0);
-  const record = {
-    canvas: plate,
-    bounds: { ...state.view },
-    level,
-    fractalId: state.fractalId,
-    presetId: state.presetId,
-    paletteId: state.paletteId,
-  };
-  state.curvePlate = record;
-  if (sameWindow(state.view, state.home) || !curvePlateMatches(state.curveHomePlate, box)) {
-    state.curveHomePlate = record;
-  }
-}
-
-function sameWindow(a, b) {
-  if (!a || !b || a.scale || b.scale) return false;
-  const span = Math.max(1e-9, Math.abs(a.maxX - a.minX), Math.abs(a.maxY - a.minY));
-  return Math.abs(a.minX - b.minX) <= span * 1e-6
-    && Math.abs(a.maxX - b.maxX) <= span * 1e-6
-    && Math.abs(a.minY - b.minY) <= span * 1e-6
-    && Math.abs(a.maxY - b.maxY) <= span * 1e-6;
-}
-
-function blitCurvePlate(box, plate) {
-  prepareVectorCanvas(box);
-  const rect = curveBlitRect(
-    { bounds: plate.bounds, width: box.width, height: box.height },
-    state.view,
-    box.width,
-    box.height,
-  );
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = PAPER;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!rect) return;
-  const dpr = box.dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(
-    plate.canvas,
-    rect.sx * dpr,
-    rect.sy * dpr,
-    Math.max(1, rect.sw * dpr),
-    Math.max(1, rect.sh * dpr),
-    rect.dx,
-    rect.dy,
-    rect.dw,
-    rect.dh,
-  );
-}
-
-function settleCurvePlate() {
-  if (!canExplore()) return;
-  const fractal = currentFractal();
-  if (fractal.kind === "escape" || fractal.kind === "ifs") return;
-  const box = viewBox();
-  if (curvePlateHoldsView(state.curvePlate, box, exploredLevel())) return;
-  paint();
-}
-
-function drawStored(geometry, box, clear, cull = false) {
+function drawStored(geometry, box, clear) {
   if (geometry.mode === "triangles") {
     const total = geometry.vertices.length / 6;
     drawTriangles(state.paletteId, ctx, geometry.vertices, box.width, box.height, state.view, {
@@ -1174,8 +1034,6 @@ function drawStored(geometry, box, clear, cull = false) {
     until: total,
     clear,
     total,
-    cull,
-    pad: FIT_PAD,
   });
 }
 
@@ -1858,14 +1716,8 @@ canvas.addEventListener("pointermove", (event) => {
   applyZoom(midX, midY, pointerDistance(now) / span);
 });
 
-canvas.addEventListener("pointerup", (event) => {
-  pointers.delete(event.pointerId);
-  if (pointers.size === 0) settleCurvePlate();
-});
-canvas.addEventListener("pointercancel", (event) => {
-  pointers.delete(event.pointerId);
-  if (pointers.size === 0) settleCurvePlate();
-});
+canvas.addEventListener("pointerup", (event) => pointers.delete(event.pointerId));
+canvas.addEventListener("pointercancel", (event) => pointers.delete(event.pointerId));
 canvas.addEventListener("pointerleave", () => {
   if (state.autoZoom || !isReactive() || !state.finished || state.running) return;
   state.cursorParam = null;

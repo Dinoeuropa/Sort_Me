@@ -18,8 +18,6 @@ import {
   autoZoomRamp,
   autoZoomView,
   boundsMagnification,
-  curveBlitRect,
-  curvePlateHolds,
   clampViewToPlate,
   coverViews,
   easeFactor,
@@ -237,29 +235,6 @@ test("a scaled escape plate stays anchored under the cursor", () => {
   const y = rect.y + (80 / height) * rect.h;
   assert.ok(Math.abs(x - 30) < 1e-6);
   assert.ok(Math.abs(y - 80) < 1e-6);
-});
-
-test("a curve plate blits the window the pointer zoomed into", () => {
-  const bounds = { minX: 0, maxX: 1, minY: 0, maxY: 1 };
-  const same = curveBlitRect({ bounds, width: 200, height: 100 }, bounds, 200, 100);
-  assert.equal(same.sx, 68);
-  assert.equal(same.sy, 18);
-  assert.equal(same.sw, 64);
-  assert.equal(same.sh, 64);
-  assert.equal(same.dx, 68);
-  assert.equal(same.dy, 18);
-  const view = { minX: 0.25, maxX: 0.75, minY: 0.25, maxY: 0.75 };
-  const closer = curveBlitRect({ bounds, width: 200, height: 100 }, view, 200, 100);
-  assert.equal(closer.sx, 84);
-  assert.equal(closer.sy, 34);
-  assert.equal(closer.sw, 32);
-  assert.equal(closer.sh, 32);
-  assert.equal(closer.dw, 64);
-  assert.equal(closer.dh, 64);
-  const plate = { bounds, width: 200, height: 100, level: 5 };
-  assert.equal(curvePlateHolds(plate, bounds, 200, 100, 5), true);
-  assert.equal(curvePlateHolds(plate, view, 200, 100, 5), false);
-  assert.equal(curvePlateHolds(plate, bounds, 200, 100, 6), false);
 });
 
 test("the next fractal level fades in across its scale factor", () => {
