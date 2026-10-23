@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { escapeBand } from "../src/fractals.js";
+import { PROGRAMS } from "../src/algorithms.js";
+import { VIEWS } from "../src/views.js";
 import {
   FADE_MS,
   FILM_MS,
@@ -9,25 +11,43 @@ import {
   FRAME_RATE,
   FRAME_WIDTH,
   SCENES,
+  SORTS,
   fadeAmount,
   sceneAt,
   showMode,
+  sortFrames,
   zoomCamera,
 } from "../src/home-show.js";
 
-test("the screensaver is three pre-recorded zoom films", () => {
-  assert.deepEqual(SCENES.map((scene) => scene.id), ["mandelbrot", "julia", "burning"]);
+test("the screensaver crossfades fractal zooms and three sorting films", () => {
+  assert.deepEqual(
+    SCENES.map((scene) => scene.id),
+    ["mandelbrot", "julia", "burning", "quick", "merge", "heap"],
+  );
+  assert.deepEqual(
+    SCENES.map((scene) => scene.kind),
+    ["zoom", "zoom", "zoom", "sort", "sort", "sort"],
+  );
   assert.equal(FRAME_WIDTH, 3840);
   assert.equal(FRAME_HEIGHT, 2160);
   assert.equal(FRAME_RATE, 24);
   assert.equal(FRAME_COUNT, 192);
   assert.equal(FILM_MS, 8000);
   for (const scene of SCENES) {
-    assert.equal(scene.kind, "zoom");
     assert.equal(scene.duration, FILM_MS);
     assert.equal(scene.duration > FADE_MS, true);
-    assert.equal(scene.src, `/media/${scene.id}-zoom.mp4`);
-    assert.equal(scene.poster, `/media/${scene.id}-zoom.jpg`);
+    const suffix = scene.kind === "zoom" ? "zoom" : "sort";
+    assert.equal(scene.src, `/media/${scene.id}-${suffix}.mp4`);
+    assert.equal(scene.poster, `/media/${scene.id}-${suffix}.jpg`);
+  }
+  assert.deepEqual(SORTS.map((sort) => [sort.programId, sort.viewId]), [
+    ["quick", "bars"],
+    ["merge", "slope"],
+    ["heap", "radial"],
+  ]);
+  for (const sort of SORTS) {
+    assert.equal(PROGRAMS.some((program) => program.id === sort.programId), true);
+    assert.equal(VIEWS.some((view) => view.id === sort.viewId), true);
   }
 });
 
@@ -53,16 +73,46 @@ test("a crossfade eases in instead of cutting", () => {
   assert.equal(shown.fade, 1);
   assert.equal(shown.kind, "zoom");
 
-  const following = sceneAt(SCENES[0].duration + 20);
+  const slot = FILM_MS - FADE_MS;
+  const beforeHandoff = sceneAt(slot - 20);
+  assert.equal(beforeHandoff.id, "mandelbrot");
+  assert.equal(beforeHandoff.fade, 1);
+  assert.ok(beforeHandoff.progress < 1);
+
+  const following = sceneAt(slot + 20);
   assert.equal(following.id, "julia");
   assert.equal(following.kind, "zoom");
   assert.ok(following.fade < 0.2);
+  assert.ok(following.outgoingLeft > FADE_MS - 40);
 
-  assert.equal(sceneAt(-5).id, "burning");
+  const overlap = sceneAt(slot + FADE_MS / 2);
+  assert.equal(overlap.id, "julia");
+  assert.ok(overlap.fade > 0.45 && overlap.fade < 0.55);
+  assert.ok(Math.abs(overlap.outgoingLeft - FADE_MS / 2) < 1);
+
+  const sorts = sceneAt(slot * 3 + FADE_MS / 2);
+  assert.equal(sorts.id, "quick");
+  assert.equal(sorts.kind, "sort");
+  assert.ok(sorts.fade > 0.45 && sorts.fade < 0.55);
+  assert.ok(Math.abs(sorts.outgoingLeft - FADE_MS / 2) < 1);
+
+  const cycle = slot * SCENES.length;
+  const stillLast = sceneAt(cycle - 5);
+  assert.equal(stillLast.id, "heap");
+  assert.equal(stillLast.fade, 1);
+  assert.ok(stillLast.progress < 1);
+
+  const wrap = sceneAt(cycle + FADE_MS / 2);
+  assert.equal(wrap.id, "mandelbrot");
+  assert.equal(wrap.kind, "zoom");
+  assert.ok(wrap.fade > 0.45 && wrap.fade < 0.55);
+  assert.ok(Math.abs(wrap.outgoingLeft - FADE_MS / 2) < 1);
+
+  assert.equal(sceneAt(-5).id, "heap");
 });
 
 test("each film zooms on a fixed center", () => {
-  for (const scene of SCENES) {
+  for (const scene of SCENES.filter((item) => item.kind === "zoom")) {
     const start = zoomCamera(scene.id, 0);
     const mid = zoomCamera(scene.id, 0.5);
     const end = zoomCamera(scene.id, 1);
@@ -93,10 +143,24 @@ test("each film zooms on a fixed center", () => {
   assert.throws(() => zoomCamera("missing", 0), /unknown screensaver zoom/i);
 });
 
+test("a recorded sort plays through to an ordered list", async () => {
+  for (const sort of SORTS) {
+    const frames = await sortFrames(sort.id);
+    const again = await sortFrames(sort.id);
+    assert.equal(frames.length, FRAME_COUNT);
+    assert.deepEqual(frames[0].array, again[0].array);
+    assert.deepEqual(frames.at(-1).array, frames[0].array.slice().sort((a, b) => a - b));
+    assert.notDeepEqual(frames[0].array, frames.at(-1).array);
+    assert.equal(frames.at(-1).array.every((value, index) => value === index + 1), true);
+    assert.equal(frames[0].viewId, sort.viewId);
+  }
+  await assert.rejects(() => sortFrames("bogo"), /unknown screensaver sort/i);
+});
+
 test("a zoom stays on fractal structure through the last frame", () => {
   const width = 96;
   const height = 54;
-  for (const scene of SCENES) {
+  for (const scene of SCENES.filter((item) => item.kind === "zoom")) {
     for (const progress of [0, 0.5, 1]) {
       const camera = zoomCamera(scene.id, progress);
       const band = escapeBand(

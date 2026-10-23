@@ -95,7 +95,8 @@ test("public paths replace the html addresses", async () => {
     assert.match(home.body, /href="\/fractals"/);
     assert.match(home.body, /<h1>Sort Me<\/h1>/);
     assert.match(home.body, /class="home-film"/);
-    assert.match(home.body, /data-zoom="mandelbrot"/);
+    assert.match(home.body, /data-film="mandelbrot"/);
+    assert.match(home.body, /data-film="quick"/);
     assert.doesNotMatch(home.body, /<canvas/);
     assert.doesNotMatch(home.body, /id="program"/);
     assert.doesNotMatch(home.body, /\.html"/);

@@ -16,10 +16,16 @@ test("the home page is a quiet chooser over the screensaver", () => {
   assert.match(home, /<h1>Sort Me<\/h1>/);
   assert.match(home, /class="home-card"/);
   assert.match(home, /class="home-film"/);
-  assert.match(home, /data-zoom="mandelbrot"/);
+  assert.match(home, /data-film="mandelbrot"/);
   assert.match(home, /src="\/media\/mandelbrot-zoom\.mp4"/);
   assert.match(home, /src="\/media\/julia-zoom\.mp4"/);
   assert.match(home, /src="\/media\/burning-zoom\.mp4"/);
+  assert.match(home, /data-film="quick"/);
+  assert.match(home, /src="\/media\/quick-sort\.mp4"/);
+  assert.match(home, /data-film="merge"/);
+  assert.match(home, /src="\/media\/merge-sort\.mp4"/);
+  assert.match(home, /data-film="heap"/);
+  assert.match(home, /src="\/media\/heap-sort\.mp4"/);
   assert.match(home, /aria-hidden="true"/);
   assert.doesNotMatch(home, /<canvas/);
   assert.match(home, /href="\/sorting"/);
