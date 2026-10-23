@@ -33,14 +33,29 @@ test("a fractal menu is available to select from", () => {
     assert.equal(Number.isInteger(fractal.defaultDepth), true);
     assert.ok(fractal.minDepth <= fractal.defaultDepth);
     assert.ok(fractal.defaultDepth <= fractal.maxDepth);
-    assert.equal(fractal.presets.length, 3, fractal.id);
+    assert.ok(fractal.presets.length >= 3, fractal.id);
     const presetIds = fractal.presets.map((preset) => preset.id);
-    assert.equal(new Set(presetIds).size, 3);
+    assert.equal(new Set(presetIds).size, presetIds.length);
     for (const preset of fractal.presets) {
       assert.equal(typeof preset.name, "string");
       assert.equal(preset.name.length > 0, true);
     }
   }
+});
+
+test("curves from the build-themselves film sit in the menu", () => {
+  const ids = FRACTALS.map((fractal) => fractal.id);
+  for (const id of ["gosper", "levy", "tree"]) assert.equal(ids.includes(id), true, id);
+  const presetIds = (id) => fractalById(id).presets.map((preset) => preset.id);
+  for (const id of ["cesaro", "island", "minkowski", "square"]) {
+    assert.equal(presetIds("koch").includes(id), true, id);
+  }
+  assert.equal(presetIds("dragon").includes("terdragon"), true);
+  assert.equal(presetIds("sierpinski").includes("arrowhead"), true);
+  assert.equal(presetIds("hilbert").includes("peano"), true);
+  for (const id of ["binary", "ternary", "windswept", "h"]) assert.equal(presetIds("tree").includes(id), true, id);
+  for (const id of ["curve", "mirrored", "tapestry"]) assert.equal(presetIds("levy").includes(id), true, id);
+  for (const id of ["flowsnake", "mirrored", "island"]) assert.equal(presetIds("gosper").includes(id), true, id);
 });
 
 test("unknown fractal and preset ids are rejected", () => {
@@ -274,6 +289,107 @@ test("hilbert visits every cell of its grid without a diagonal jump", () => {
   assert.ok(width > 1);
 });
 
+test("koch variations keep their endpoints and turn by their own rule", () => {
+  const cesaro = pairs(buildGeometry("koch", "cesaro", 1).paths[0]);
+  assert.ok(Math.abs(cesaro[0][0]) < 1e-9 && Math.abs(cesaro.at(-1)[0] - 1) < 1e-6);
+  assert.ok(Math.abs(cesaro.at(-1)[1]) < 1e-6);
+  assert.ok(cesaro[2][1] > Math.sqrt(3) / 6 + 0.05);
+  const square = pairs(buildGeometry("koch", "square", 1).paths[0]);
+  assert.ok(Math.abs(square.at(-1)[0] - 1) < 1e-6);
+  assert.ok(Math.abs(square.at(-1)[1]) < 1e-6);
+  assert.equal(rightAngles(square), square.length - 2);
+  const coast = pairs(buildGeometry("koch", "minkowski", 1).paths[0]);
+  assert.ok(Math.abs(coast.at(-1)[0] - 1) < 1e-6);
+  assert.ok(Math.abs(coast.at(-1)[1]) < 1e-6);
+  assert.equal(rightAngles(coast), coast.length - 3);
+  const island = buildGeometry("koch", "island", 0);
+  assert.equal(island.paths[0].length, 5 * 2);
+  assert.ok(buildGeometry("koch", "island", 1).paths[0].length > island.paths[0].length);
+});
+
+test("the terdragon replaces each segment with three at 120 degrees", () => {
+  const once = pairs(buildGeometry("dragon", "terdragon", 1).paths[0]);
+  assert.equal(once.length, 4);
+  const a = [once[1][0] - once[0][0], once[1][1] - once[0][1]];
+  const b = [once[2][0] - once[1][0], once[2][1] - once[1][1]];
+  const dot = a[0] * b[0] + a[1] * b[1];
+  const scale = Math.hypot(a[0], a[1]) * Math.hypot(b[0], b[1]);
+  assert.ok(Math.abs(dot / scale + 0.5) < 1e-6);
+  assert.equal(buildGeometry("dragon", "terdragon", 3).paths[0].length, (3 ** 3 + 1) * 2);
+});
+
+test("the gosper curve grows by seven and turns sixty degrees", () => {
+  const once = pairs(buildGeometry("gosper", "flowsnake", 1).paths[0]);
+  assert.equal(once.length, 8);
+  const a = [once[1][0] - once[0][0], once[1][1] - once[0][1]];
+  const b = [once[2][0] - once[1][0], once[2][1] - once[1][1]];
+  const dot = a[0] * b[0] + a[1] * b[1];
+  const scale = Math.hypot(a[0], a[1]) * Math.hypot(b[0], b[1]);
+  assert.ok(Math.abs(Math.abs(dot / scale) - 0.5) < 1e-6);
+  assert.equal(buildGeometry("gosper", "flowsnake", 2).paths[0].length, (7 ** 2 + 1) * 2);
+  const island = buildGeometry("gosper", "island", 2).paths[0];
+  assert.ok(island.length > buildGeometry("gosper", "island", 1).paths[0].length);
+  const box = bounds(island);
+  assert.ok(box.maxX - box.minX > 0.2);
+  assert.ok(box.maxY - box.minY > 0.2);
+});
+
+test("the levy curve folds a right angle over its segment", () => {
+  const once = pairs(buildGeometry("levy", "curve", 1).paths[0]);
+  assert.equal(once.length, 3);
+  assert.ok(Math.abs(once[1][0] - 0.5) < 1e-9);
+  assert.ok(Math.abs(once[1][1] - 0.5) < 1e-9);
+  const a = [once[1][0] - once[0][0], once[1][1] - once[0][1]];
+  const b = [once[2][0] - once[1][0], once[2][1] - once[1][1]];
+  assert.ok(Math.abs(a[0] * b[0] + a[1] * b[1]) < 1e-9);
+  assert.equal(buildGeometry("levy", "curve", 4).paths[0].length, (2 ** 4 + 1) * 2);
+  const tapestry = buildGeometry("levy", "tapestry", 0);
+  assert.equal(tapestry.paths[0].length, 5 * 2);
+  assert.ok(buildGeometry("levy", "tapestry", 2).paths[0].length > tapestry.paths[0].length);
+});
+
+test("the arrowhead is a path under the gasket and the peano curve fills a 3-grid", () => {
+  const head = buildGeometry("sierpinski", "arrowhead", 2);
+  assert.equal(head.mode, "polyline");
+  assert.ok(head.paths[0].length > buildGeometry("sierpinski", "arrowhead", 1).paths[0].length);
+  const wide = bounds(buildGeometry("sierpinski", "arrowhead", 3).paths[0]);
+  const again = bounds(buildGeometry("sierpinski", "arrowhead", 4).paths[0]);
+  assert.ok(Math.abs(wide.maxX - wide.minX - (again.maxX - again.minX)) < 1e-6);
+  const peano = pairs(buildGeometry("hilbert", "peano", 1).paths[0]);
+  assert.equal(peano.length, 9);
+  const seen = new Set(peano.map(([x, y]) => `${x},${y}`));
+  assert.equal(seen.size, 9);
+  for (let i = 1; i < peano.length; i += 1) {
+    const step = Math.abs(peano[i][0] - peano[i - 1][0]) + Math.abs(peano[i][1] - peano[i - 1][1]);
+    assert.equal(step, 1);
+  }
+  const finer = pairs(buildGeometry("hilbert", "peano", 2).paths[0]);
+  assert.equal(finer.length, 81);
+  assert.equal(new Set(finer.map(([x, y]) => `${x},${y}`)).size, 81);
+});
+
+test("fractal trees branch, and the h-tree stays on the axes", () => {
+  const binary = buildGeometry("tree", "binary", 1);
+  assert.equal(binary.paths.length, 3);
+  const ternary = buildGeometry("tree", "ternary", 1);
+  assert.equal(ternary.paths.length, 4);
+  const swept = buildGeometry("tree", "windswept", 3).paths;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const path of swept) {
+    minX = Math.min(minX, path[2]);
+    maxX = Math.max(maxX, path[2]);
+  }
+  assert.ok(Math.abs(maxX) > Math.abs(minX) * 1.2 || Math.abs(minX) > Math.abs(maxX) * 1.2);
+  const h = buildGeometry("tree", "h", 1);
+  assert.equal(h.paths.length, 3);
+  for (const path of h.paths) {
+    const horizontal = path[1] === path[3];
+    const vertical = path[0] === path[2];
+    assert.equal(horizontal || vertical, true);
+  }
+});
+
 test("fern points stay inside the preset bounds and repeat for a seed", () => {
   const preset = presetById("fern", "classic");
   assert.deepEqual(
@@ -382,4 +498,16 @@ function contains(flat, point) {
 
 function cross(ax, ay, bx, by) {
   return ax * by - ay * bx;
+}
+
+function rightAngles(points) {
+  let count = 0;
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const ax = points[i][0] - points[i - 1][0];
+    const ay = points[i][1] - points[i - 1][1];
+    const bx = points[i + 1][0] - points[i][0];
+    const by = points[i + 1][1] - points[i][1];
+    if (Math.abs(ax * bx + ay * by) < 1e-6) count += 1;
+  }
+  return count;
 }
