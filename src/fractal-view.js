@@ -17,6 +17,9 @@ const RATIOS = {
   sierpinski: 2,
   hilbert: 2,
   dragon: Math.SQRT2,
+  gosper: Math.sqrt(7),
+  levy: Math.SQRT2,
+  tree: 1.5,
 };
 
 export function escapeWindow(preset) {

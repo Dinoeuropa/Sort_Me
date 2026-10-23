@@ -154,6 +154,10 @@ export const FRACTALS = [
       { id: "snowflake", name: "Snowflake", mode: "snowflake" },
       { id: "curve", name: "Curve", mode: "curve" },
       { id: "inward", name: "Inward", mode: "inward" },
+      { id: "cesaro", name: "Cesàro", mode: "cesaro" },
+      { id: "island", name: "Island", mode: "island" },
+      { id: "minkowski", name: "Minkowski", mode: "minkowski" },
+      { id: "square", name: "Square", mode: "square" },
     ],
   },
   {
@@ -173,6 +177,7 @@ export const FRACTALS = [
       { id: "heighway", name: "Heighway", mode: "heighway" },
       { id: "mirrored", name: "Mirrored", mode: "mirrored" },
       { id: "twin", name: "Twin", mode: "twin" },
+      { id: "terdragon", name: "Terdragon", mode: "terdragon" },
     ],
   },
   {
@@ -192,6 +197,7 @@ export const FRACTALS = [
       { id: "upright", name: "Upright", mode: "upright" },
       { id: "inverted", name: "Inverted", mode: "inverted" },
       { id: "right", name: "Right", mode: "right" },
+      { id: "arrowhead", name: "Arrowhead", mode: "arrowhead" },
     ],
   },
   {
@@ -211,6 +217,7 @@ export const FRACTALS = [
       { id: "hilbert", name: "Hilbert", mode: "hilbert" },
       { id: "moore", name: "Moore", mode: "moore" },
       { id: "transpose", name: "Transpose", mode: "transpose" },
+      { id: "peano", name: "Peano", mode: "peano" },
     ],
   },
   {
@@ -230,6 +237,64 @@ export const FRACTALS = [
       { id: "classic", name: "Classic", maps: FERN_CLASSIC, bounds: FERN_BOUNDS },
       { id: "lepto", name: "Lepto", maps: FERN_LEPTO, bounds: LEPTO_BOUNDS },
       { id: "tree", name: "Tree", maps: FERN_TREE, bounds: TREE_BOUNDS },
+    ],
+  },
+  {
+    id: "gosper",
+    name: "Gosper curve",
+    kind: "curve",
+    latex: "\\dim=2",
+    blurb: "Seven copies of the path, turned by sixty degrees, fill a hexagon.",
+    note: "Depth is how many times each segment is replaced. The island closes the same idea into a loop.",
+    depthLabel: "Depth",
+    legend: ["Start", "Middle", "End"],
+    minDepth: 0,
+    maxDepth: 4,
+    defaultDepth: 3,
+    frame: "final",
+    presets: [
+      { id: "flowsnake", name: "Flowsnake", mode: "flowsnake" },
+      { id: "mirrored", name: "Mirrored", mode: "mirrored" },
+      { id: "island", name: "Island", mode: "island" },
+    ],
+  },
+  {
+    id: "levy",
+    name: "Lévy C curve",
+    kind: "curve",
+    latex: "\\dim\\approx 1.934",
+    blurb: "Replace each segment with the two legs of a right isosceles triangle.",
+    note: "Depth is how many times the fold is repeated. The tapestry starts from a square.",
+    depthLabel: "Depth",
+    legend: ["Start", "Middle", "End"],
+    minDepth: 0,
+    maxDepth: 14,
+    defaultDepth: 10,
+    frame: "final",
+    presets: [
+      { id: "curve", name: "Curve", mode: "curve" },
+      { id: "mirrored", name: "Mirrored", mode: "mirrored" },
+      { id: "tapestry", name: "Tapestry", mode: "tapestry" },
+    ],
+  },
+  {
+    id: "tree",
+    name: "Fractal tree",
+    kind: "curve",
+    latex: "F\\to F[+F][-F]",
+    blurb: "A trunk splits into smaller copies of itself, turned to either side.",
+    note: "Depth is how many times the tips split. Ternary, windswept, and the H-tree use the same idea.",
+    depthLabel: "Depth",
+    legend: ["Trunk", "Branch", "Tip"],
+    minDepth: 0,
+    maxDepth: 8,
+    defaultDepth: 6,
+    frame: "final",
+    presets: [
+      { id: "binary", name: "Binary", mode: "binary" },
+      { id: "ternary", name: "Ternary", mode: "ternary" },
+      { id: "windswept", name: "Windswept", mode: "windswept" },
+      { id: "h", name: "H-tree", mode: "h" },
     ],
   },
 ];
@@ -578,12 +643,16 @@ export function buildGeometry(fractalId, presetId, depth) {
   const preset = presetById(fractalId, presetId);
   const level = Math.min(fractal.maxDepth, Math.max(fractal.minDepth, depth | 0));
   if (fractal.kind === "gasket") {
+    if (preset.mode === "arrowhead") return { mode: "polyline", paths: [arrowheadPoints(level)] };
     return { mode: "triangles", vertices: gasketVertices(preset.mode, level) };
   }
   if (fractal.kind !== "curve") throw new Error(`${fractal.name} has no curve geometry.`);
   if (fractal.id === "koch") return { mode: "polyline", paths: [kochPoints(level, preset.mode)] };
   if (fractal.id === "dragon") return { mode: "polyline", paths: dragonPaths(level, preset.mode) };
   if (fractal.id === "hilbert") return { mode: "polyline", paths: [spacePath(level, preset.mode)] };
+  if (fractal.id === "gosper") return { mode: "polyline", paths: gosperPaths(level, preset.mode) };
+  if (fractal.id === "levy") return { mode: "polyline", paths: levyPaths(level, preset.mode) };
+  if (fractal.id === "tree") return { mode: "polyline", paths: treePaths(level, preset.mode) };
   throw new Error(`${fractal.name} has no curve geometry.`);
 }
 
@@ -754,8 +823,15 @@ function nearestBasin(x, y) {
 }
 
 function kochPoints(depth, mode) {
+  if (mode === "minkowski") return flatten(rewriteOpen(depth, minkowskiSteps));
+  if (mode === "square") return flatten(rewriteOpen(depth, squareKochSteps));
+  if (mode === "cesaro" || mode === "island") {
+    const turn = ((mode === "island" ? -85 : 85) * Math.PI) / 180;
+    const start = mode === "island" ? squareLoop() : line();
+    return flatten(rewriteTurn(start, depth, turn));
+  }
   const height = Math.sqrt(3) / 2;
-  let pts = mode === "curve" ? [[0, 0], [1, 0]] : [[0, 0], [1, 0], [0.5, height], [0, 0]];
+  let pts = mode === "curve" ? line() : [[0, 0], [1, 0], [0.5, height], [0, 0]];
   // Left of travel is +1. The snowflake is counterclockwise, so outward is −1.
   const sign = mode === "snowflake" ? -1 : 1;
   for (let level = 0; level < depth; level += 1) {
@@ -781,7 +857,78 @@ function kochPoints(depth, mode) {
   return flatten(pts);
 }
 
+function line() {
+  return [[0, 0], [1, 0]];
+}
+
+function squareLoop() {
+  return [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]];
+}
+
+function rewriteTurn(pts, depth, turn) {
+  let current = pts;
+  for (let level = 0; level < depth; level += 1) {
+    const next = [current[0]];
+    for (let i = 0; i < current.length - 1; i += 1) {
+      const [x1, y1] = current[i];
+      const [x2, y2] = current[i + 1];
+      const span = Math.hypot(x2 - x1, y2 - y1);
+      const len = span / (2 * (1 + Math.cos(Math.abs(turn))));
+      let angle = Math.atan2(y2 - y1, x2 - x1);
+      let x = x1;
+      let y = y1;
+      for (const delta of [0, turn, -2 * turn, turn]) {
+        angle += delta;
+        x += Math.cos(angle) * len;
+        y += Math.sin(angle) * len;
+        next.push([x, y]);
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+function rewriteOpen(depth, steps) {
+  let pts = line();
+  for (let level = 0; level < depth; level += 1) {
+    const next = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      next.push(...steps(pts[i], pts[i + 1]));
+    }
+    pts = next;
+  }
+  return pts;
+}
+
+function walkTurns(x1, y1, x2, y2, part, turns) {
+  const span = Math.hypot(x2 - x1, y2 - y1);
+  const len = span / part;
+  let angle = Math.atan2(y2 - y1, x2 - x1);
+  let x = x1;
+  let y = y1;
+  const out = [];
+  for (const delta of turns) {
+    angle += delta;
+    x += Math.cos(angle) * len;
+    y += Math.sin(angle) * len;
+    out.push([x, y]);
+  }
+  return out;
+}
+
+function squareKochSteps(a, b) {
+  const right = Math.PI / 2;
+  return walkTurns(a[0], a[1], b[0], b[1], 3, [0, right, -right, -right, right]);
+}
+
+function minkowskiSteps(a, b) {
+  const right = Math.PI / 2;
+  return walkTurns(a[0], a[1], b[0], b[1], 4, [0, right, -right, -right, 0, right, right, -right]);
+}
+
 function dragonPaths(depth, mode) {
+  if (mode === "terdragon") return [terdragonPath(depth)];
   const turn = mode === "mirrored" ? -1 : 1;
   const main = dragonPath(depth, turn);
   if (mode !== "twin") return [main];
@@ -791,6 +938,30 @@ function dragonPaths(depth, mode) {
     twin[i + 1] = -main[i + 1];
   }
   return [main, twin];
+}
+
+function terdragonPath(depth) {
+  let pts = line();
+  const turn = (2 * Math.PI) / 3;
+  for (let level = 0; level < depth; level += 1) {
+    const next = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      const [x1, y1] = pts[i];
+      const [x2, y2] = pts[i + 1];
+      let angle = Math.atan2(y2 - y1, x2 - x1);
+      const step = Math.hypot(x2 - x1, y2 - y1);
+      let x = x1;
+      let y = y1;
+      for (const delta of [0, turn, -turn]) {
+        angle += delta;
+        x += Math.cos(angle) * step;
+        y += Math.sin(angle) * step;
+        next.push([x, y]);
+      }
+    }
+    pts = next;
+  }
+  return flatten(pts);
 }
 
 function dragonPath(depth, turn) {
@@ -857,6 +1028,7 @@ function divideGasket(depth, ax, ay, bx, by, cx, cy, out) {
 
 function spacePath(order, mode) {
   if (mode === "moore") return moorePath(order);
+  if (mode === "peano") return peanoPath(order);
   const path = hilbertPath(order);
   if (mode === "transpose") {
     for (let i = 0; i < path.length; i += 2) {
@@ -938,6 +1110,183 @@ function moorePath(order) {
     else if (symbol === "-") dir = (dir + 3) & 3;
   }
   return Float64Array.from(pts);
+}
+
+function peanoPath(order) {
+  let seq = "L";
+  const rules = {
+    L: "LFRFL-F-RFLFR+F+LFRFL",
+    R: "RFLFR+F+LFRFL-F-RFLFR",
+  };
+  for (let i = 0; i < order; i += 1) {
+    let next = "";
+    for (const symbol of seq) next += rules[symbol] || symbol;
+    seq = next;
+  }
+  const dirs = [
+    [1, 0],
+    [0, 1],
+    [-1, 0],
+    [0, -1],
+  ];
+  let x = 0;
+  let y = 0;
+  let dir = 1;
+  const pts = [0, 0];
+  for (const symbol of seq) {
+    if (symbol === "F") {
+      x += dirs[dir][0];
+      y += dirs[dir][1];
+      pts.push(x, y);
+    } else if (symbol === "+") dir = (dir + 1) & 3;
+    else if (symbol === "-") dir = (dir + 3) & 3;
+  }
+  return Float64Array.from(pts);
+}
+
+function gosperPaths(depth, mode) {
+  if (mode === "island") {
+    let seq = "F";
+    const rule = "F+F-F-F+F+FF-F+";
+    for (let i = 0; i < depth; i += 1) {
+      let next = "";
+      for (const symbol of seq) next += symbol === "F" ? rule : symbol;
+      seq = next;
+    }
+    return [turtle(seq, 0, 7 ** (-depth / 2), {})];
+  }
+  let seq = "A";
+  const rules = mode === "mirrored"
+    ? { A: "A+B++B-A--AA-B+", B: "-A+BB++B+A--A-B" }
+    : { A: "A-B--B+A++AA+B-", B: "+A-BB--B-A++A+B" };
+  for (let i = 0; i < depth; i += 1) {
+    let next = "";
+    for (const symbol of seq) next += rules[symbol] || symbol;
+    seq = next;
+  }
+  return [turtle(seq, 0, 7 ** (-depth / 2), { A: "F", B: "F" })];
+}
+
+function levyPaths(depth, mode) {
+  const sign = mode === "curve" ? 1 : -1;
+  let pts = mode === "tapestry" ? squareLoop() : line();
+  for (let level = 0; level < depth; level += 1) {
+    const next = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      const [x1, y1] = pts[i];
+      const [x2, y2] = pts[i + 1];
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      next.push([(x1 + x2) / 2 + sign * (-dy / 2), (y1 + y2) / 2 + sign * (dx / 2)], [x2, y2]);
+    }
+    pts = next;
+  }
+  return [flatten(pts)];
+}
+
+function arrowheadPoints(depth) {
+  let seq = "XF";
+  const rules = {
+    X: "YF+XF+Y",
+    Y: "XF-YF-X",
+  };
+  for (let i = 0; i < depth; i += 1) {
+    let next = "";
+    for (const symbol of seq) next += rules[symbol] || symbol;
+    seq = next;
+  }
+  return fitWidth(turtle(seq, 0, 1, { X: "", Y: "" }), 1);
+}
+
+function treePaths(depth, mode) {
+  if (mode === "h") return hTree(depth);
+  const spec = treeSpec(mode);
+  const paths = [];
+  const trunk = mode === "windswept" ? Math.PI / 2 - 0.35 : Math.PI / 2;
+  growTree(depth, 0, 0, trunk, 1, spec, paths);
+  return paths;
+}
+
+function treeSpec(mode) {
+  if (mode === "ternary") {
+    return [
+      { turn: 0.75, scale: 0.62 },
+      { turn: 0, scale: 0.7 },
+      { turn: -0.75, scale: 0.62 },
+    ];
+  }
+  if (mode === "windswept") {
+    return [
+      { turn: 0.28, scale: 0.82 },
+      { turn: -1.15, scale: 0.42 },
+    ];
+  }
+  return [
+    { turn: 0.5, scale: 0.72 },
+    { turn: -0.5, scale: 0.72 },
+  ];
+}
+
+function growTree(depth, x, y, angle, length, spec, paths) {
+  const x2 = x + Math.cos(angle) * length;
+  const y2 = y + Math.sin(angle) * length;
+  paths.push(Float64Array.from([x, y, x2, y2]));
+  if (depth <= 0) return;
+  for (const branch of spec) {
+    growTree(depth - 1, x2, y2, angle + branch.turn, length * branch.scale, spec, paths);
+  }
+}
+
+function hTree(depth) {
+  const paths = [];
+  growH(depth, 0.5, 0.5, 0.5, false, paths);
+  return paths;
+}
+
+function growH(depth, cx, cy, half, vertical, paths) {
+  const x1 = vertical ? cx : cx - half;
+  const y1 = vertical ? cy - half : cy;
+  const x2 = vertical ? cx : cx + half;
+  const y2 = vertical ? cy + half : cy;
+  paths.push(Float64Array.from([x1, y1, x2, y2]));
+  if (depth <= 0) return;
+  growH(depth - 1, x1, y1, half / 2, !vertical, paths);
+  growH(depth - 1, x2, y2, half / 2, !vertical, paths);
+}
+
+function turtle(seq, angle, step, drawAs, turn = Math.PI / 3) {
+  const pts = [0, 0];
+  let x = 0;
+  let y = 0;
+  for (const symbol of seq) {
+    const action = drawAs[symbol] ?? symbol;
+    if (action === "F") {
+      x += Math.cos(angle) * step;
+      y += Math.sin(angle) * step;
+      pts.push(x, y);
+    } else if (symbol === "+") angle += turn;
+    else if (symbol === "-") angle -= turn;
+  }
+  return Float64Array.from(pts);
+}
+
+function fitWidth(flat, width) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  for (let i = 0; i < flat.length; i += 2) {
+    minX = Math.min(minX, flat[i]);
+    maxX = Math.max(maxX, flat[i]);
+    minY = Math.min(minY, flat[i + 1]);
+  }
+  const span = Math.max(1e-9, maxX - minX);
+  const scale = width / span;
+  const fitted = new Float64Array(flat.length);
+  for (let i = 0; i < flat.length; i += 2) {
+    fitted[i] = (flat[i] - minX) * scale;
+    fitted[i + 1] = (flat[i + 1] - minY) * scale;
+  }
+  return fitted;
 }
 
 function applyMap(maps, x, y, seed) {

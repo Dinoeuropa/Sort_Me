@@ -315,12 +315,12 @@ function paceLabel(fractal) {
   if (state.stages) {
     const budget = generationBudget(false);
     const batch = Math.max(1, Math.ceil((state.total || 1) / budget));
-    if (fractal.kind === "gasket") return perFrame(batch, "triangle", "triangles");
+    if (state.vertices) return perFrame(batch, "triangle", "triangles");
     return perFrame(batch, "segment", "segments");
   }
   const units = unitsPerFrame(speed, state.total || depthValue(), false);
   if (fractal.kind === "ifs") return perFrame(units, "pt", "pts");
-  if (fractal.kind === "gasket") return perFrame(units, "triangle", "triangles");
+  if (state.vertices) return perFrame(units, "triangle", "triangles");
   return perFrame(units, "segment", "segments");
 }
 
@@ -477,7 +477,7 @@ function paint() {
     paintPoints(box);
     return;
   }
-  if (fractal.kind === "gasket") {
+  if (state.vertices) {
     paintTriangles(box);
     return;
   }
@@ -620,8 +620,7 @@ function advanceCurve(step) {
   }
   const batch = unitsPerFrame(speedInput.value, state.total, step);
   const next = Math.min(state.total, state.revealed + batch);
-  const fractal = currentFractal();
-  const y = fractal.kind === "gasket"
+  const y = state.vertices
     ? triangleCentroidY(state.vertices, next - 1)
     : pointAtSegmentEnd(state.paths, next - 1)?.y;
   if (Number.isFinite(y)) speaker.playNotes([pitchFromY(y, state.frameBounds)], 100, 1);
@@ -642,8 +641,7 @@ function advanceGeneration(step) {
   const jump = step ? Math.max(1, Math.ceil(budget / 4)) : 1;
   state.stageTick = Math.min(budget, state.stageTick + jump);
   const shown = Math.min(state.total, Math.max(1, Math.ceil((state.total * state.stageTick) / budget)));
-  const fractal = currentFractal();
-  const y = fractal.kind === "gasket"
+  const y = state.vertices
     ? triangleCentroidY(state.vertices, shown - 1)
     : pointAtSegmentEnd(state.paths, shown - 1)?.y;
   if (Number.isFinite(y)) speaker.playNotes([pitchFromY(y, state.frameBounds)], 100, 1);
@@ -1013,9 +1011,7 @@ function geometryAt(level) {
   let geometry = levelCache.get(key);
   if (!geometry) {
     geometry = buildGeometry(state.fractalId, state.presetId, level);
-    if (state.fractalId === "dragon" || state.fractalId === "hilbert") {
-      geometry = placeGeometry(geometry, state.home);
-    }
+    if (growsInPlace(state.fractalId)) geometry = placeGeometry(geometry, state.home);
     levelCache.set(key, geometry);
   }
   return geometry;
@@ -1148,9 +1144,7 @@ function redrawExplored() {
     state.samples = state.total;
   } else {
     let geometry = buildGeometry(state.fractalId, state.presetId, level);
-    if (fractal.id === "dragon" || fractal.id === "hilbert") {
-      geometry = placeGeometry(geometry, state.home);
-    }
+    if (growsInPlace(fractal.id)) geometry = placeGeometry(geometry, state.home);
     if (geometry.mode === "triangles") {
       state.vertices = geometry.vertices;
       state.paths = null;
@@ -1170,6 +1164,10 @@ function redrawExplored() {
   state.finished = true;
   paint();
   renderChrome();
+}
+
+function growsInPlace(fractalId) {
+  return fractalId === "dragon" || fractalId === "hilbert" || fractalId === "gosper" || fractalId === "levy" || fractalId === "tree";
 }
 
 function placeGeometry(geometry, home) {
