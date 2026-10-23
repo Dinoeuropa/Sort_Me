@@ -43,7 +43,7 @@ function resume(film) {
 function apply(schedule) {
   const scene = SCENES[schedule.index];
   const previousId = SCENES[(schedule.index - 1 + SCENES.length) % SCENES.length].id;
-  if (schedule.index !== 0) primed = false;
+  if (elapsed >= FADE_MS) primed = false;
   const fade = shownFade(schedule);
   if (schedule.index !== current) {
     current = schedule.index;

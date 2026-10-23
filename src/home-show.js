@@ -171,10 +171,6 @@ function smoothstep(t) {
   return x * x * (3 - 2 * x);
 }
 
-function cycleLength() {
-  return SCENES.reduce((sum, scene) => sum + scene.duration, 0);
-}
-
 /**
  * How far a crossfade has come, eased so it leaves slowly, moves through the middle, and settles.
  * `linear` is 0 at the start of the blend and 1 when the incoming film is fully there.
@@ -184,28 +180,27 @@ export function fadeAmount(linear) {
 }
 
 /**
- * Film playing at `elapsedMs`. Time wraps. `fade` is {@link fadeAmount} across {@link FADE_MS}.
+ * Film playing at `elapsedMs`. A film keeps its own picture for {@link FILM_MS} minus {@link FADE_MS},
+ * then the next one fades in across the frames the previous film still has left. Time wraps, so the
+ * last film blends into the first the same way. `fade` is {@link fadeAmount} across {@link FADE_MS}.
+ * `outgoingLeft` is how many milliseconds of the previous film remain.
  */
 export function sceneAt(elapsedMs) {
-  const cycle = cycleLength();
+  const slot = FILM_MS - FADE_MS;
+  const cycle = slot * SCENES.length;
   let time = elapsedMs % cycle;
   if (time < 0) time += cycle;
-  for (let index = 0; index < SCENES.length; index += 1) {
-    const scene = SCENES[index];
-    if (time < scene.duration || index === SCENES.length - 1) {
-      const local = Math.min(scene.duration, Math.max(0, time));
-      return {
-        index,
-        id: scene.id,
-        kind: scene.kind,
-        progress: scene.duration === 0 ? 0 : local / scene.duration,
-        fade: fadeAmount(Math.min(1, local / FADE_MS)),
-      };
-    }
-    time -= scene.duration;
-  }
-  const last = SCENES.length - 1;
-  return { index: last, id: SCENES[last].id, kind: SCENES[last].kind, progress: 1, fade: 1 };
+  const index = Math.min(SCENES.length - 1, Math.floor(time / slot));
+  const local = time - index * slot;
+  const scene = SCENES[index];
+  return {
+    index,
+    id: scene.id,
+    kind: scene.kind,
+    progress: FILM_MS === 0 ? 0 : Math.min(1, local / FILM_MS),
+    fade: fadeAmount(Math.min(1, local / FADE_MS)),
+    outgoingLeft: Math.max(0, FADE_MS - local),
+  };
 }
 
 /**
