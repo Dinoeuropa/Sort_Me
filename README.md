@@ -16,7 +16,7 @@ The server listens on every interface and prints its address. Home is `/`. Sorti
 
 ## Home
 
-`/` opens on a full-frame screensaver and a short panel: Sorting and Fractals. The picture alternates a fractal flight with a sorting run. The Mandelbrot flight starts on the classic view, then pans and zooms up to the bulb on top of the cardioid. A Julia set and the burning ship do the same kind of move, using the classic and heat colorings from the fractal page. Between them, quicksort, mergesort, and heapsort play in the bar, slope, and radial views. The panel uses the same ink as the rest of the site, so the title stays readable over every frame. When the system asks for reduced motion, the page holds the opening Mandelbrot frame instead of flying.
+`/` opens on a full-frame screensaver and a short panel: Sorting and Fractals. The picture is three pre-recorded 4K zoom films — Mandelbrot, a Julia set, and the burning ship — played back to back. Nothing on the home page renders a fractal. Each film holds its center still and moves the scale in: Mandelbrot settles on the crown of the top bulb, the Julia film on a junction of the rabbit, and the burning ship on the fire along its rim. Mandelbrot and Julia use the classic brass coloring. The ship uses heat. An eased crossfade joins each film to the next. The panel uses the same ink as the rest of the site, so the title stays readable over every frame. When the system asks for reduced motion, the page holds the opening Mandelbrot frame instead of playing. `scripts/record-zooms.mjs` is the offline recorder that writes `media/`.
 
 `vercel.json` hosts the same files. Clean URLs drop the `.html` suffix, and the response headers match the page policy.
 

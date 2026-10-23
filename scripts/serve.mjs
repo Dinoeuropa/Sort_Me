@@ -13,6 +13,9 @@ const types = {
   ".js": "text/javascript; charset=utf-8",
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
+  ".mp4": "video/mp4",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
 };
 
 const redirects = new Map([
@@ -62,9 +65,34 @@ const server = http.createServer((request, response) => {
       response.end("Not found");
       return;
     }
+    const type = types[path.extname(file)] || "application/octet-stream";
+    const total = data.length;
+    const range = request.headers.range;
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      const start = match && match[1] !== "" ? Number(match[1]) : 0;
+      const end = match && match[2] !== "" ? Number(match[2]) : total - 1;
+      if (!match || start > end || start >= total) {
+        response.writeHead(416, { ...headers, "Content-Range": `bytes */${total}` });
+        response.end();
+        return;
+      }
+      const last = Math.min(end, total - 1);
+      response.writeHead(206, {
+        ...headers,
+        "Content-Type": type,
+        "Accept-Ranges": "bytes",
+        "Content-Range": `bytes ${start}-${last}/${total}`,
+        "Content-Length": last - start + 1,
+      });
+      response.end(data.subarray(start, last + 1));
+      return;
+    }
     response.writeHead(200, {
       ...headers,
-      "Content-Type": types[path.extname(file)] || "application/octet-stream",
+      "Content-Type": type,
+      "Accept-Ranges": "bytes",
+      "Content-Length": total,
     });
     response.end(data);
   });

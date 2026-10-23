@@ -15,8 +15,13 @@ test("the home page is a quiet chooser over the screensaver", () => {
   assert.doesNotMatch(home, /\.html"/);
   assert.match(home, /<h1>Sort Me<\/h1>/);
   assert.match(home, /class="home-card"/);
-  assert.match(home, /id="home-canvas"/);
+  assert.match(home, /class="home-film"/);
+  assert.match(home, /data-zoom="mandelbrot"/);
+  assert.match(home, /src="\/media\/mandelbrot-zoom\.mp4"/);
+  assert.match(home, /src="\/media\/julia-zoom\.mp4"/);
+  assert.match(home, /src="\/media\/burning-zoom\.mp4"/);
   assert.match(home, /aria-hidden="true"/);
+  assert.doesNotMatch(home, /<canvas/);
   assert.match(home, /href="\/sorting"/);
   assert.match(home, /href="\/fractals"/);
   assert.match(home, /src="\/src\/home-app\.js"/);
@@ -34,6 +39,8 @@ test("home type sits on the existing panel ink", () => {
   assert.match(root, /--coral:\s*#ef6f4c/);
   assert.match(css, /\.home-card\s*\{[^}]*background:\s*var\(--panel\)/);
   assert.match(css, /\.home-card\s*\{[^}]*color:\s*var\(--text\)/);
+  assert.match(css, /\.home-film\s*\{[^}]*object-fit:\s*cover/);
+  assert.doesNotMatch(css, /\.home-canvas/);
   assert.match(home, /class="home-card"/);
   assert.match(home, /<h1>Sort Me<\/h1>/);
 });
@@ -45,11 +52,13 @@ test("the tool pages link back to home and mark themselves", () => {
   assert.match(fractals, /href="\/fractals" aria-current="page"/);
 });
 
-test("reduced motion and a hidden tab stop the flight", () => {
+test("the home page plays films and does not render them", () => {
   assert.match(app, /prefers-reduced-motion/);
   assert.match(app, /showMode\(/);
   assert.match(app, /visibilitychange/);
-  assert.match(app, /fractalCamera\(/);
-  assert.match(app, /sortFrames\(/);
-  assert.match(app, /draw\(/);
+  assert.match(app, /sceneAt\(/);
+  assert.match(app, /FADE_MS/);
+  assert.match(app, /opacity/);
+  assert.doesNotMatch(app, /escapeBand|paintEscape|getContext|sortFrames|fractalCamera|draw\(/);
+  assert.doesNotMatch(app, /from "\.\/(?:fractals|palettes|views|algorithms)\.js"/);
 });

@@ -94,7 +94,9 @@ test("public paths replace the html addresses", async () => {
     assert.match(home.body, /href="\/sorting"/);
     assert.match(home.body, /href="\/fractals"/);
     assert.match(home.body, /<h1>Sort Me<\/h1>/);
-    assert.match(home.body, /id="home-canvas"/);
+    assert.match(home.body, /class="home-film"/);
+    assert.match(home.body, /data-zoom="mandelbrot"/);
+    assert.doesNotMatch(home.body, /<canvas/);
     assert.doesNotMatch(home.body, /id="program"/);
     assert.doesNotMatch(home.body, /\.html"/);
 
@@ -124,6 +126,41 @@ test("public paths replace the html addresses", async () => {
     const homeEnding = await request(address.port, "/home.html");
     assert.equal(homeEnding.status, 308);
     assert.equal(homeEnding.location, "/");
+
+    const film = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: address.port,
+          path: "/media/mandelbrot-zoom.mp4",
+          headers: { Range: "bytes=0-15" },
+        },
+        (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => resolve({ status: res.statusCode, type: res.headers["content-type"], size: Buffer.concat(chunks).length }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(film.status, 206);
+    assert.equal(film.type, "video/mp4");
+    assert.equal(film.size, 16);
+
+    const poster = await new Promise((resolve, reject) => {
+      const req = http.request(
+        { hostname: "127.0.0.1", port: address.port, path: "/media/mandelbrot-zoom.jpg" },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve({ status: res.statusCode, type: res.headers["content-type"] }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(poster.status, 200);
+    assert.equal(poster.type, "image/jpeg");
   } finally {
     child.kill();
   }
