@@ -1,0 +1,55 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import test from "node:test";
+
+const home = fs.readFileSync(new URL("../home.html", import.meta.url), "utf8");
+const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+const app = fs.readFileSync(new URL("../src/home-app.js", import.meta.url), "utf8");
+const sorting = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const fractals = fs.readFileSync(new URL("../fractals.html", import.meta.url), "utf8");
+
+test("the home page is a quiet chooser over the screensaver", () => {
+  assert.match(home, /Content-Security-Policy/);
+  assert.match(home, /script-src 'self'/);
+  assert.doesNotMatch(home, /https?:\/\//);
+  assert.doesNotMatch(home, /\.html"/);
+  assert.match(home, /<h1>Sort Me<\/h1>/);
+  assert.match(home, /class="home-card"/);
+  assert.match(home, /id="home-canvas"/);
+  assert.match(home, /aria-hidden="true"/);
+  assert.match(home, /href="\/sorting"/);
+  assert.match(home, /href="\/fractals"/);
+  assert.match(home, /src="\/src\/home-app\.js"/);
+  assert.doesNotMatch(home, /id="program"/);
+  assert.doesNotMatch(home, /id="fractal"/);
+  assert.doesNotMatch(home, /id="compare"/);
+});
+
+test("home type sits on the existing panel ink", () => {
+  const root = css.slice(css.indexOf(":root"), css.indexOf("}"));
+  assert.match(root, /--bg:\s*#12100e/);
+  assert.match(root, /--panel:\s*#1c1814/);
+  assert.match(root, /--text:\s*#f6efe4/);
+  assert.match(root, /--brass:\s*#e2b657/);
+  assert.match(root, /--coral:\s*#ef6f4c/);
+  assert.match(css, /\.home-card\s*\{[^}]*background:\s*var\(--panel\)/);
+  assert.match(css, /\.home-card\s*\{[^}]*color:\s*var\(--text\)/);
+  assert.match(home, /class="home-card"/);
+  assert.match(home, /<h1>Sort Me<\/h1>/);
+});
+
+test("the tool pages link back to home and mark themselves", () => {
+  assert.match(sorting, /href="\/">Home<\/a>/);
+  assert.match(sorting, /href="\/sorting" aria-current="page"/);
+  assert.match(fractals, /href="\/">Home<\/a>/);
+  assert.match(fractals, /href="\/fractals" aria-current="page"/);
+});
+
+test("reduced motion and a hidden tab stop the flight", () => {
+  assert.match(app, /prefers-reduced-motion/);
+  assert.match(app, /showMode\(/);
+  assert.match(app, /visibilitychange/);
+  assert.match(app, /fractalCamera\(/);
+  assert.match(app, /sortFrames\(/);
+  assert.match(app, /draw\(/);
+});

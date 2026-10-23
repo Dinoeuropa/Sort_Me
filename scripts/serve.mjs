@@ -16,13 +16,16 @@ const types = {
 };
 
 const redirects = new Map([
-  ["/index.html", "/"],
+  ["/index.html", "/sorting"],
+  ["/home.html", "/"],
+  ["/sorting/", "/sorting"],
   ["/fractals.html", "/fractals"],
   ["/fractals/", "/fractals"],
 ]);
 
 const pages = new Map([
-  ["/", "/index.html"],
+  ["/", "/home.html"],
+  ["/sorting", "/index.html"],
   ["/fractals", "/fractals.html"],
   ["/favicon.ico", "/favicon.svg"],
 ]);

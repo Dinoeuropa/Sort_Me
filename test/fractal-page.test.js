@@ -18,7 +18,7 @@ test("sorting and fractals are two pages that link to each other", () => {
     assert.doesNotMatch(page, /\.html"/);
     assert.match(page, /aria-label="Sort Me pages"/);
   }
-  assert.match(sorting, /href="\/" aria-current="page"/);
+  assert.match(sorting, /href="\/sorting" aria-current="page"/);
   assert.match(fractals, /href="\/fractals" aria-current="page"/);
   assert.match(sorting, /src="\/src\/app\.js"/);
   assert.match(fractals, /src="\/src\/fractal-app\.js"/);
