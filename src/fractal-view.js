@@ -440,12 +440,12 @@ export function wheelZoomFactor(deltaY, deltaMode = 0) {
   return Math.exp(-clamped * WHEEL_GAIN);
 }
 
-/** Spend part of a pending zoom. One frame stays inside a fractal level. */
+/** Spend part of a pending zoom. A frame grows by at most 3%, so one frame stays inside a level. */
 export function easeFactor(pending, rate = 0.22) {
   const safe = Number.isFinite(pending) && pending > 0 ? pending : 1;
   if (Math.abs(Math.log(safe)) < 0.004) return { applied: safe, rest: 1 };
   let applied = Math.exp(Math.log(safe) * rate);
-  const cap = 1.06;
+  const cap = 1.03;
   if (applied > cap) applied = cap;
   else if (applied < 1 / cap) applied = 1 / cap;
   if ((safe > 1 && applied > safe) || (safe < 1 && applied < safe)) applied = safe;

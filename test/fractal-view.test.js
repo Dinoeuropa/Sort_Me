@@ -255,12 +255,11 @@ test("a wheel notch is a small zoom in every delta mode", () => {
 
 test("easing spends part of a pending zoom and keeps the product", () => {
   const first = easeFactor(9);
-  assert.ok(first.applied > 1);
-  assert.ok(first.applied <= 1.06);
+  assert.ok(Math.abs(first.applied - 1.03) < 1e-12);
   assert.ok(Math.abs(first.applied * first.rest - 9) < 1e-9);
   let rest = 9;
   let product = 1;
-  for (let i = 0; i < 80; i += 1) {
+  for (let i = 0; i < 120; i += 1) {
     const step = easeFactor(rest);
     product *= step.applied;
     rest = step.rest;
