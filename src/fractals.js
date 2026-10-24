@@ -656,6 +656,43 @@ export function buildGeometry(fractalId, presetId, depth) {
   throw new Error(`${fractal.name} has no curve geometry.`);
 }
 
+/**
+ * The similarity, z ↦ (re + i·im)·z + (x + i·y), that carries one level of a curve into a frame
+ * shared by all its levels, where each level lies on the one before it. A dragon or flowsnake
+ * grows and turns with every level, so its start and end are pinned. A grid curve is measured in
+ * cells, so its cells are pinned to a unit square. The rest already refine in place.
+ */
+export function levelFrame(fractalId, presetId, geometry) {
+  const preset = presetById(fractalId, presetId);
+  const path = geometry.mode === "polyline" ? geometry.paths[0] : null;
+  const pinsEnds = fractalId === "dragon" || (fractalId === "gosper" && preset.mode !== "island");
+  if (pinsEnds && path && path.length >= 4) {
+    const dx = path[path.length - 2] - path[0];
+    const dy = path[path.length - 1] - path[1];
+    const norm = dx * dx + dy * dy;
+    if (norm > 0) {
+      const re = dx / norm;
+      const im = -dy / norm;
+      return { re, im, x: -(re * path[0] - im * path[1]), y: -(im * path[0] + re * path[1]) };
+    }
+  }
+  if (fractalId === "hilbert" && path) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < path.length; i += 2) {
+      minX = Math.min(minX, path[i]);
+      maxX = Math.max(maxX, path[i]);
+      minY = Math.min(minY, path[i + 1]);
+      maxY = Math.max(maxY, path[i + 1]);
+    }
+    const re = 1 / (Math.max(maxX - minX, maxY - minY) + 1);
+    return { re, im: 0, x: (0.5 - minX) * re, y: (0.5 - minY) * re };
+  }
+  return { re: 1, im: 0, x: 0, y: 0 };
+}
+
 export function iterateIfs(fractalId, presetId, cursor, count) {
   const fractal = fractalById(fractalId);
   if (fractal.kind !== "ifs") throw new Error(`${fractal.name} is not an IFS fractal.`);
@@ -940,28 +977,32 @@ function dragonPaths(depth, mode) {
   return [main, twin];
 }
 
+/** Each segment becomes three, √3 shorter, turned −30°, +90°, −30° from it, so its ends stay put. */
 function terdragonPath(depth) {
-  let pts = line();
-  const turn = (2 * Math.PI) / 3;
+  let pts = Float64Array.from([0, 0, 1, 0]);
+  const half = 0.5;
+  const third = 1 / Math.sqrt(3);
   for (let level = 0; level < depth; level += 1) {
-    const next = [pts[0]];
-    for (let i = 0; i < pts.length - 1; i += 1) {
-      const [x1, y1] = pts[i];
-      const [x2, y2] = pts[i + 1];
-      let angle = Math.atan2(y2 - y1, x2 - x1);
-      const step = Math.hypot(x2 - x1, y2 - y1);
-      let x = x1;
-      let y = y1;
-      for (const delta of [0, turn, -turn]) {
-        angle += delta;
-        x += Math.cos(angle) * step;
-        y += Math.sin(angle) * step;
-        next.push([x, y]);
-      }
+    const segments = pts.length / 2 - 1;
+    const next = new Float64Array((segments * 3 + 1) * 2);
+    next[0] = pts[0];
+    next[1] = pts[1];
+    for (let i = 0; i < segments; i += 1) {
+      const x1 = pts[i * 2];
+      const y1 = pts[i * 2 + 1];
+      const dx = pts[i * 2 + 2] - x1;
+      const dy = pts[i * 2 + 3] - y1;
+      const o = i * 6 + 2;
+      next[o] = x1 + half * dx + half * third * dy;
+      next[o + 1] = y1 + half * dy - half * third * dx;
+      next[o + 2] = next[o] - third * dy;
+      next[o + 3] = next[o + 1] + third * dx;
+      next[o + 4] = pts[i * 2 + 2];
+      next[o + 5] = pts[i * 2 + 3];
     }
     pts = next;
   }
-  return flatten(pts);
+  return pts;
 }
 
 function dragonPath(depth, turn) {
@@ -1146,14 +1187,25 @@ function peanoPath(order) {
 
 function gosperPaths(depth, mode) {
   if (mode === "island") {
-    let seq = "F";
-    const rule = "F+F-F-F+F+FF-F+";
-    for (let i = 0; i < depth; i += 1) {
-      let next = "";
-      for (const symbol of seq) next += symbol === "F" ? rule : symbol;
-      seq = next;
+    // Each side becomes three sides √7 shorter, the middle one turned sixty degrees.
+    const tilt = Math.atan(Math.sqrt(3) / 5);
+    const hexagon = [[0, 0]];
+    for (let side = 0; side < 6; side += 1) {
+      const [x, y] = hexagon[side];
+      hexagon.push([x + Math.cos((side * Math.PI) / 3), y + Math.sin((side * Math.PI) / 3)]);
     }
-    return [turtle(seq, 0, 7 ** (-depth / 2), {})];
+    hexagon[6] = [0, 0];
+    let pts = hexagon;
+    for (let level = 0; level < depth; level += 1) {
+      const next = [pts[0]];
+      for (let i = 0; i < pts.length - 1; i += 1) {
+        const sides = walkTurns(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], Math.sqrt(7), [-tilt, Math.PI / 3, -Math.PI / 3]);
+        sides[2] = pts[i + 1];
+        next.push(...sides);
+      }
+      pts = next;
+    }
+    return [flatten(pts)];
   }
   let seq = "A";
   const rules = mode === "mirrored"
@@ -1195,7 +1247,28 @@ function arrowheadPoints(depth) {
     for (const symbol of seq) next += rules[symbol] || symbol;
     seq = next;
   }
-  return fitWidth(turtle(seq, 0, 1, { X: "", Y: "" }), 1);
+  // An even order comes out turned sixty degrees from an odd one; starting it turned keeps one triangle.
+  const path = turtle(seq, depth % 2 === 0 ? Math.PI / 3 : 0, 1, { X: "", Y: "" });
+  return pinEnds(path, 0.5, Math.sqrt(3) / 2);
+}
+
+/** The path moved, turned, and scaled so it runs from the origin to (x, y). */
+function pinEnds(path, x, y) {
+  const dx = path[path.length - 2] - path[0];
+  const dy = path[path.length - 1] - path[1];
+  const norm = dx * dx + dy * dy || 1;
+  const re = (x * dx + y * dy) / norm;
+  const im = (y * dx - x * dy) / norm;
+  const out = new Float64Array(path.length);
+  for (let i = 0; i < path.length; i += 2) {
+    const px = path[i] - path[0];
+    const py = path[i + 1] - path[1];
+    out[i] = re * px - im * py;
+    out[i + 1] = im * px + re * py;
+  }
+  out[out.length - 2] = x;
+  out[out.length - 1] = y;
+  return out;
 }
 
 function treePaths(depth, mode) {
@@ -1268,25 +1341,6 @@ function turtle(seq, angle, step, drawAs, turn = Math.PI / 3) {
     else if (symbol === "-") angle -= turn;
   }
   return Float64Array.from(pts);
-}
-
-function fitWidth(flat, width) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  for (let i = 0; i < flat.length; i += 2) {
-    minX = Math.min(minX, flat[i]);
-    maxX = Math.max(maxX, flat[i]);
-    minY = Math.min(minY, flat[i + 1]);
-  }
-  const span = Math.max(1e-9, maxX - minX);
-  const scale = width / span;
-  const fitted = new Float64Array(flat.length);
-  for (let i = 0; i < flat.length; i += 2) {
-    fitted[i] = (flat[i] - minX) * scale;
-    fitted[i + 1] = (flat[i + 1] - minY) * scale;
-  }
-  return fitted;
 }
 
 function applyMap(maps, x, y, seed) {
