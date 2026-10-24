@@ -47,30 +47,46 @@ test("escape colors stay in range, share an interior, and separate iterations", 
   }
 });
 
-test("classic bands follow the escape fraction, so neighbors at a high cap stay close", () => {
+test("classic contours repeat so nested escape rings stay distinct, without a large step", () => {
   const max = 4800;
-  const neighborStep = (paletteId) => {
-    let stepMax = 0;
-    let at = 0;
-    for (let iter = 1; iter < max - 1; iter += 1) {
-      const a = colorSample(paletteId, iter, max);
-      const b = colorSample(paletteId, iter + 1, max);
-      for (let channel = 0; channel < 3; channel += 1) {
-        const step = Math.abs(a[channel] - b[channel]);
-        if (step > stepMax) {
-          stepMax = step;
-          at = iter;
-        }
+  let stepMax = 0;
+  let stepAt = 0;
+  for (let iter = 1; iter < max - 1; iter += 1) {
+    const a = colorSample("classic", iter, max);
+    const b = colorSample("classic", iter + 1, max);
+    for (let channel = 0; channel < 3; channel += 1) {
+      const step = Math.abs(a[channel] - b[channel]);
+      if (step > stepMax) {
+        stepMax = step;
+        stepAt = iter;
       }
     }
-    return { stepMax, at };
+  }
+  assert.ok(stepMax <= 12, `classic step ${stepMax} at ${stepAt}`);
+
+  const lum = (iter) => {
+    const [r, g, b] = colorSample("classic", iter, max);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   };
-  const classic = neighborStep("classic");
-  const heat = neighborStep("heat");
-  const worst = classic.stepMax;
-  const worstAt = classic.at;
-  const heatWorst = heat.stepMax;
-  assert.ok(worst <= heatWorst + 1, `classic step ${worst} at ${worstAt}, heat step ${heatWorst}`);
+  const period = 12;
+  let rings = 0;
+  for (let start = 80; start < max - period; start += period * 20) {
+    let low = Infinity;
+    let high = -Infinity;
+    let rose = false;
+    let fell = false;
+    let prev = lum(start);
+    for (let iter = start + 1; iter < start + period; iter += 1) {
+      const value = lum(iter);
+      if (value > prev + 0.5) rose = true;
+      if (value < prev - 0.5) fell = true;
+      prev = value;
+      low = Math.min(low, value);
+      high = Math.max(high, value);
+    }
+    if (rose && fell && high - low >= 30) rings += 1;
+  }
+  assert.ok(rings >= 8, `rings ${rings}`);
 
   const early = colorSample("classic", Math.round(max * 0.05), max);
   const late = colorSample("classic", Math.round(max * 0.95), max);
@@ -84,8 +100,6 @@ test("classic bands follow the escape fraction, so neighbors at a high cap stay 
     if (distance < nearest) nearest = distance;
   }
   assert.ok(nearest <= 1, `nearest brass distance ${nearest}`);
-
-  assert.deepEqual(colorSample("classic", 35, 100), colorSample("classic", 350, 1000));
 });
 
 test("newton basins take different colors from the same palette", () => {

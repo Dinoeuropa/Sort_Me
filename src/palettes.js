@@ -477,20 +477,21 @@ function rgb(channels) {
 function classicPaint(iter, max) {
   const t = Math.min(1, iter / Math.max(1, max));
   const dark = [24, 20, 16];
-  const shade = [132, 102, 48];
-  const lift = [168, 128, 60];
   const brass = [226, 182, 87];
   const coral = [239, 111, 76];
   const cream = [246, 239, 228];
-  // Two dim bands, then brass, coral, and cream. The dim pair stays under the
-  // bright brass, so a moving picture does not flip in and out of it on every
-  // iteration. Every stop is a function of t = iter / max.
-  if (t < 0.08) return mix(dark, shade, t / 0.08);
-  if (t < 0.3) return mix(shade, lift, (t - 0.08) / 0.22);
-  if (t < 0.46) return mix(lift, shade, (t - 0.3) / 0.16);
-  if (t < 0.66) return mix(shade, brass, (t - 0.46) / 0.2);
-  if (t < 0.82) return mix(brass, coral, (t - 0.66) / 0.16);
-  return mix(coral, cream, (t - 0.82) / 0.18);
+  // The ramp carries the picture from the ground to the boundary. A triangle of
+  // twelve iterations lays a light and a dark ring on it, so copies of the set
+  // stay separated. The ring moves a few levels per iteration, so a zoom does
+  // not flip the whole field in and out of brass.
+  let color = mix(coral, cream, (t - 0.75) / 0.25);
+  if (t < 0.35) color = mix(dark, brass, t / 0.35);
+  else if (t < 0.75) color = mix(brass, coral, (t - 0.35) / 0.4);
+  const period = 12;
+  const phase = (iter % period) / period;
+  const triangle = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+  const contour = (triangle - 0.5) * 46;
+  return color.map((channel) => clampChannel(channel + contour));
 }
 
 function heatPaint(iter, max) {
