@@ -55,7 +55,7 @@ import {
 import { renderEscape } from "./escape-pool.js";
 import { GPU_ITER_LIMIT, gpuAvailable, paintGpuEscape } from "./escape-gpu.js";
 import { hasDeepCenter, viewOffset } from "./precision.js";
-import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, paintEscape } from "./palettes.js";
+import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, easeWindow, paintEscape } from "./palettes.js";
 import { runControlLabel } from "./session.js";
 import { createSpeaker } from "./sound.js";
 
@@ -1238,7 +1238,7 @@ const BAND_SHARE = 16;
 /** What the shader has cost lately, in milliseconds per million pixels per iteration of the cap. */
 const gpuClock = { cost: Number.NaN };
 const refine = { raf: 0, key: "" };
-const paletteFit = { key: "", window: null };
+const paletteFit = { key: "", window: null, scene: "", shown: null };
 
 function cancelRefine() {
   if (refine.raf) cancelAnimationFrame(refine.raf);
@@ -1259,20 +1259,29 @@ function timeGpu(width, height, cap, paint) {
 
 /**
  * The palette window a deep plate from the workers would get, so the shader's picture looks the
- * same. Sampled again each quarter octave rather than every frame.
+ * same. Sampled again each quarter octave rather than every frame, and a frame that moves the
+ * picture eases the colors shown toward the newest fit.
  */
-function gpuPaletteWindow(job, width, height, cap) {
-  if (!hasDeepCenter(job.preset)) return { floor: 0, top: null };
+function gpuPaletteWindow(job, width, height, cap, moving) {
   const preset = job.preset;
-  const key = [
-    job.fractalId, preset.cx, preset.cy, preset.px, preset.py, cap, width, height,
-    Math.round(Math.log2(preset.scale) * 4),
-  ].join(":");
+  const scene = [job.fractalId, preset.cx, preset.cy, preset.px, preset.py, width, height].join(":");
+  if (!hasDeepCenter(preset)) {
+    paletteFit.scene = scene;
+    paletteFit.shown = { floor: 0, top: cap };
+    return { floor: 0, top: null };
+  }
+  const key = [scene, Math.round(Math.log2(preset.scale) * 4)].join(":");
   if (paletteFit.key !== key) {
     paletteFit.key = key;
     paletteFit.window = paletteRange(job.fractalId, preset, width, height, cap);
   }
-  return paletteFit.window;
+  if (!paletteFit.shown || paletteFit.scene !== scene) {
+    paletteFit.scene = scene;
+    paletteFit.shown = paletteFit.window;
+  } else if (moving) {
+    paletteFit.shown = easeWindow(paletteFit.shown, paletteFit.window);
+  }
+  return paletteFit.shown;
 }
 
 /**
@@ -1288,11 +1297,12 @@ function paintGpuFrame(view, box, settle = false) {
   const depth = gpuDepthMode(view, dest.height);
   if (cap > GPU_ITER_LIMIT || !depth) return false;
   const job = renderJob(view);
-  const fit = gpuPaletteWindow(job, dest.width, dest.height, cap);
   const key = [
     job.fractalId, view.centerX, view.centerXLo, view.centerY, view.centerYLo, view.scale,
     job.preset.cx, job.preset.cy, job.preset.px, job.preset.py, cap, state.paletteId, dest.width, dest.height,
   ].join(":");
+  const repaint = !(settle && state.gpuKey === key && (refine.key === key || state.gpuShare < 1));
+  const fit = gpuPaletteWindow(job, dest.width, dest.height, cap, repaint);
   const shared = {
     fractalId: job.fractalId,
     preset: job.preset,

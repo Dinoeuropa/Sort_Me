@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { autoZoomFloor, autoZoomTarget, escapeBand, escapeValue, paletteRange, presetById } from "../src/fractals.js";
-import { paintEscape, paletteWindow } from "../src/palettes.js";
+import { easeWindow, paintEscape, paletteWindow } from "../src/palettes.js";
 import {
   autoZoomIterations,
   autoZoomPath,
@@ -454,6 +454,29 @@ test("the palette window fits a crowded plate and leaves a wide or shallow one a
   assert.deepEqual([...painted.subarray(12, 15)], [...flat.subarray(12, 15)]);
   const capped = paintEscape("ink", Uint16Array.from([70, 200, 300]), Int8Array.from([-1, -1, -1]), 3, 1, 6000, 1, 6000, 0, 200);
   assert.deepEqual([...capped.subarray(4, 7)], [...capped.subarray(8, 11)]);
+});
+
+test("a shown palette window eases toward a new fit instead of jumping to it", () => {
+  const whole = { floor: 0, top: 640 };
+  const fitted = { floor: 8, top: 215 };
+  assert.deepEqual(easeWindow(null, fitted), fitted);
+  const first = easeWindow(whole, fitted);
+  assert.ok(first.top < 640 && first.top > 500, `one frame moves the top a little: ${first.top}`);
+  assert.ok(first.floor >= 0 && first.floor < 8, `floor ${first.floor}`);
+  const tops = [whole.top];
+  let shown = whole;
+  for (let frame = 0; frame < 200 && (shown.floor !== fitted.floor || shown.top !== fitted.top); frame += 1) {
+    shown = easeWindow(shown, fitted);
+    assert.ok(shown.top > shown.floor);
+    tops.push(shown.top);
+  }
+  assert.deepEqual(shown, fitted);
+  for (let i = 1; i < tops.length; i += 1) {
+    assert.ok(tops[i] <= tops[i - 1] && tops[i] >= fitted.top, "the top never overshoots");
+    assert.ok(Math.abs(Math.log(tops[i] / tops[i - 1])) < 0.2, `no frame jumps: ${tops[i - 1]} -> ${tops[i]}`);
+  }
+  const back = easeWindow(fitted, whole);
+  assert.ok(back.top > 215 && back.top < 300 && back.floor <= 8, `easing back ${back.floor}..${back.top}`);
 });
 
 test("the auto zoom path lands on the Julia, Newton, and burning ship targets", () => {
