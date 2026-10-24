@@ -144,6 +144,14 @@ test("the reactive badge is a switch that turns cursor reaction off", () => {
   assert.match(click, /scheduleEscape/);
 });
 
+test("the legend swatches follow the classic ramp and the open palette", () => {
+  assert.match(css, /\.swatch\.early\s*\{[^}]*background:\s*var\(--coral\)/);
+  assert.match(css, /\.swatch\.late\s*\{[^}]*background:\s*var\(--text\)/);
+  assert.match(fractalApp, /colorSample\(state\.paletteId/);
+  assert.match(fractalApp, /\.swatch\.early/);
+  assert.match(fractalApp, /\.swatch\.late/);
+});
+
 test("auto zoom is hidden for fractals that cannot glide and stays available when reaction is off", () => {
   assert.match(fractals, /id="auto-zoom"/);
   assert.match(fractalApp, /function canAutoZoom/);
