@@ -30,6 +30,7 @@ import {
   iterationCap,
   MOTION_SCALE_MIN,
   motionScale,
+  incomingLevelFade,
   levelBlend,
   mapPointsInto,
   panBounds,
@@ -282,6 +283,28 @@ test("a scaled escape plate stays anchored under the cursor", () => {
   const y = rect.y + (80 / height) * rect.h;
   assert.ok(Math.abs(x - 30) < 1e-6);
   assert.ok(Math.abs(y - 80) < 1e-6);
+});
+
+test("a finer level stays off the picture until its segments are as wide as the stroke", () => {
+  const ratio = 3;
+  const minPx = 6;
+  const thin = 1.4;
+  const hidden = (progress) => incomingLevelFade(progress, thin * ratio ** progress, ratio, minPx);
+  assert.equal(hidden(0), 0);
+  assert.equal(hidden(0.2), 0);
+  assert.equal(hidden(0.9), 0);
+  assert.equal(hidden(1), 0);
+
+  const alreadyWide = (progress) => incomingLevelFade(progress, 8 * 2 ** progress, 2, minPx);
+  assert.equal(alreadyWide(0), 0);
+  assert.ok(Math.abs(alreadyWide(0.4) - 0.4) < 1e-9);
+  assert.ok(Math.abs(alreadyWide(1) - 1) < 1e-9);
+
+  const opensMidway = (progress) => incomingLevelFade(progress, 2 * 4 ** progress, 4, 4);
+  assert.equal(opensMidway(0.25), 0);
+  assert.ok(Math.abs(opensMidway(0.5)) < 1e-9);
+  assert.ok(Math.abs(opensMidway(0.75) - 0.5) < 1e-9);
+  assert.ok(Math.abs(opensMidway(1) - 1) < 1e-9);
 });
 
 test("the next fractal level fades in across its scale factor", () => {

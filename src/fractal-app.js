@@ -32,7 +32,10 @@ import {
   escapeIterationCap,
   escapeMagnification,
   escapeWindow,
+  FIT_PAD,
+  incomingLevelFade,
   levelBlend,
+  levelRatio,
   placeLevel,
   panBounds,
   panEscape,
@@ -56,7 +59,18 @@ import {
 import { renderEscape } from "./escape-pool.js";
 import { GPU_ITER_LIMIT, gpuAvailable, paintGpuEscape } from "./escape-gpu.js";
 import { hasDeepCenter, viewOffset } from "./precision.js";
-import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, easeWindow, paintEscape } from "./palettes.js";
+import {
+  PALETTES,
+  boundsOf,
+  drawPaths,
+  drawPoints,
+  drawTriangles,
+  easeWindow,
+  fitScale,
+  paintEscape,
+  sampledSegmentLength,
+  strokeWidth,
+} from "./palettes.js";
 import { runControlLabel } from "./session.js";
 import { createSpeaker } from "./sound.js";
 
@@ -1024,14 +1038,19 @@ function paintSettled(box) {
   const blend = levelBlend(fractal.id, currentMagnification(), state.presetId);
   const base = clampNumber((state.baseDepth || depthValue()) + blend.extra, fractal.minDepth, fractal.maxDepth);
   const next = Math.min(fractal.maxDepth, base + 1);
-  drawStored(geometryAt(base), box, true);
-  if (next > base && blend.fade > 0.004) {
+  const geometry = geometryAt(base);
+  drawStored(geometry, box, true);
+  const ratio = levelRatio(fractal.id, state.presetId);
+  const points = geometry.mode === "triangles" ? geometry.vertices : geometry.paths?.[0];
+  const span = sampledSegmentLength(points, geometry.mode === "triangles" ? 3 : 0);
+  const nextPx = ratio > 1 ? (span / ratio) * fitScale(state.view, box.width, box.height, FIT_PAD) : 0;
+  const shown = incomingLevelFade(blend.fade, nextPx, ratio, strokeWidth(box.width, box.height));
+  if (next > base && shown > 0.004) {
     ctx.save();
-    ctx.globalAlpha = blend.fade;
+    ctx.globalAlpha = shown;
     drawStored(geometryAt(next), box, false);
     ctx.restore();
   }
-  const geometry = geometryAt(base);
   if (geometry.mode === "triangles") {
     state.vertices = geometry.vertices;
     state.paths = null;
