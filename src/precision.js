@@ -314,42 +314,9 @@ export function ddNewtonStart(zx, zxLo, zy, zyLo, px, py, pixel, maxSteps) {
     const x = xhi + xlo;
     const y = yhi + ylo;
     if (Math.hypot(gx, gy) * pixel > 1e-13 * Math.hypot(x, y)) break;
-    const xx = ddMul(xhi, xlo, xhi, xlo);
-    const yy = ddMul(yhi, ylo, yhi, ylo);
-    const xy = ddMul(xhi, xlo, yhi, ylo);
-    const x2 = ddSub(xx[0], xx[1], yy[0], yy[1]);
-    const y2 = [2 * xy[0], 2 * xy[1]];
-    const x2x = ddMul(x2[0], x2[1], xhi, xlo);
-    const y2y = ddMul(y2[0], y2[1], yhi, ylo);
-    const x2y = ddMul(x2[0], x2[1], yhi, ylo);
-    const y2x = ddMul(y2[0], y2[1], xhi, xlo);
-    const x3 = ddSub(x2x[0], x2x[1], y2y[0], y2y[1]);
-    const y3 = ddAdd(x2y[0], x2y[1], y2x[0], y2x[1]);
-    const pxx = ddMul(xhi, xlo, px, 0);
-    const pyy = ddMul(yhi, ylo, py, 0);
-    const pxy = ddMul(yhi, ylo, px, 0);
-    const pyx = ddMul(xhi, xlo, py, 0);
-    const bend = ddSub(pxx[0], pxx[1], pyy[0], pyy[1]);
-    const bendIm = ddAdd(pxy[0], pxy[1], pyx[0], pyx[1]);
-    const fxa = ddAdd(x3[0], x3[1], bend[0], bend[1]);
-    const fx = ddAdd(fxa[0], fxa[1], -1, 0);
-    const fy = ddAdd(y3[0], y3[1], bendIm[0], bendIm[1]);
-    const x2t = ddMul(x2[0], x2[1], 3, 0);
-    const y2t = ddMul(y2[0], y2[1], 3, 0);
-    const dx = ddAdd(x2t[0], x2t[1], px, 0);
-    const dy = ddAdd(y2t[0], y2t[1], py, 0);
-    const dxx = ddMul(dx[0], dx[1], dx[0], dx[1]);
-    const dyy = ddMul(dy[0], dy[1], dy[0], dy[1]);
-    const denom = ddAdd(dxx[0], dxx[1], dyy[0], dyy[1]);
-    if (!(denom[0] > 0) || denom[0] === Infinity) break;
-    const fxdx = ddMul(fx[0], fx[1], dx[0], dx[1]);
-    const fydy = ddMul(fy[0], fy[1], dy[0], dy[1]);
-    const fydx = ddMul(fy[0], fy[1], dx[0], dx[1]);
-    const fxdy = ddMul(fx[0], fx[1], dy[0], dy[1]);
-    const numX = ddAdd(fxdx[0], fxdx[1], fydy[0], fydy[1]);
-    const numY = ddSub(fydx[0], fydx[1], fxdy[0], fxdy[1]);
-    const stepX = ddDiv(numX[0], numX[1], denom[0], denom[1]);
-    const stepY = ddDiv(numY[0], numY[1], denom[0], denom[1]);
+    const { fx, fy, dx, dy } = ddNewtonParts(xhi, xlo, yhi, ylo, px, py);
+    const { q, stepX, stepY } = ddNewtonQuotient(fx, fy, dx, dy);
+    if (!(q[0] > 0) || q[0] === Infinity) break;
     // N'(z) = f f'' / f'², with f'' = 6z, in doubles for the spread of neighboring pixels.
     const fr = fx[0];
     const fi = fy[0];
@@ -373,6 +340,101 @@ export function ddNewtonStart(zx, zxLo, zy, zyLo, px, py, pixel, maxSteps) {
     steps += 1;
   }
   return { x: xhi + xlo, y: yhi + ylo, steps };
+}
+
+/** f(z) = z³ + p z − 1 and f'(z) = 3z² + p for a double-double z, each part a [hi, lo] pair. */
+function ddNewtonParts(xhi, xlo, yhi, ylo, px, py) {
+  const xx = ddMul(xhi, xlo, xhi, xlo);
+  const yy = ddMul(yhi, ylo, yhi, ylo);
+  const xy = ddMul(xhi, xlo, yhi, ylo);
+  const x2 = ddSub(xx[0], xx[1], yy[0], yy[1]);
+  const y2 = [2 * xy[0], 2 * xy[1]];
+  const x2x = ddMul(x2[0], x2[1], xhi, xlo);
+  const y2y = ddMul(y2[0], y2[1], yhi, ylo);
+  const x2y = ddMul(x2[0], x2[1], yhi, ylo);
+  const y2x = ddMul(y2[0], y2[1], xhi, xlo);
+  const x3 = ddSub(x2x[0], x2x[1], y2y[0], y2y[1]);
+  const y3 = ddAdd(x2y[0], x2y[1], y2x[0], y2x[1]);
+  const pxx = ddMul(xhi, xlo, px, 0);
+  const pyy = ddMul(yhi, ylo, py, 0);
+  const pxy = ddMul(yhi, ylo, px, 0);
+  const pyx = ddMul(xhi, xlo, py, 0);
+  const bend = ddSub(pxx[0], pxx[1], pyy[0], pyy[1]);
+  const bendIm = ddAdd(pxy[0], pxy[1], pyx[0], pyx[1]);
+  const fxa = ddAdd(x3[0], x3[1], bend[0], bend[1]);
+  const fx = ddAdd(fxa[0], fxa[1], -1, 0);
+  const fy = ddAdd(y3[0], y3[1], bendIm[0], bendIm[1]);
+  const x2t = ddMul(x2[0], x2[1], 3, 0);
+  const y2t = ddMul(y2[0], y2[1], 3, 0);
+  const dx = ddAdd(x2t[0], x2t[1], px, 0);
+  const dy = ddAdd(y2t[0], y2t[1], py, 0);
+  return { fx, fy, dx, dy };
+}
+
+/** The Newton step f / f' in double-double, with |f'|² as `q` for the caller to check. */
+function ddNewtonQuotient(fx, fy, dx, dy) {
+  const dxx = ddMul(dx[0], dx[1], dx[0], dx[1]);
+  const dyy = ddMul(dy[0], dy[1], dy[0], dy[1]);
+  const q = ddAdd(dxx[0], dxx[1], dyy[0], dyy[1]);
+  const fxdx = ddMul(fx[0], fx[1], dx[0], dx[1]);
+  const fydy = ddMul(fy[0], fy[1], dy[0], dy[1]);
+  const fydx = ddMul(fy[0], fy[1], dx[0], dx[1]);
+  const fxdy = ddMul(fx[0], fx[1], dy[0], dy[1]);
+  const numX = ddAdd(fxdx[0], fxdx[1], fydy[0], fydy[1]);
+  const numY = ddSub(fydx[0], fydx[1], fxdy[0], fxdy[1]);
+  return { q, stepX: ddDiv(numX[0], numX[1], q[0], q[1]), stepY: ddDiv(numY[0], numY[1], q[0], q[1]) };
+}
+
+/** A Newton reference stops once its step is this small, beside a root, where plain floats suffice. */
+const NEWTON_SETTLED = 1e-10;
+
+/** A reference this far out or this close to the pole has no next point a float could carry. */
+const NEWTON_FAR = 1e30;
+const NEWTON_POLE = 1e-30;
+
+/**
+ * Newton's method for z³ + p z − 1 from a double-double start, kept as doubles: the point z_n and
+ * the derivative 3z_n² + p at it, which beside the pole only double-double can give. A shader
+ * follows each pixel as a float offset from these. The orbit ends at the pole, far out, once it
+ * has settled on a root, or after `maxSteps` steps.
+ */
+export function newtonReference(zx, zxLo, zy, zyLo, px, py, maxSteps) {
+  const cap = Math.max(1, maxSteps | 0);
+  const orbit = new Float64Array((cap + 1) * 2);
+  const denom = new Float64Array((cap + 1) * 2);
+  let xhi = zx;
+  let xlo = zxLo;
+  let yhi = zy;
+  let ylo = zyLo;
+  let count = 0;
+  for (let n = 0; n <= cap; n += 1) {
+    const { fx, fy, dx, dy } = ddNewtonParts(xhi, xlo, yhi, ylo, px, py);
+    orbit[n * 2] = xhi + xlo;
+    orbit[n * 2 + 1] = yhi + ylo;
+    denom[n * 2] = dx[0] + dx[1];
+    denom[n * 2 + 1] = dy[0] + dy[1];
+    count = n + 1;
+    const size = Math.hypot(orbit[n * 2], orbit[n * 2 + 1]);
+    const slope = Math.hypot(denom[n * 2], denom[n * 2 + 1]);
+    if (n === cap || !(size < NEWTON_FAR) || !(slope > NEWTON_POLE)) break;
+    const { stepX, stepY } = ddNewtonQuotient(fx, fy, dx, dy);
+    const nextX = ddSub(xhi, xlo, stepX[0], stepX[1]);
+    const nextY = ddSub(yhi, ylo, stepY[0], stepY[1]);
+    xhi = nextX[0];
+    xlo = nextX[1];
+    yhi = nextY[0];
+    ylo = nextY[1];
+    if (Math.hypot(stepX[0], stepY[0]) < NEWTON_SETTLED && n + 1 <= cap) {
+      const last = ddNewtonParts(xhi, xlo, yhi, ylo, px, py);
+      orbit[(n + 1) * 2] = xhi + xlo;
+      orbit[(n + 1) * 2 + 1] = yhi + ylo;
+      denom[(n + 1) * 2] = last.dx[0] + last.dx[1];
+      denom[(n + 1) * 2 + 1] = last.dy[0] + last.dy[1];
+      count = n + 2;
+      break;
+    }
+  }
+  return { orbit, denom, count };
 }
 
 /**

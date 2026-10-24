@@ -20,7 +20,6 @@ import {
   PLATE_BLEND_MS,
   PLATE_TARGET_MS,
   advanceAutoZoom,
-  autoZoomIterations,
   autoZoomPath,
   autoZoomRamp,
   autoZoomView,
@@ -29,9 +28,9 @@ import {
   easeFactor,
   escapeSourceBlit,
   fitZoomOut,
+  escapeIterationCap,
   escapeMagnification,
   escapeWindow,
-  iterationCap,
   levelBlend,
   mapPointsInto,
   panBounds,
@@ -45,7 +44,8 @@ import {
   plateMargin,
   plateRasterEdge,
   pointBudget,
-  gpuPrecisionHolds,
+  gpuDepthMode,
+  motionScale,
   rasterSize,
   recursionLevel,
   wheelZoomFactor,
@@ -53,7 +53,7 @@ import {
   zoomEscape,
 } from "./fractal-view.js";
 import { renderEscape } from "./escape-pool.js";
-import { GPU_ITER_LIMIT, paintGpuEscape } from "./escape-gpu.js";
+import { GPU_ITER_LIMIT, gpuAvailable, paintGpuEscape } from "./escape-gpu.js";
 import { hasDeepCenter, viewOffset } from "./precision.js";
 import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, paintEscape } from "./palettes.js";
 import { runControlLabel } from "./session.js";
@@ -157,6 +157,8 @@ const state = {
   plate: null,
   gpu: false,
   gpuHold: false,
+  gpuKey: "",
+  gpuShare: 1,
   reactiveView: null,
   autoHold: false,
   cursorDirty: false,
@@ -355,6 +357,8 @@ function resetProgress() {
   state.plate = null;
   state.gpu = false;
   state.gpuHold = false;
+  state.gpuKey = "";
+  cancelRefine();
   state.cursorDirty = false;
   state.cursorRedraw = false;
   levelCache.clear();
@@ -804,7 +808,7 @@ function exploredLevel() {
   const magnification = currentMagnification();
   const base = state.baseDepth || depthValue();
   if (fractal.kind === "escape") {
-    return state.autoZoom ? autoZoomIterations(base, magnification) : iterationCap(base, magnification);
+    return escapeIterationCap(state.fractalId, base, magnification);
   }
   if (fractal.kind === "ifs") return pointBudget(base, magnification, 80000);
   return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth);
@@ -977,7 +981,9 @@ function startGlide() {
     glide.panY -= panY;
     if (Math.abs(glide.panX) < 0.4) glide.panX = 0;
     if (Math.abs(glide.panY) < 0.4) glide.panY = 0;
+    const before = pictureView()?.scale;
     if (zoom.applied !== 1 || panX || panY) shiftPicture(glide.px, glide.py, zoom.applied, panX, panY);
+    if (zoom.applied !== 1 && Number.isFinite(before) && pictureView()?.scale === before) glide.factor = 1;
     if (glide.factor !== 1 || glide.panX || glide.panY) {
       glide.raf = requestAnimationFrame(step);
       return;
@@ -1246,37 +1252,104 @@ function renderJob(view = pictureView() || state.view) {
 
 let newestBand = 0;
 
+/** Milliseconds a moving frame may spend on the GPU, and a settled band of the sharp picture. */
+const MOTION_BUDGET_MS = 14;
+const BAND_BUDGET_MS = 24;
+const BAND_SHARE = 16;
+
+/** What the shader has cost lately, in milliseconds per million pixels per iteration of the cap. */
+const gpuClock = { cost: Number.NaN };
+const refine = { raf: 0, key: "" };
+const paletteFit = { key: "", window: null };
+
+function cancelRefine() {
+  if (refine.raf) cancelAnimationFrame(refine.raf);
+  refine.raf = 0;
+  refine.key = "";
+}
+
+function timeGpu(width, height, cap, paint) {
+  const started = performance.now();
+  const sheet = paint();
+  const took = performance.now() - started;
+  if (sheet && took > 0) {
+    const sample = took / (((width * height) / 1e6) * Math.max(1, cap));
+    gpuClock.cost = Number.isFinite(gpuClock.cost) ? gpuClock.cost * 0.5 + sample * 0.5 : sample;
+  }
+  return sheet;
+}
+
 /**
- * Color the pixels on screen from the formula, at the monitor's own resolution.
- * A deep view returns false and the double-double workers take over.
+ * The palette window a deep plate from the workers would get, so the shader's picture looks the
+ * same. Sampled again each quarter octave rather than every frame.
  */
-function paintGpuFrame(view, box) {
+function gpuPaletteWindow(job, width, height, cap) {
+  if (!hasDeepCenter(job.preset)) return { floor: 0, top: null };
+  const preset = job.preset;
+  const key = [
+    job.fractalId, preset.cx, preset.cy, preset.px, preset.py, cap, width, height,
+    Math.round(Math.log2(preset.scale) * 4),
+  ].join(":");
+  if (paletteFit.key !== key) {
+    paletteFit.key = key;
+    paletteFit.window = paletteRange(job.fractalId, preset, width, height, cap);
+  }
+  return paletteFit.window;
+}
+
+/**
+ * Color the pixels on screen from the formula, at the monitor's own resolution. Deep views are
+ * offsets from a double-double reference orbit. A frame too heavy for the budget is drawn smaller
+ * and stretched; a settled one then sharpens band by band at full size.
+ * Returns false where the GPU cannot draw the view, and the workers take over.
+ */
+function paintGpuFrame(view, box, settle = false) {
   if (!view || state.running || !box) return false;
   const dest = motionRaster(box);
   const cap = exploredLevel();
-  if (cap > GPU_ITER_LIMIT || !gpuPrecisionHolds(view, dest.height)) return false;
+  const depth = gpuDepthMode(view, dest.height);
+  if (cap > GPU_ITER_LIMIT || !depth) return false;
   const job = renderJob(view);
-  let sheet = null;
-  try {
-    sheet = paintGpuEscape({
-      width: dest.width,
-      height: dest.height,
-      fractalId: job.fractalId,
-      preset: job.preset,
-      cap,
-      paletteId: state.paletteId,
-    });
-  } catch {
-    return false;
+  const fit = gpuPaletteWindow(job, dest.width, dest.height, cap);
+  const key = [
+    job.fractalId, view.centerX, view.centerXLo, view.centerY, view.centerYLo, view.scale,
+    job.preset.cx, job.preset.cy, job.preset.px, job.preset.py, cap, state.paletteId, dest.width, dest.height,
+  ].join(":");
+  const shared = {
+    fractalId: job.fractalId,
+    preset: job.preset,
+    cap,
+    paletteId: state.paletteId,
+    depth,
+    floor: fit.floor,
+    top: fit.top,
+  };
+  const share = motionScale(gpuClock.cost * cap, dest.width * dest.height, MOTION_BUDGET_MS);
+  if (settle && refine.key === key) return true;
+  cancelRefine();
+  if (!(settle && state.gpuKey === key && state.gpuShare < 1)) {
+    const width = Math.max(1, Math.round(dest.width * share));
+    const height = Math.max(1, Math.round(dest.height * share));
+    let sheet = null;
+    try {
+      sheet = timeGpu(width, height, cap, () => paintGpuEscape({ ...shared, width, height }));
+    } catch {
+      return false;
+    }
+    if (!sheet) return false;
+    if (canvas.width !== dest.width || canvas.height !== dest.height) {
+      canvas.width = dest.width;
+      canvas.height = dest.height;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(sheet, 0, 0, width, height, 0, 0, dest.width, dest.height);
+    state.gpuKey = key;
+    state.gpuShare = share;
   }
-  if (!sheet) return false;
-  if (canvas.width !== dest.width || canvas.height !== dest.height) {
-    canvas.width = dest.width;
-    canvas.height = dest.height;
-  }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalAlpha = 1;
-  ctx.drawImage(sheet, 0, 0);
+  if (settle && state.gpuShare < 1) sharpenGpuFrame(key, dest, shared);
   state.gpu = true;
   state.gpuHold = true;
   state.plate = null;
@@ -1297,6 +1370,49 @@ function paintGpuFrame(view, box) {
 }
 
 /**
+ * Redraw a stretched GPU frame at full size, a band of rows per animation frame sized to the
+ * budget, so the page keeps answering the pointer while a deep picture sharpens.
+ */
+function sharpenGpuFrame(key, dest, shared) {
+  refine.key = key;
+  let y = 0;
+  const band = () => {
+    refine.raf = 0;
+    if (refine.key !== key || state.gpuKey !== key || state.running || state.autoZoom) return;
+    if (canvas.width !== dest.width || canvas.height !== dest.height) {
+      refine.key = "";
+      return;
+    }
+    const perRow = Number.isFinite(gpuClock.cost) ? (gpuClock.cost * shared.cap * dest.width) / 1e6 : 0;
+    // Thin strips leave a GPU mostly idle, so a band is never under a sixteenth of the frame.
+    const least = Math.ceil(dest.height / BAND_SHARE);
+    const rows = perRow > 0 ? Math.max(least, Math.floor(BAND_BUDGET_MS / perRow)) : dest.height;
+    const to = Math.min(dest.height, y + rows);
+    let sheet = null;
+    try {
+      sheet = paintGpuEscape({ ...shared, width: dest.width, height: dest.height, rows: { from: y, to } });
+    } catch {
+      sheet = null;
+    }
+    if (!sheet) {
+      refine.key = "";
+      return;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.drawImage(sheet, 0, 0, dest.width, to - y, 0, y, dest.width, to - y);
+    y = to;
+    if (y < dest.height) {
+      refine.raf = requestAnimationFrame(band);
+      return;
+    }
+    state.gpuShare = 1;
+    refine.key = "";
+  };
+  refine.raf = requestAnimationFrame(band);
+}
+
+/**
  * A quick plate is the moving raster and marks itself a draft, so the sharp picture follows once it
  * is on screen. Stopping a deep dive takes this road: the full raster there runs for many seconds.
  */
@@ -1304,7 +1420,7 @@ function scheduleEscape(quick = false) {
   if (state.autoZoom) return;
   const targetView = pictureView() || state.view;
   if (!targetView) return;
-  if (paintGpuFrame(targetView, viewBox())) return;
+  if (paintGpuFrame(targetView, viewBox(), true)) return;
   const epoch = state.epoch;
   const fractalAt = state.fractalId;
   state.exploreToken += 1;
@@ -1320,7 +1436,7 @@ function scheduleEscape(quick = false) {
     target = { ...cover, flipY: Boolean(targetView.flipY) };
     longEdge = DRAW_RASTER_EDGE;
     const homeScale = usingReactiveFrame() ? 3.2 : state.home.scale;
-    cap = iterationCap(state.baseDepth || depthValue(), homeScale / Math.max(1e-12, target.scale));
+    cap = escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), homeScale / Math.max(1e-12, target.scale));
   }
   const raster = rasterSize(box.width, box.height, box.dpr, true, longEdge);
   const job = renderJob(target);
@@ -1498,8 +1614,9 @@ function startAutoZoom() {
   state.cursorDirty = false;
   state.cursorRedraw = false;
   state.plateFlight = 0;
-  state.autoHold = Boolean(hoveringMandelbrot);
-  const first = hoveringMandelbrot ? null : capturePlate(state.view);
+  const drawn = Boolean(hoveringMandelbrot) && paintGpuFrame(state.view, viewBox());
+  state.autoHold = Boolean(hoveringMandelbrot) && !drawn;
+  const first = state.autoHold ? null : capturePlate(state.view);
   state.autoPlates = first ? [first] : [];
   state.autoStart = first;
   state.autoDeep = null;
@@ -1509,7 +1626,7 @@ function startAutoZoom() {
   state.autoOctave = 0;
   state.autoFade = null;
   state.autoRampAt = null;
-  state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(autoZoomIterations(state.baseDepth || depthValue(), 1)));
+  state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), 1)));
   state.plateTook = 0;
   state.exploring = false;
   state.zoomStamp = performance.now();
@@ -1581,7 +1698,7 @@ function ensureAutoPlate(token, box) {
   if (state.plateFlight || !state.autoPath) return;
   const screenHeight = motionRaster(box).height;
   const aheadView = autoZoomView(state.autoPath, state.autoOctave + 0.4);
-  if (gpuPrecisionHolds(state.view, screenHeight) && gpuPrecisionHolds(aheadView, screenHeight)) return;
+  if (gpuAvailable() && gpuDepthMode(state.view, screenHeight) && gpuDepthMode(aheadView, screenHeight)) return;
   const aspect = box.width / Math.max(1, box.height);
   const path = state.autoPath;
   const from = state.autoOctave;
@@ -1590,7 +1707,7 @@ function ensureAutoPlate(token, box) {
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(path, from + ((to - from) * i) / 4));
   const cover = coverViews(samples, aspect, plateMargin(from));
   const deepest = samples[samples.length - 1].scale;
-  const cap = autoZoomIterations(state.baseDepth || depthValue(), (state.home?.scale || deepest) / deepest);
+  const cap = escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), (state.home?.scale || deepest) / deepest);
   const edge = Math.min(state.plateEdge || plateRasterEdge(cap), PLATE_EDGE_MAX);
   const raster = rasterSize(box.width, box.height, box.dpr, true, edge);
   const view = { ...cover, flipY: Boolean(path.start.flipY) };
@@ -1874,7 +1991,8 @@ fractalSelect.addEventListener("change", () => {
 
 paletteSelect.addEventListener("change", () => {
   state.paletteId = paletteSelect.value;
-  paint();
+  if (state.gpu && canExplore() && currentFractal().kind === "escape") scheduleEscape();
+  else paint();
   renderChrome();
 });
 

@@ -1,26 +1,64 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { colorSample } from "../src/palettes.js";
-import { GPU_ITER_LIMIT, buildPaletteLut, gpuEscapeMode } from "../src/escape-gpu.js";
+import { paintEscape } from "../src/palettes.js";
+import { ITERATION_LIMIT } from "../src/fractal-view.js";
+import { juliaReference, newtonReference, referenceOrbit } from "../src/precision.js";
+import { GPU_ITER_LIMIT, buildPaletteLut, gpuEscapeMode, packOrbit } from "../src/escape-gpu.js";
 
-test("the shader palette is the same ramp the canvas painter uses", () => {
-  const cap = 48;
-  const lut = buildPaletteLut("classic", cap);
-  const span = cap + 1;
-  assert.equal(lut.length, span * 4 * 4);
-  for (const iter of [0, 1, 17, cap]) {
-    const rgb = colorSample("classic", iter, cap, -1);
-    const offset = (3 * span + iter) * 4;
-    assert.equal(lut[offset], rgb[0]);
-    assert.equal(lut[offset + 1], rgb[1]);
-    assert.equal(lut[offset + 2], rgb[2]);
-    assert.equal(lut[offset + 3], 255);
+function painted(cap, iteration, basin, floor, top) {
+  return paintEscape("classic", [iteration], [basin], 1, 1, cap, 1, null, floor, top);
+}
+
+test("the shader palette holds the colors paintEscape writes, fitted window included", () => {
+  for (const [cap, floor, top] of [[48, 0, null], [3000, 120, 900], [ITERATION_LIMIT, 4000, 9000]]) {
+    const lut = buildPaletteLut("classic", cap, floor, top);
+    const span = cap + 1;
+    assert.equal(lut.span, span);
+    assert.ok(lut.width <= 2048);
+    assert.ok(lut.width * lut.height >= span * 4);
+    assert.equal(lut.data.length, lut.width * lut.height * 4);
+    for (const iter of [0, 1, floor, floor + 1, Math.floor(cap / 2), top ?? cap - 1, cap - 1, cap]) {
+      for (let slot = 0; slot < 4; slot += 1) {
+        const expected = painted(cap, iter, slot < 3 ? slot : -1, floor, top);
+        const offset = (slot * span + iter) * 4;
+        assert.deepEqual([...lut.data.subarray(offset, offset + 4)], [...expected], `cap ${cap} slot ${slot} iter ${iter}`);
+      }
+    }
   }
-  const basin = colorSample("classic", 4, cap, 1);
-  const basinOffset = (1 * span + 4) * 4;
-  assert.equal(lut[basinOffset], basin[0]);
-  assert.equal(lut[basinOffset + 1], basin[1]);
-  assert.ok(GPU_ITER_LIMIT >= 4096);
+  assert.equal(GPU_ITER_LIMIT, ITERATION_LIMIT);
+});
+
+test("a reference orbit packs into one float texture with its rebase orbit after it", () => {
+  const ref = referenceOrbit(-0.75, 0, 0.1, 0, 500);
+  const packed = packOrbit(ref);
+  assert.equal(packed.last, ref.count - 1);
+  assert.equal(packed.rebaseAt, 0);
+  assert.equal(packed.rebaseLast, ref.count - 1);
+  assert.ok(packed.width <= 2048);
+  assert.equal(packed.data.length, packed.width * packed.height * 4);
+  for (const n of [0, 1, ref.count - 1]) {
+    assert.equal(packed.data[n * 4], Math.fround(ref.orbit[n * 2]));
+    assert.equal(packed.data[n * 4 + 1], Math.fround(ref.orbit[n * 2 + 1]));
+  }
+
+  const julia = juliaReference(0.1, 0, 0.2, 0, -0.123, 0.745, 2500);
+  const both = packOrbit(julia);
+  assert.equal(both.rebaseAt, julia.count);
+  assert.equal(both.rebaseLast, julia.rebase.count - 1);
+  assert.ok(both.width * both.height >= julia.count + julia.rebase.count);
+  for (const n of [0, 3, julia.rebase.count - 1]) {
+    assert.equal(both.data[(both.rebaseAt + n) * 4], Math.fround(julia.rebase.orbit[n * 2]));
+    assert.equal(both.data[(both.rebaseAt + n) * 4 + 1], Math.fround(julia.rebase.orbit[n * 2 + 1]));
+  }
+
+  const newton = newtonReference(-0.625, 0, -0.2551, 0, 0, 0, 120);
+  const steps = packOrbit(newton);
+  assert.equal(steps.last, newton.count - 1);
+  for (const n of [0, newton.count - 1]) {
+    assert.equal(steps.data[n * 4], Math.fround(newton.orbit[n * 2]));
+    assert.equal(steps.data[n * 4 + 2], Math.fround(newton.denom[n * 2]));
+    assert.equal(steps.data[n * 4 + 3], Math.fround(newton.denom[n * 2 + 1]));
+  }
 });
 
 test("each escape fractal picks the shader that matches its formula", () => {

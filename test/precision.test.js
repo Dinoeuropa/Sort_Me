@@ -23,6 +23,7 @@ import {
   ddNewtonPole,
   ddNewtonStart,
   ddSub,
+  newtonReference,
   deepCenter,
   hasDeepCenter,
   juliaReference,
@@ -545,4 +546,38 @@ test("the auto zoom path lands exactly on a double-double target", () => {
   assert.ok(bottom.scale >= 1e-28 * 0.999);
   const shallow = autoZoomPath(start, { x: 0.3, y: 0.1 });
   assert.equal(hasDeepCenter(autoZoomView(shallow, 10)), false);
+});
+
+test("a Newton reference orbit follows the method in double-double and stops where it must", () => {
+  const plain = newtonReference(0.3, 0, 0.4, 0, 0, 0, 200);
+  let x = 0.3;
+  let y = 0.4;
+  for (let n = 0; n < 4; n += 1) {
+    assert.ok(Math.abs(plain.orbit[n * 2] - x) < 1e-12);
+    assert.ok(Math.abs(plain.orbit[n * 2 + 1] - y) < 1e-12);
+    const d2x = 3 * (x * x - y * y);
+    const d2y = 6 * x * y;
+    assert.ok(Math.abs(plain.denom[n * 2] - d2x) < 1e-12);
+    assert.ok(Math.abs(plain.denom[n * 2 + 1] - d2y) < 1e-12);
+    const fx = x * x * x - 3 * x * y * y - 1;
+    const fy = 3 * x * x * y - y * y * y;
+    const q = d2x * d2x + d2y * d2y;
+    x -= (fx * d2x + fy * d2y) / q;
+    y -= (fy * d2x - fx * d2y) / q;
+  }
+  assert.ok(plain.count > 4 && plain.count < 200, "a converged reference stops early");
+  const lastX = plain.orbit[(plain.count - 1) * 2];
+  const lastY = plain.orbit[(plain.count - 1) * 2 + 1];
+  const nearRoot = [[1, 0], [-0.5, Math.sqrt(3) / 2], [-0.5, -Math.sqrt(3) / 2]].some(
+    ([rx, ry]) => Math.hypot(lastX - rx, lastY - ry) < 1e-9,
+  );
+  assert.ok(nearRoot);
+
+  const pole = ddNewtonPole(0.1, -0.05);
+  const atPole = newtonReference(pole.x, pole.xLo, pole.y, pole.yLo, 0.1, -0.05, 200);
+  assert.equal(atPole.count, 1, "the pole has no next step");
+  assert.ok(Math.hypot(atPole.denom[0], atPole.denom[1]) < 1e-25);
+
+  const short = newtonReference(-0.625, 0, -0.2551, 0, 0, 0, 3);
+  assert.equal(short.count, 4);
 });

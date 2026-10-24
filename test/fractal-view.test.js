@@ -25,7 +25,11 @@ import {
   escapeSourceBlit,
   fitZoomOut,
   escapeMagnification,
+  escapeIterationCap,
+  gpuDepthMode,
   iterationCap,
+  MOTION_SCALE_MIN,
+  motionScale,
   levelBlend,
   mapPointsInto,
   panBounds,
@@ -120,6 +124,18 @@ test("closer escape windows spend more iterations and ferns plot more points", (
   assert.equal(pointBudget(20000, 20, 80000), 80000);
 });
 
+test("Newton's method gets a few more steps per octave, not the escape-time hundred", () => {
+  assert.equal(escapeIterationCap("mandelbrot", 48, 2 ** 20), iterationCap(48, 2 ** 20));
+  assert.equal(escapeIterationCap("julia", 48, 3), iterationCap(48, 3));
+  assert.equal(escapeIterationCap("newton", 16, 1), 16);
+  const million = escapeIterationCap("newton", 16, 1e6);
+  assert.ok(million >= 110, `a million times in needs about 110 steps at the pole, got ${million}`);
+  assert.ok(million <= 140);
+  const deepest = escapeIterationCap("newton", 16, 1e28);
+  assert.ok(deepest >= 330 && deepest <= 600);
+  assert.ok(escapeIterationCap("newton", 40, 2) > escapeIterationCap("newton", 40, 1));
+});
+
 test("auto zoom raises iterations with the log of magnification", () => {
   assert.equal(autoZoomIterations(48, 1), 48);
   const step = autoZoomIterations(48, 2) - autoZoomIterations(48, 1);
@@ -205,6 +221,24 @@ test("a shallow escape view fits in float32 and a deep one does not", () => {
   const lowWord = { centerX: -0.75, centerY: 0, centerYLo: 0.01, scale: 2.6 };
   assert.equal(gpuPrecisionHolds(lowWord, 800), false);
   assert.equal(gpuPrecisionHolds(null, 800), false);
+});
+
+test("the shader draws plain coordinates while they hold and offsets from a reference past that", () => {
+  assert.equal(gpuDepthMode({ centerX: -0.75, centerY: 0, scale: 2.6 }, 800), "direct");
+  assert.equal(gpuDepthMode({ centerX: -0.75, centerY: 0.1, scale: 1e-8 }, 800), "perturb");
+  assert.equal(gpuDepthMode({ centerX: -0.74, centerXLo: 1e-18, centerY: 0.13, centerYLo: 0, scale: 1e-26 }, 1080), "perturb");
+  assert.equal(gpuDepthMode({ centerX: 0, centerXLo: 0, centerY: 0, centerYLo: 0, scale: 3e-27 }, 1080), "direct");
+  assert.equal(gpuDepthMode({ centerX: -0.75, centerY: 0.1, scale: 1e-300 }, 800), null);
+  assert.equal(gpuDepthMode(null, 800), null);
+});
+
+test("a moving picture is drawn at the share of full size that fits the frame budget", () => {
+  assert.equal(motionScale(0, 1e6, 14), 1);
+  assert.equal(motionScale(4, 1e6, 14), 1);
+  const slow = motionScale(56, 1e6, 14);
+  assert.ok(Math.abs(slow - 0.5) < 1e-9);
+  assert.equal(motionScale(1e6, 1e6, 14), MOTION_SCALE_MIN);
+  assert.equal(motionScale(Number.NaN, 1e6, 14), 1);
 });
 
 test("a wheel notch is a small zoom in every delta mode", () => {
