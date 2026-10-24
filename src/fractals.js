@@ -1153,36 +1153,34 @@ function moorePath(order) {
   return Float64Array.from(pts);
 }
 
+/** The L-system L → LFRFL-F-RFLFR+F+LFRFL, R → RFLFR+F+LFRFL-F-RFLFR, walked without spelling it out. */
 function peanoPath(order) {
-  let seq = "L";
   const rules = {
-    L: "LFRFL-F-RFLFR+F+LFRFL",
-    R: "RFLFR+F+LFRFL-F-RFLFR",
+    L: Array.from("LFRFL-F-RFLFR+F+LFRFL"),
+    R: Array.from("RFLFR+F+LFRFL-F-RFLFR"),
   };
-  for (let i = 0; i < order; i += 1) {
-    let next = "";
-    for (const symbol of seq) next += rules[symbol] || symbol;
-    seq = next;
-  }
-  const dirs = [
-    [1, 0],
-    [0, 1],
-    [-1, 0],
-    [0, -1],
-  ];
+  const stepX = [1, 0, -1, 0];
+  const stepY = [0, 1, 0, -1];
+  const pts = new Float64Array(9 ** order * 2);
+  let at = 2;
   let x = 0;
   let y = 0;
   let dir = 1;
-  const pts = [0, 0];
-  for (const symbol of seq) {
-    if (symbol === "F") {
-      x += dirs[dir][0];
-      y += dirs[dir][1];
-      pts.push(x, y);
-    } else if (symbol === "+") dir = (dir + 1) & 3;
-    else if (symbol === "-") dir = (dir + 3) & 3;
-  }
-  return Float64Array.from(pts);
+  const walk = (symbol, depth) => {
+    for (const ch of rules[symbol]) {
+      if (ch === "F") {
+        x += stepX[dir];
+        y += stepY[dir];
+        pts[at] = x;
+        pts[at + 1] = y;
+        at += 2;
+      } else if (ch === "+") dir = (dir + 1) & 3;
+      else if (ch === "-") dir = (dir + 3) & 3;
+      else if (depth > 1) walk(ch, depth - 1);
+    }
+  };
+  if (order > 0) walk("L", order);
+  return pts;
 }
 
 function gosperPaths(depth, mode) {
