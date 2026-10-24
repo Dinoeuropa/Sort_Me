@@ -36,6 +36,7 @@ import {
   plateMargin,
   plateRasterEdge,
   pointBudget,
+  gpuPrecisionHolds,
   rasterSize,
   recursionLevel,
   unproject,
@@ -192,6 +193,18 @@ test("a finished escape picture is sampled at 4K", () => {
   assert.equal(SHARP_RASTER_EDGE, 3840);
   const moving = rasterSize(900, 520, 1, true, 1920);
   assert.equal(Math.max(moving.width, moving.height), 1920);
+});
+
+test("a shallow escape view fits in float32 and a deep one does not", () => {
+  const classic = { centerX: -0.75, centerY: 0, scale: 2.6 };
+  assert.equal(gpuPrecisionHolds(classic, 800), true);
+  const seahorse = { centerX: -0.75, centerY: 0.11, scale: 0.22 };
+  assert.equal(gpuPrecisionHolds(seahorse, 1080), true);
+  const deep = { centerX: -0.75, centerY: 0.1, scale: 1e-8 };
+  assert.equal(gpuPrecisionHolds(deep, 800), false);
+  const lowWord = { centerX: -0.75, centerY: 0, centerYLo: 0.01, scale: 2.6 };
+  assert.equal(gpuPrecisionHolds(lowWord, 800), false);
+  assert.equal(gpuPrecisionHolds(null, 800), false);
 });
 
 test("a wheel notch is a small zoom in every delta mode", () => {

@@ -45,6 +45,7 @@ import {
   plateMargin,
   plateRasterEdge,
   pointBudget,
+  gpuPrecisionHolds,
   rasterSize,
   recursionLevel,
   wheelZoomFactor,
@@ -52,6 +53,7 @@ import {
   zoomEscape,
 } from "./fractal-view.js";
 import { renderEscape } from "./escape-pool.js";
+import { GPU_ITER_LIMIT, paintGpuEscape } from "./escape-gpu.js";
 import { hasDeepCenter, viewOffset } from "./precision.js";
 import { PALETTES, boundsOf, drawPaths, drawPoints, drawTriangles, paintEscape } from "./palettes.js";
 import { runControlLabel } from "./session.js";
@@ -153,6 +155,8 @@ const state = {
   plateEdge: 2560,
   plateTook: 0,
   plate: null,
+  gpu: false,
+  gpuHold: false,
   reactiveView: null,
   autoHold: false,
   cursorDirty: false,
@@ -301,7 +305,7 @@ function renderChrome() {
   canvas.classList.toggle("reactive", state.finished && !state.running && reactive);
   const box = viewBox();
   const sharpEnough = state.raster && Math.max(state.raster.width, state.raster.height) + 1 >= Math.max(box.width, box.height) * box.dpr;
-  canvas.classList.toggle("pixelated", fractal.kind === "escape" && !sharpEnough && !state.plate);
+  canvas.classList.toggle("pixelated", fractal.kind === "escape" && !sharpEnough && !state.plate && !state.gpu);
   const paramText = formatParam();
   paramEl.hidden = !paramText;
   paramEl.textContent = paramText;
@@ -348,6 +352,8 @@ function resetProgress() {
   state.cursorParam = null;
   state.reactiveView = null;
   state.plate = null;
+  state.gpu = false;
+  state.gpuHold = false;
   state.cursorDirty = false;
   state.cursorRedraw = false;
   levelCache.clear();
@@ -912,6 +918,10 @@ function shiftPicture(px, py, factor, dx, dy) {
       if (factor !== 1) state.view = zoomInsidePlate(state.view, factor, px, py, box, state.home.scale);
       if (dx || dy) state.view = panEscape(state.view, dx, dy, box.width, box.height);
     }
+    if (paintGpuFrame(pictureView(), box)) {
+      renderChrome();
+      return;
+    }
     if (state.plate && pictureView() && viewMoved(state.plate, pictureView(), 0.004)) blitPlate();
     renderChrome();
     requestDetail(false);
@@ -1215,6 +1225,56 @@ function renderJob(view = pictureView() || state.view) {
 let newestBand = 0;
 
 /**
+ * Color the pixels on screen from the formula, at the monitor's own resolution.
+ * A deep view returns false and the double-double workers take over.
+ */
+function paintGpuFrame(view, box) {
+  if (!view || state.running || !box) return false;
+  const dest = motionRaster(box);
+  const cap = exploredLevel();
+  if (cap > GPU_ITER_LIMIT || !gpuPrecisionHolds(view, dest.height)) return false;
+  const job = renderJob(view);
+  let sheet = null;
+  try {
+    sheet = paintGpuEscape({
+      width: dest.width,
+      height: dest.height,
+      fractalId: job.fractalId,
+      preset: job.preset,
+      cap,
+      paletteId: state.paletteId,
+    });
+  } catch {
+    return false;
+  }
+  if (!sheet) return false;
+  if (canvas.width !== dest.width || canvas.height !== dest.height) {
+    canvas.width = dest.width;
+    canvas.height = dest.height;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.drawImage(sheet, 0, 0);
+  state.gpu = true;
+  state.gpuHold = true;
+  state.plate = null;
+  state.iterations = null;
+  state.basins = null;
+  state.raster = null;
+  state.samples = dest.width * dest.height;
+  state.shownCap = cap;
+  state.finished = true;
+  state.exploring = false;
+  if (state.flightJob) {
+    state.shownJob = Math.max(state.shownJob, state.flightJob);
+    newestBand = Math.max(newestBand, state.flightJob);
+    state.flightJob = 0;
+    state.flightView = null;
+  }
+  return true;
+}
+
+/**
  * A quick plate is the moving raster and marks itself a draft, so the sharp picture follows once it
  * is on screen. Stopping a deep dive takes this road: the full raster there runs for many seconds.
  */
@@ -1222,6 +1282,7 @@ function scheduleEscape(quick = false) {
   if (state.autoZoom) return;
   const targetView = pictureView() || state.view;
   if (!targetView) return;
+  if (paintGpuFrame(targetView, viewBox())) return;
   const epoch = state.epoch;
   const fractalAt = state.fractalId;
   state.exploreToken += 1;
@@ -1322,6 +1383,8 @@ function applyEscapeResult(result) {
   plate.width = width;
   plate.height = height;
   plate.getContext("2d").putImageData(new ImageData(pixels, width, height), 0, 0);
+  state.gpu = false;
+  state.gpuHold = false;
   state.plate = { canvas: plate, ...finished };
   if (current && viewMoved(finished, current, 0.004)) blitPlate();
   else {
@@ -1494,6 +1557,9 @@ function plateLookahead() {
 
 function ensureAutoPlate(token, box) {
   if (state.plateFlight || !state.autoPath) return;
+  const screenHeight = motionRaster(box).height;
+  const aheadView = autoZoomView(state.autoPath, state.autoOctave + 0.4);
+  if (gpuPrecisionHolds(state.view, screenHeight) && gpuPrecisionHolds(aheadView, screenHeight)) return;
   const aspect = box.width / Math.max(1, box.height);
   const path = state.autoPath;
   const from = state.autoOctave;
@@ -1609,6 +1675,10 @@ function drawPlateLayer(plates, view, width, height, aspect, alpha, now) {
 }
 
 function drawAutoFrame(box, now) {
+  if (paintGpuFrame(state.view, box)) return;
+  const aspectNow = box.width / Math.max(1, box.height);
+  if (state.gpuHold && pickPlate(state.autoPlates, state.view, aspectNow) < 0 && !state.autoFade) return;
+  state.gpuHold = false;
   const dest = motionRaster(box);
   const width = dest.width;
   const height = dest.height;

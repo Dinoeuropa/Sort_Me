@@ -332,6 +332,27 @@ export function plateRasterEdge(cap = 500) {
   return Math.max(760, Math.min(2560, edge));
 }
 
+/**
+ * True when one pixel is still many float32 steps across, so a shader can color it
+ * from the plain coordinates. A deep view, or a low word that moves the center by
+ * more than a pixel, stays on the double-double path.
+ */
+export function gpuPrecisionHolds(view, height) {
+  if (!view || !(view.scale > 0)) return false;
+  if (!Number.isFinite(view.centerX) || !Number.isFinite(view.centerY)) return false;
+  const pixel = view.scale / Math.max(1, height);
+  const step = Math.max(float32Ulp(view.centerX), float32Ulp(view.centerY), float32Ulp(view.scale));
+  if (!(pixel >= step * 32)) return false;
+  const low = Math.max(Math.abs(view.centerXLo || 0), Math.abs(view.centerYLo || 0));
+  return low <= pixel * 0.25;
+}
+
+function float32Ulp(value) {
+  const mag = Math.abs(value);
+  if (!(mag > 0) || !Number.isFinite(mag)) return 2 ** -149;
+  return 2 ** (Math.floor(Math.log2(mag)) - 23);
+}
+
 export function rasterSize(width, height, dpr = 1, sharp = false, longEdge = 0) {
   const ratio = Math.min(Math.max(Number(dpr) || 1, 1), 2);
   let pixelW = Math.max(1, Math.floor(width * ratio));
