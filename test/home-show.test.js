@@ -13,7 +13,9 @@ import {
   SCENES,
   SORTS,
   fadeAmount,
+  filmBudget,
   filmLayer,
+  filmSrc,
   sceneAt,
   showMode,
   sortFrames,
@@ -184,6 +186,26 @@ test("a zoom stays on fractal structure through the last frame", () => {
       const share = inside / band.iterations.length;
       assert.ok(share < 0.7, `${scene.id} at ${progress} is ${(share * 100).toFixed(0)}% interior`);
     }
+  }
+});
+
+test("a narrow screen or a slow link plays the light film", () => {
+  assert.equal(filmBudget({ width: 1440, downlink: 20 }), "screen");
+  assert.equal(filmBudget({ width: 1440 }), "screen");
+  assert.equal(filmBudget({ width: 390, downlink: 30 }), "lite");
+  assert.equal(filmBudget({ width: 1440, saveData: true, downlink: 30 }), "lite");
+  assert.equal(filmBudget({ width: 1440, effectiveType: "3g" }), "lite");
+  assert.equal(filmBudget({ width: 1440, effectiveType: "4g", downlink: 1.5 }), "lite");
+  for (const scene of SCENES.filter((item) => item.kind === "zoom")) {
+    assert.equal(filmSrc(scene, "screen"), scene.screen);
+    assert.equal(filmSrc(scene, "lite"), scene.lite);
+    assert.notEqual(filmSrc(scene, "screen"), scene.src);
+    assert.match(scene.screen, /-screen\.mp4$/);
+    assert.match(scene.lite, /-lite\.mp4$/);
+  }
+  for (const scene of SCENES.filter((item) => item.kind === "sort")) {
+    assert.equal(filmSrc(scene, "lite"), scene.src);
+    assert.equal(filmSrc(scene, "screen"), scene.src);
   }
 });
 
