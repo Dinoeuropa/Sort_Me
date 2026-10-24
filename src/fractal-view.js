@@ -64,6 +64,19 @@ export function iterationCap(baseDepth, magnification) {
   return Math.min(ITERATION_LIMIT, Math.max(1, baseDepth + extra));
 }
 
+/**
+ * Steps Newton's method gains per octave. Beside the pole one step throws a pixel out to about
+ * 1/(3z²), and the way back shrinks by 2/3 a step, so about 3.4 more steps are spent per halving.
+ * The escape-time rate of 96 would squeeze every pixel into the first sliver of the shading.
+ */
+const NEWTON_STEPS_PER_OCTAVE = 5;
+
+export function escapeIterationCap(fractalId, baseDepth, magnification) {
+  if (fractalId !== "newton") return iterationCap(baseDepth, magnification);
+  const extra = Math.max(0, Math.round(Math.log2(Math.max(1, magnification)) * NEWTON_STEPS_PER_OCTAVE));
+  return Math.min(ITERATION_LIMIT, Math.max(1, baseDepth + extra));
+}
+
 /** Iterations for a continuous zoom. Grows with log2 of magnification for as long as the zoom runs. */
 export function autoZoomIterations(baseDepth, magnification) {
   return iterationCap(baseDepth, magnification);
@@ -345,6 +358,36 @@ export function gpuPrecisionHolds(view, height) {
   if (!(pixel >= step * 32)) return false;
   const low = Math.max(Math.abs(view.centerXLo || 0), Math.abs(view.centerYLo || 0));
   return low <= pixel * 0.25;
+}
+
+/**
+ * Smallest pixel the shader takes. Offsets from the reference are carried in units of the view
+ * scale, so only the scale itself has to stay a normal float32.
+ */
+const GPU_PIXEL_FLOOR = 1e-34;
+
+/**
+ * How the shader can draw a view: "direct" from plain float32 coordinates, "perturb" as float32
+ * offsets from a double-double reference orbit, or null when the view is past both.
+ */
+export function gpuDepthMode(view, height) {
+  if (!view || !(view.scale > 0) || !Number.isFinite(view.scale)) return null;
+  if (gpuPrecisionHolds(view, height)) return "direct";
+  if (!Number.isFinite(view.centerX) || !Number.isFinite(view.centerY)) return null;
+  return view.scale / Math.max(1, height) >= GPU_PIXEL_FLOOR ? "perturb" : null;
+}
+
+/** Smallest share of the screen's width a moving picture is drawn at. */
+export const MOTION_SCALE_MIN = 0.2;
+
+/**
+ * Share of full width and height to draw a moving frame at, from what a full frame is expected
+ * to cost in milliseconds per million pixels, so the frame fits `budgetMs`.
+ */
+export function motionScale(msPerMegapixel, pixels, budgetMs) {
+  const full = (msPerMegapixel * pixels) / 1e6;
+  if (!(full > budgetMs)) return 1;
+  return Math.max(MOTION_SCALE_MIN, Math.sqrt(budgetMs / full));
 }
 
 function float32Ulp(value) {

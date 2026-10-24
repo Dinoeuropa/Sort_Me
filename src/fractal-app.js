@@ -20,7 +20,6 @@ import {
   PLATE_BLEND_MS,
   PLATE_TARGET_MS,
   advanceAutoZoom,
-  autoZoomIterations,
   autoZoomPath,
   autoZoomRamp,
   autoZoomView,
@@ -29,9 +28,9 @@ import {
   easeFactor,
   escapeSourceBlit,
   fitZoomOut,
+  escapeIterationCap,
   escapeMagnification,
   escapeWindow,
-  iterationCap,
   levelBlend,
   mapPointsInto,
   panBounds,
@@ -803,7 +802,7 @@ function exploredLevel() {
   const magnification = currentMagnification();
   const base = state.baseDepth || depthValue();
   if (fractal.kind === "escape") {
-    return state.autoZoom ? autoZoomIterations(base, magnification) : iterationCap(base, magnification);
+    return escapeIterationCap(state.fractalId, base, magnification);
   }
   if (fractal.kind === "ifs") return pointBudget(base, magnification, 80000);
   return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth);
@@ -1298,7 +1297,7 @@ function scheduleEscape(quick = false) {
     target = { ...cover, flipY: Boolean(targetView.flipY) };
     longEdge = DRAW_RASTER_EDGE;
     const homeScale = usingReactiveFrame() ? 3.2 : state.home.scale;
-    cap = iterationCap(state.baseDepth || depthValue(), homeScale / Math.max(1e-12, target.scale));
+    cap = escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), homeScale / Math.max(1e-12, target.scale));
   }
   const raster = rasterSize(box.width, box.height, box.dpr, true, longEdge);
   const job = renderJob(target);
@@ -1487,7 +1486,7 @@ function startAutoZoom() {
   state.autoOctave = 0;
   state.autoFade = null;
   state.autoRampAt = null;
-  state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(autoZoomIterations(state.baseDepth || depthValue(), 1)));
+  state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), 1)));
   state.plateTook = 0;
   state.exploring = false;
   state.zoomStamp = performance.now();
@@ -1568,7 +1567,7 @@ function ensureAutoPlate(token, box) {
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(path, from + ((to - from) * i) / 4));
   const cover = coverViews(samples, aspect, plateMargin(from));
   const deepest = samples[samples.length - 1].scale;
-  const cap = autoZoomIterations(state.baseDepth || depthValue(), (state.home?.scale || deepest) / deepest);
+  const cap = escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), (state.home?.scale || deepest) / deepest);
   const edge = Math.min(state.plateEdge || plateRasterEdge(cap), PLATE_EDGE_MAX);
   const raster = rasterSize(box.width, box.height, box.dpr, true, edge);
   const view = { ...cover, flipY: Boolean(path.start.flipY) };
