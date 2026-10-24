@@ -148,6 +148,45 @@ test("a zoomed curve strokes only the segments that reach the canvas, in their o
   }
 });
 
+test("a zoomed curve passes over far-off stretches without reading their points", () => {
+  const points = buildGeometry("hilbert", "hilbert", 7).paths[0];
+  let reads = 0;
+  const path = new Proxy(points, {
+    get(target, key) {
+      if (typeof key === "string" && /^\d+$/.test(key)) reads += 1;
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const view = { minX: 40, maxX: 48, minY: 70, maxY: 78 };
+  const width = 320;
+  const height = 240;
+  const first = recordingContext();
+  drawPaths("classic", first, [path], width, height, view, { clear: true });
+  reads = 0;
+  const again = recordingContext();
+  drawPaths("classic", again, [path], width, height, view, { clear: true });
+  assert.deepEqual(again.segments, first.segments);
+  assert.ok(first.segments.length > 0);
+  assert.ok(reads < points.length / 8, `${reads} of ${points.length}`);
+});
+
+test("segments drawn alone and in a zoomed frame keep the colors of the whole curve", () => {
+  const curve = buildGeometry("dragon", "twin", 9);
+  const width = 320;
+  const height = 240;
+  const whole = recordingContext();
+  drawPaths("classic", whole, curve.paths, width, height, { minX: -40, maxX: 40, minY: -40, maxY: 40 }, { clear: true });
+  const colorOf = new Map(whole.segments.map((line) => [line.split(" ")[0], line.slice(line.indexOf(" ") + 1)]));
+  const near = recordingContext();
+  drawPaths("classic", near, curve.paths, width * 4, height * 4, { minX: -40, maxX: 40, minY: -40, maxY: 40 }, { clear: true });
+  const zoomed = recordingContext();
+  drawPaths("classic", zoomed, curve.paths, width, height, { minX: 2, maxX: 9, minY: -3, maxY: 4 }, { clear: true });
+  assert.ok(zoomed.segments.length > 0 && near.segments.length === whole.segments.length);
+  const styles = new Set(zoomed.segments.map((line) => line.slice(line.indexOf(" ") + 1)));
+  for (const style of styles) assert.ok([...colorOf.values()].includes(style), style);
+});
+
 function recordingContext() {
   let pen = null;
   let pending = [];
