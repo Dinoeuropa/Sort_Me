@@ -99,6 +99,27 @@ export function paletteWindow(samples, cap, weight = 1) {
   return { floor: Math.min(floor, max - 1), top: Math.max(floor + 1, Math.min(max, top)) };
 }
 
+/** Share of the way a moving picture's palette window travels toward a new fit each frame. */
+const WINDOW_EASE = 0.12;
+
+/**
+ * The palette window a moving picture shows next: `shown` moved part of the way to the fitted
+ * `target`, the floor evenly and the top geometrically, and at least one iteration a step so it
+ * lands. Fits from a grid of samples can differ widely one view to the next, and a picture that
+ * took each at once would flash brighter and darker as it zoomed.
+ */
+export function easeWindow(shown, target, rate = WINDOW_EASE) {
+  if (!shown || shown.top == null || target.top == null) return { floor: target.floor, top: target.top };
+  const toward = (from, to, next) => {
+    if (from === to) return to;
+    if (from < to) return Math.min(to, Math.max(from + 1, Math.round(next)));
+    return Math.max(to, Math.min(from - 1, Math.round(next)));
+  };
+  const floor = toward(shown.floor, target.floor, shown.floor + (target.floor - shown.floor) * rate);
+  const top = toward(shown.top, target.top, shown.top * (target.top / shown.top) ** rate);
+  return { floor, top: Math.max(floor + 1, top) };
+}
+
 /**
  * Color an iteration grid. `floorIter` is where the palette starts: iterations at or below it take
  * the first color. The ramp runs from there to `topIter`, or to `shownIter` when no top is given,
