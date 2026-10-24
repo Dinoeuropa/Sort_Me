@@ -125,6 +125,37 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.doesNotMatch(fractalApp, /zoomPattern|detailTarget|steadyAim/);
 });
 
+test("the reactive badge is a switch that turns cursor reaction off", () => {
+  assert.match(
+    fractals,
+    /<button type="button" id="mode-badge" class="mode-badge" hidden aria-pressed="true">reactive<\/button>/,
+  );
+  const badgeRule = css.slice(css.indexOf(".mode-badge {"), css.indexOf(".param {"));
+  assert.doesNotMatch(badgeRule, /pointer-events:\s*none/);
+  assert.match(fractalApp, /reactive: true/);
+  const gate = fractalApp.slice(fractalApp.indexOf("function isReactive"), fractalApp.indexOf("function formatMag"));
+  assert.match(gate, /state\.reactive/);
+  const click = fractalApp.slice(
+    fractalApp.indexOf('modeBadge.addEventListener("click"'),
+    fractalApp.indexOf("fractalSelect.addEventListener"),
+  );
+  assert.match(click, /cursorParam = null/);
+  assert.match(click, /reactiveView = null/);
+  assert.match(click, /scheduleEscape/);
+});
+
+test("auto zoom is hidden for fractals that cannot glide and stays available when reaction is off", () => {
+  assert.match(fractals, /id="auto-zoom"/);
+  assert.match(fractalApp, /function canAutoZoom/);
+  assert.match(fractalApp, /autoZoomButton\.hidden = !canAutoZoom\(\)/);
+  const start = fractalApp.slice(fractalApp.indexOf("function startAutoZoom"), fractalApp.indexOf("const AUTO_FADE_MS"));
+  assert.match(start, /canAutoZoom\(\)/);
+  assert.doesNotMatch(start, /isReactive\(\)/);
+  const chrome = fractalApp.slice(fractalApp.indexOf("function renderChrome"), fractalApp.indexOf("function paceLabel"));
+  assert.match(chrome, /modeBadge\.hidden = !\(canAutoZoom\(\) && state\.finished && !state\.running\)/);
+  assert.match(chrome, /modeBadge\.setAttribute\("aria-pressed"/);
+});
+
 test("a deep GPU dive refits its palette each quarter octave and eases into it", () => {
   const fit = fractalApp.match(/function gpuPaletteWindow\([^]*?\n\}/);
   assert.ok(fit, "gpuPaletteWindow is in the page");

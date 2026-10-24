@@ -475,15 +475,22 @@ function rgb(channels) {
 }
 
 function classicPaint(iter, max) {
-  const t = Math.min(1, iter / max);
-  const band = 0.72 + 0.28 * Math.sin(iter * 0.7);
+  const t = Math.min(1, iter / Math.max(1, max));
   const dark = [24, 20, 16];
+  const shade = [132, 102, 48];
+  const lift = [168, 128, 60];
   const brass = [226, 182, 87];
   const coral = [239, 111, 76];
   const cream = [246, 239, 228];
-  if (t < 0.35) return mix(dark, brass, (t / 0.35) * band);
-  if (t < 0.75) return mix(brass, coral, ((t - 0.35) / 0.4) * band);
-  return mix(coral, cream, (t - 0.75) / 0.25);
+  // Two dim bands, then brass, coral, and cream. The dim pair stays under the
+  // bright brass, so a moving picture does not flip in and out of it on every
+  // iteration. Every stop is a function of t = iter / max.
+  if (t < 0.08) return mix(dark, shade, t / 0.08);
+  if (t < 0.3) return mix(shade, lift, (t - 0.08) / 0.22);
+  if (t < 0.46) return mix(lift, shade, (t - 0.3) / 0.16);
+  if (t < 0.66) return mix(shade, brass, (t - 0.46) / 0.2);
+  if (t < 0.82) return mix(brass, coral, (t - 0.66) / 0.16);
+  return mix(coral, cream, (t - 0.82) / 0.18);
 }
 
 function heatPaint(iter, max) {

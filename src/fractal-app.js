@@ -156,6 +156,7 @@ const state = {
   flightJob: 0,
   flightView: null,
   autoZoom: false,
+  reactive: true,
   autoToken: 0,
   cursorParam: null,
   frozenParam: null,
@@ -317,9 +318,12 @@ function renderChrome() {
   zoomInButton.disabled = !canZoom;
   zoomOutButton.disabled = !canZoom;
   zoomResetButton.disabled = !(state.finished && !state.running && state.home);
-  autoZoomButton.disabled = !(state.finished && !state.running && reactive);
+  autoZoomButton.hidden = !canAutoZoom();
+  autoZoomButton.disabled = !(state.finished && !state.running && canAutoZoom());
   autoZoomButton.setAttribute("aria-pressed", String(state.autoZoom));
-  modeBadge.hidden = !(reactive && state.finished && !state.running);
+  modeBadge.hidden = !(canAutoZoom() && state.finished && !state.running);
+  modeBadge.setAttribute("aria-pressed", String(state.reactive));
+  modeBadge.textContent = state.reactive ? "reactive on" : "reactive off";
   canvas.classList.toggle("exploring", canZoom && !reactive);
   canvas.classList.toggle("reactive", state.finished && !state.running && reactive);
   const box = viewBox();
@@ -848,8 +852,12 @@ function canExplore() {
   return state.finished && !state.running && state.home && state.view && !state.autoZoom;
 }
 
-function isReactive(id = state.fractalId) {
+function canAutoZoom(id = state.fractalId) {
   return REACTIVE.has(id);
+}
+
+function isReactive(id = state.fractalId) {
+  return canAutoZoom(id) && state.reactive;
 }
 
 function formatMag(mag) {
@@ -1640,7 +1648,7 @@ function capturePlate(view) {
 }
 
 function startAutoZoom() {
-  if (!state.finished || state.running || !state.home || !state.view || !isReactive()) return;
+  if (!state.finished || state.running || !state.home || !state.view || !canAutoZoom()) return;
   const hoveringMandelbrot = state.fractalId === "mandelbrot" && state.cursorParam;
   cancelGlide();
   state.frozenParam = freezeCursor();
@@ -2007,6 +2015,18 @@ zoomResetButton.addEventListener("click", resetExplore);
 autoZoomButton.addEventListener("click", () => {
   if (state.autoZoom) stopAutoZoom();
   else startAutoZoom();
+});
+
+modeBadge.addEventListener("click", () => {
+  state.reactive = !state.reactive;
+  if (!state.reactive) {
+    state.cursorParam = null;
+    state.cursorDirty = false;
+    state.cursorRedraw = false;
+    state.reactiveView = null;
+    if (state.finished && !state.running && !state.autoZoom) scheduleEscape();
+  }
+  renderChrome();
 });
 
 fractalSelect.addEventListener("change", () => {

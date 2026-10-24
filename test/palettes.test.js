@@ -47,6 +47,47 @@ test("escape colors stay in range, share an interior, and separate iterations", 
   }
 });
 
+test("classic bands follow the escape fraction, so neighbors at a high cap stay close", () => {
+  const max = 4800;
+  const neighborStep = (paletteId) => {
+    let stepMax = 0;
+    let at = 0;
+    for (let iter = 1; iter < max - 1; iter += 1) {
+      const a = colorSample(paletteId, iter, max);
+      const b = colorSample(paletteId, iter + 1, max);
+      for (let channel = 0; channel < 3; channel += 1) {
+        const step = Math.abs(a[channel] - b[channel]);
+        if (step > stepMax) {
+          stepMax = step;
+          at = iter;
+        }
+      }
+    }
+    return { stepMax, at };
+  };
+  const classic = neighborStep("classic");
+  const heat = neighborStep("heat");
+  const worst = classic.stepMax;
+  const worstAt = classic.at;
+  const heatWorst = heat.stepMax;
+  assert.ok(worst <= heatWorst + 1, `classic step ${worst} at ${worstAt}, heat step ${heatWorst}`);
+
+  const early = colorSample("classic", Math.round(max * 0.05), max);
+  const late = colorSample("classic", Math.round(max * 0.95), max);
+  assert.notDeepEqual(early, late);
+
+  const brass = [226, 182, 87];
+  let nearest = Infinity;
+  for (let iter = 1; iter < max; iter += 1) {
+    const color = colorSample("classic", iter, max);
+    const distance = Math.hypot(color[0] - brass[0], color[1] - brass[1], color[2] - brass[2]);
+    if (distance < nearest) nearest = distance;
+  }
+  assert.ok(nearest <= 1, `nearest brass distance ${nearest}`);
+
+  assert.deepEqual(colorSample("classic", 35, 100), colorSample("classic", 350, 1000));
+});
+
 test("newton basins take different colors from the same palette", () => {
   const a = colorSample("classic", 4, 20, 0);
   const b = colorSample("classic", 4, 20, 1);
