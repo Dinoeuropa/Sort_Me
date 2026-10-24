@@ -484,6 +484,24 @@ export function levelBlend(fractalId, magnification, presetId) {
   return { extra, fade: fade < 1e-9 ? 0 : fade };
 }
 
+/**
+ * How much of the incoming level to draw. `progress` is the fractional step toward the next
+ * ratio, and `nextSegmentPx` is how long one of its segments is on screen now. A segment shorter
+ * than the stroke is hidden, because drawing it only lays a second curve over the one already
+ * there. Once a segment reaches the stroke, the fade runs over the rest of the step.
+ */
+export function incomingLevelFade(progress, nextSegmentPx, ratio, minPx) {
+  const fade = Math.min(1, Math.max(0, progress || 0));
+  if (!(fade > 0)) return 0;
+  if (!(ratio > 1) || !(nextSegmentPx > 0) || !(minPx > 0)) return fade;
+  const grown = ratio ** fade;
+  const atStart = nextSegmentPx / grown;
+  if (atStart >= minPx) return fade;
+  const openAt = Math.log(minPx / atStart) / Math.log(ratio);
+  if (!(openAt < 1) || fade <= openAt) return 0;
+  return (fade - openAt) / (1 - openAt);
+}
+
 export function recursionLevel(fractalId, baseDepth, magnification, minDepth, maxDepth, presetId) {
   const ratio = levelRatio(fractalId, presetId);
   const extra = ratio

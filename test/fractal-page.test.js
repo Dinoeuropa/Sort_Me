@@ -76,6 +76,16 @@ test("dragging a curve repaints once per frame, however many moves arrive", () =
   assert.match(next.slice(0, next.indexOf("\n}\n")), /if \(curveFrame\) return;[\s\S]*requestAnimationFrame/);
 });
 
+test("a zoom draws one curve level, never one level on top of another", () => {
+  const choice = fractalApp.slice(fractalApp.indexOf("function settledCurve"), fractalApp.indexOf("function paintSettled"));
+  const paint = fractalApp.slice(fractalApp.indexOf("function paintSettled"), fractalApp.indexOf("function geometryAt"));
+  assert.match(choice, /incomingLevelFade/);
+  assert.doesNotMatch(choice, /globalAlpha/);
+  assert.match(choice, /shown > 0\.5 && next > base \? \{ level: next, geometry: geometryAt\(next\) \} : \{ level: base, geometry \}/);
+  assert.match(paint, /settledCurve\(box\)/);
+  assert.equal(paint.match(/drawStored\(/g).length, 1);
+});
+
 test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /canvas.addEventListener\("pointerdown"/);
   assert.match(fractalApp, /canvas.addEventListener\("pointermove"/);
@@ -98,6 +108,7 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /wheelZoomFactor/);
   assert.match(fractalApp, /easeFactor/);
   assert.match(fractalApp, /levelBlend/);
+  assert.match(fractalApp, /incomingLevelFade/);
   assert.match(fractalApp, /SHARP_RASTER_EDGE|rasterSize\([^)]*true\)/);
   assert.match(fractalApp, /"burning"/);
   assert.match(fractalApp, /advanceAutoZoom/);

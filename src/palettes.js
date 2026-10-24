@@ -207,12 +207,46 @@ function writeLut(lut, span, slot, iter, rgb) {
   lut[offset + 2] = rgb[2];
 }
 
+export function fitScale(bounds, width, height, pad = 16) {
+  const innerW = Math.max(1, width - pad * 2);
+  const innerH = Math.max(1, height - pad * 2);
+  const spanX = Math.max(1e-9, bounds.maxX - bounds.minX);
+  const spanY = Math.max(1e-9, bounds.maxY - bounds.minY);
+  return Math.min(innerW / spanX, innerH / spanY);
+}
+
+/** The pen width drawPaths uses, so a segment shorter than this is covered by the stroke. */
+export function strokeWidth(width, height) {
+  return Math.max(1.25, Math.min(width, height) * 0.007);
+}
+
+/**
+ * A representative segment length. The shortest of the first, middle and last segments, so one
+ * long opening stroke does not stand in for the rest. `group` points form one shape: a triangle
+ * is 3, and the jump to the next shape is not a segment.
+ */
+export function sampledSegmentLength(points, group = 0) {
+  if (!points) return 0;
+  const count = Math.floor(points.length / 2);
+  const span = group > 1 ? Math.min(group, count) : count;
+  if (span < 2) return 0;
+  let best = Infinity;
+  const seen = new Set();
+  for (const i of [0, Math.floor((span - 1) / 2), span - 2]) {
+    if (i < 0 || i >= span - 1 || seen.has(i)) continue;
+    seen.add(i);
+    const len = Math.hypot(points[i * 2 + 2] - points[i * 2], points[i * 2 + 3] - points[i * 2 + 1]);
+    if (len > 0 && len < best) best = len;
+  }
+  return Number.isFinite(best) ? best : 0;
+}
+
 export function fitTransform(bounds, width, height, pad = 16) {
   const innerW = Math.max(1, width - pad * 2);
   const innerH = Math.max(1, height - pad * 2);
   const spanX = Math.max(1e-9, bounds.maxX - bounds.minX);
   const spanY = Math.max(1e-9, bounds.maxY - bounds.minY);
-  const scale = Math.min(innerW / spanX, innerH / spanY);
+  const scale = fitScale(bounds, width, height, pad);
   const drawnW = spanX * scale;
   const drawnH = spanY * scale;
   const offsetX = pad + (innerW - drawnW) / 2;
@@ -309,7 +343,7 @@ export function drawPaths(paletteId, ctx, paths, width, height, bounds, range) {
   let total = 0;
   for (const path of paths) total += Math.max(0, path.length / 2 - 1);
   const max = Math.max(2, (range?.total ?? total) + 1);
-  const widthPx = Math.max(1.25, Math.min(width, height) * 0.007);
+  const widthPx = strokeWidth(width, height);
   const colors = segmentColors(paletteId, max);
   const { scale, offsetX, offsetY, minX, maxY } = map.frame;
   const left = -widthPx;
