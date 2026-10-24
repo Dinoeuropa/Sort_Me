@@ -67,6 +67,15 @@ test("selecting a fractal waits for Draw", () => {
   );
 });
 
+test("dragging a curve repaints once per frame, however many moves arrive", () => {
+  const pan = fractalApp.slice(fractalApp.indexOf("function applyPan"), fractalApp.indexOf("function queueZoom"));
+  assert.match(pan, /shiftPicture\([^)]*, true\)/);
+  const shift = fractalApp.slice(fractalApp.indexOf("function shiftPicture"), fractalApp.indexOf("function startGlide"));
+  assert.match(shift, /paintNextFrame\(\)/);
+  const next = fractalApp.slice(fractalApp.indexOf("function paintNextFrame"));
+  assert.match(next.slice(0, next.indexOf("\n}\n")), /if \(curveFrame\) return;[\s\S]*requestAnimationFrame/);
+});
+
 test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /canvas.addEventListener\("pointerdown"/);
   assert.match(fractalApp, /canvas.addEventListener\("pointermove"/);

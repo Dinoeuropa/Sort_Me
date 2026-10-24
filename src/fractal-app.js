@@ -164,6 +164,7 @@ const state = {
 
 const REACTIVE = new Set(["mandelbrot", "julia", "burning", "newton"]);
 const glide = { factor: 1, px: 0, py: 0, panX: 0, panY: 0, raf: 0, movedAt: 0 };
+let curveFrame = 0;
 const levelCache = new Map();
 
 for (const fractal of FRACTALS) {
@@ -875,14 +876,14 @@ function pictureView() {
 
 function applyZoom(px, py, factor) {
   glide.factor = 1;
-  shiftPicture(px, py, factor, 0, 0);
+  shiftPicture(px, py, factor, 0, 0, true);
 }
 
 function applyPan(dx, dy) {
   if (dx === 0 && dy === 0) return;
   glide.panX = 0;
   glide.panY = 0;
-  shiftPicture(0, 0, 1, dx, dy);
+  shiftPicture(0, 0, 1, dx, dy, true);
 }
 
 function queueZoom(px, py, factor) {
@@ -903,7 +904,7 @@ function zoomInsidePlate(view, factor, px, py, box, homeScale) {
   return fitted;
 }
 
-function shiftPicture(px, py, factor, dx, dy) {
+function shiftPicture(px, py, factor, dx, dy, soon = false) {
   if (!canExplore()) return;
   const box = viewBox();
   const fractal = currentFractal();
@@ -930,8 +931,29 @@ function shiftPicture(px, py, factor, dx, dy) {
   if (factor !== 1) state.view = zoomBounds(state.view, factor, px, py, box.width, box.height, state.home);
   if (dx || dy) state.view = panBounds(state.view, dx, dy, box.width, box.height);
   state.frameBounds = { ...state.view };
+  if (soon) {
+    paintNextFrame();
+    return;
+  }
+  cancelNextFrame();
   paint();
   renderChrome();
+}
+
+/** Pointer moves can outnumber frames; the view follows every one but the canvas is drawn once per frame. */
+function paintNextFrame() {
+  if (curveFrame) return;
+  curveFrame = requestAnimationFrame(() => {
+    curveFrame = 0;
+    if (!canExplore()) return;
+    paint();
+    renderChrome();
+  });
+}
+
+function cancelNextFrame() {
+  if (curveFrame) cancelAnimationFrame(curveFrame);
+  curveFrame = 0;
 }
 
 function startGlide() {
