@@ -47,55 +47,40 @@ test("escape colors stay in range, share an interior, and separate iterations", 
   }
 });
 
-test("classic contours repeat so nested escape rings stay distinct, without a large step", () => {
-  const max = 4800;
-  let stepMax = 0;
-  let stepAt = 0;
-  for (let iter = 1; iter < max - 1; iter += 1) {
-    const a = colorSample("classic", iter, max);
-    const b = colorSample("classic", iter + 1, max);
-    for (let channel = 0; channel < 3; channel += 1) {
-      const step = Math.abs(a[channel] - b[channel]);
-      if (step > stepMax) {
-        stepMax = step;
-        stepAt = iter;
+test("classic brightens along the escape, and the field stays distinct from the boundary", () => {
+  const lum = (color) => 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
+  for (const max of [48, 160, 4800]) {
+    let drop = 0;
+    let step = 0;
+    let stepAt = 0;
+    for (let iter = 1; iter < max - 1; iter += 1) {
+      const a = colorSample("classic", iter, max);
+      const b = colorSample("classic", iter + 1, max);
+      drop = Math.min(drop, lum(b) - lum(a));
+      for (let channel = 0; channel < 3; channel += 1) {
+        const delta = Math.abs(a[channel] - b[channel]);
+        if (delta > step) {
+          step = delta;
+          stepAt = iter;
+        }
       }
     }
+    assert.ok(drop > -1.5, `luminance drop ${drop} at cap ${max}`);
+    const limit = max >= 4800 ? 2 : 16;
+    assert.ok(step <= limit, `step ${step} at ${stepAt}, cap ${max}`);
   }
-  assert.ok(stepMax <= 12, `classic step ${stepMax} at ${stepAt}`);
 
-  const lum = (iter) => {
-    const [r, g, b] = colorSample("classic", iter, max);
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const period = 12;
-  let rings = 0;
-  for (let start = 80; start < max - period; start += period * 20) {
-    let low = Infinity;
-    let high = -Infinity;
-    let rose = false;
-    let fell = false;
-    let prev = lum(start);
-    for (let iter = start + 1; iter < start + period; iter += 1) {
-      const value = lum(iter);
-      if (value > prev + 0.5) rose = true;
-      if (value < prev - 0.5) fell = true;
-      prev = value;
-      low = Math.min(low, value);
-      high = Math.max(high, value);
-    }
-    if (rose && fell && high - low >= 30) rings += 1;
-  }
-  assert.ok(rings >= 8, `rings ${rings}`);
-
-  const early = colorSample("classic", Math.round(max * 0.05), max);
-  const late = colorSample("classic", Math.round(max * 0.95), max);
-  assert.notDeepEqual(early, late);
+  const max = 240;
+  const field = colorSample("classic", Math.round(max * 0.25), max);
+  const edge = colorSample("classic", Math.round(max * 0.85), max);
+  const apart = Math.hypot(field[0] - edge[0], field[1] - edge[1], field[2] - edge[2]);
+  assert.ok(apart > 70, `field and boundary are ${apart} apart`);
+  assert.notDeepEqual(colorSample("classic", Math.round(max * 0.05), max), edge);
 
   const brass = [226, 182, 87];
   let nearest = Infinity;
-  for (let iter = 1; iter < max; iter += 1) {
-    const color = colorSample("classic", iter, max);
+  for (let iter = 1; iter < 4800; iter += 1) {
+    const color = colorSample("classic", iter, 4800);
     const distance = Math.hypot(color[0] - brass[0], color[1] - brass[1], color[2] - brass[2]);
     if (distance < nearest) nearest = distance;
   }
