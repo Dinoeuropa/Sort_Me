@@ -75,7 +75,7 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /recursionLevel/);
   assert.match(fractalApp, /scheduleEscape/);
   assert.match(fractalApp, /paintGpuEscape/);
-  assert.match(fractalApp, /gpuPrecisionHolds/);
+  assert.match(fractalApp, /gpuDepthMode/);
   assert.match(css, /touch-action:\s*none/);
   assert.match(fractals, /drag or pinch to move and scroll to zoom/);
   assert.match(fractalApp, /cursorParameter/);
