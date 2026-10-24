@@ -112,6 +112,79 @@ test("every coloring can draw a curve, a gasket, and a point cloud", () => {
   }
 });
 
+test("a zoomed curve strokes only the segments that reach the canvas, in their own colors", () => {
+  const curve = buildGeometry("hilbert", "hilbert", 6);
+  const full = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  for (let i = 0; i < curve.paths[0].length; i += 2) {
+    full.minX = Math.min(full.minX, curve.paths[0][i]);
+    full.maxX = Math.max(full.maxX, curve.paths[0][i]);
+    full.minY = Math.min(full.minY, curve.paths[0][i + 1]);
+    full.maxY = Math.max(full.maxY, curve.paths[0][i + 1]);
+  }
+  const spanX = (full.maxX - full.minX) / 16;
+  const spanY = (full.maxY - full.minY) / 16;
+  const view = { minX: full.minX + spanX * 5, maxX: full.minX + spanX * 6, minY: full.minY + spanY * 9, maxY: full.minY + spanY * 10 };
+  const width = 320;
+  const height = 240;
+  const total = curve.paths[0].length / 2 - 1;
+  for (const paletteId of ["classic", "ink"]) {
+    const ctx = recordingContext();
+    drawPaths(paletteId, ctx, curve.paths, width, height, view, { clear: true });
+    const map = fitTransform(view, width, height, 18);
+    const expected = [];
+    for (let i = 0; i < total; i += 1) {
+      const a = map(curve.paths[0][i * 2], curve.paths[0][i * 2 + 1]);
+      const b = map(curve.paths[0][i * 2 + 2], curve.paths[0][i * 2 + 3]);
+      const reach = ctx.lineWidth;
+      const outside =
+        Math.max(a.x, b.x) < -reach || Math.min(a.x, b.x) > width + reach ||
+        Math.max(a.y, b.y) < -reach || Math.min(a.y, b.y) > height + reach;
+      if (outside) continue;
+      const [r, g, bl] = colorSample(paletteId, i + 1, total + 1, -1);
+      expected.push(`${a.x.toFixed(3)},${a.y.toFixed(3)}>${b.x.toFixed(3)},${b.y.toFixed(3)} rgb(${r}, ${g}, ${bl})`);
+    }
+    assert.ok(expected.length > 0 && expected.length < total / 20, `${paletteId} ${expected.length}`);
+    assert.deepEqual(ctx.segments, expected, paletteId);
+  }
+});
+
+function recordingContext() {
+  let pen = null;
+  let pending = [];
+  const ctx = {
+    strokes: 0,
+    fills: 0,
+    segments: [],
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    beginPath() {
+      pending = [];
+      pen = null;
+    },
+    moveTo(x, y) {
+      pen = { x, y };
+    },
+    lineTo(x, y) {
+      pending.push(`${pen.x.toFixed(3)},${pen.y.toFixed(3)}>${x.toFixed(3)},${y.toFixed(3)}`);
+      pen = { x, y };
+    },
+    stroke() {
+      ctx.strokes += 1;
+      for (const segment of pending) ctx.segments.push(`${segment} ${ctx.strokeStyle}`);
+      pending = [];
+    },
+    fill() {
+      ctx.fills += 1;
+    },
+    fillRect() {
+      ctx.fills += 1;
+    },
+    arc() {},
+  };
+  return ctx;
+}
+
 function mockContext() {
   return {
     strokes: 0,

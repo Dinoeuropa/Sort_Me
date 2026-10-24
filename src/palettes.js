@@ -1,5 +1,6 @@
 const INSIDE = [16, 14, 12];
 const PAPER = "#100e0c";
+const INSIDE_RGB = rgb(INSIDE);
 const BASINS = [
   [226, 182, 87],
   [121, 194, 168],
@@ -186,10 +187,30 @@ export function fitTransform(bounds, width, height, pad = 16) {
   const drawnH = spanY * scale;
   const offsetX = pad + (innerW - drawnW) / 2;
   const offsetY = pad + (innerH - drawnH) / 2;
-  return (x, y) => ({
+  const map = (x, y) => ({
     x: offsetX + (x - bounds.minX) * scale,
     y: offsetY + (bounds.maxY - y) * scale,
   });
+  map.frame = { scale, offsetX, offsetY, minX: bounds.minX, maxY: bounds.maxY };
+  return map;
+}
+
+const colorTables = new Map();
+
+/** Stroke colors for a curve of `max - 1` segments, kept so each frame of a zoom reuses them. */
+function segmentColors(paletteId, max) {
+  const key = `${paletteId}:${max}`;
+  let table = colorTables.get(key);
+  if (table) {
+    colorTables.delete(key);
+    colorTables.set(key, table);
+    return table;
+  }
+  table = new Array(max);
+  for (let iter = 0; iter < max; iter += 1) table[iter] = rgb(colorSample(paletteId, iter, max, -1));
+  colorTables.set(key, table);
+  if (colorTables.size > 6) colorTables.delete(colorTables.keys().next().value);
+  return table;
 }
 
 export function boundsOf(paths) {
@@ -224,26 +245,55 @@ export function drawPaths(paletteId, ctx, paths, width, height, bounds, range) {
   for (const path of paths) total += Math.max(0, path.length / 2 - 1);
   const max = Math.max(2, (range?.total ?? total) + 1);
   const widthPx = Math.max(1.25, Math.min(width, height) * 0.007);
-  let tip = null;
+  const colors = segmentColors(paletteId, max);
+  const { scale, offsetX, offsetY, minX, maxY } = map.frame;
+  const left = -widthPx;
+  const right = width + widthPx;
+  const top = -widthPx;
+  const bottom = height + widthPx;
+  ctx.lineWidth = widthPx;
+  let style = "";
+  let tipX = 0;
+  let tipY = 0;
+  let tipped = false;
   for (const path of paths) {
     const count = path.length / 2;
-    for (let i = 0; i < count - 1; i += 1) {
-      const from = map(path[i * 2], path[i * 2 + 1]);
-      const to = map(path[i * 2 + 2], path[i * 2 + 3]);
-      if (index >= start && index < stop) {
-        ctx.beginPath();
-        ctx.moveTo(from.x, from.y);
-        ctx.lineTo(to.x, to.y);
-        ctx.strokeStyle = rgb(colorSample(paletteId, index + 1, max, -1));
-        ctx.lineWidth = widthPx;
-        ctx.stroke();
-        tip = to;
+    if (index + count - 1 <= start) {
+      index += Math.max(0, count - 1);
+      continue;
+    }
+    let ax = offsetX + (path[0] - minX) * scale;
+    let ay = offsetY + (maxY - path[1]) * scale;
+    for (let i = 1; i < count; i += 1) {
+      const bx = offsetX + (path[i * 2] - minX) * scale;
+      const by = offsetY + (maxY - path[i * 2 + 1]) * scale;
+      if (index >= start) {
+        tipX = bx;
+        tipY = by;
+        tipped = true;
+        const inside =
+          (ax > bx ? ax : bx) >= left && (ax < bx ? ax : bx) <= right &&
+          (ay > by ? ay : by) >= top && (ay < by ? ay : by) <= bottom;
+        if (inside) {
+          const color = index + 1 < max ? colors[index + 1] : INSIDE_RGB;
+          if (color !== style) {
+            ctx.strokeStyle = color;
+            style = color;
+          }
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.stroke();
+        }
       }
+      ax = bx;
+      ay = by;
       index += 1;
       if (index >= stop) break;
     }
     if (index >= stop) break;
   }
+  const tip = tipped ? { x: tipX, y: tipY } : null;
   if (range?.tip && tip) {
     ctx.beginPath();
     ctx.fillStyle = "#e2b657";
