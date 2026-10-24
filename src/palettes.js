@@ -227,7 +227,10 @@ export function fitTransform(bounds, width, height, pad = 16) {
 
 const colorTables = new Map();
 
-/** Stroke colors for a curve of `max - 1` segments, kept so each frame of a zoom reuses them. */
+/**
+ * Stroke colors for a curve of `max - 1` segments, kept so each frame of a zoom reuses them. A
+ * color is worked out the first time its segment is drawn, so a deep zoom pays only for what it shows.
+ */
 function segmentColors(paletteId, max) {
   const key = `${paletteId}:${max}`;
   let table = colorTables.get(key);
@@ -237,10 +240,42 @@ function segmentColors(paletteId, max) {
     return table;
   }
   table = new Array(max);
-  for (let iter = 0; iter < max; iter += 1) table[iter] = rgb(colorSample(paletteId, iter, max, -1));
   colorTables.set(key, table);
   if (colorTables.size > 6) colorTables.delete(colorTables.keys().next().value);
   return table;
+}
+
+/** Segments per run whose bounding box is kept, so a zoom can pass over runs that miss the canvas. */
+const CHUNK = 256;
+const chunkTables = new WeakMap();
+
+function chunkBoxes(path) {
+  let boxes = chunkTables.get(path);
+  if (boxes) return boxes;
+  const last = path.length / 2 - 1;
+  const count = Math.ceil(last / CHUNK);
+  boxes = new Float64Array(count * 4);
+  for (let c = 0; c < count; c += 1) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const end = Math.min(last, (c + 1) * CHUNK);
+    for (let p = c * CHUNK; p <= end; p += 1) {
+      const x = path[p * 2];
+      const y = path[p * 2 + 1];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    boxes[c * 4] = minX;
+    boxes[c * 4 + 1] = maxX;
+    boxes[c * 4 + 2] = minY;
+    boxes[c * 4 + 3] = maxY;
+  }
+  chunkTables.set(path, boxes);
+  return boxes;
 }
 
 export function boundsOf(paths) {
@@ -292,9 +327,28 @@ export function drawPaths(paletteId, ctx, paths, width, height, bounds, range) {
       index += Math.max(0, count - 1);
       continue;
     }
+    const boxes = !range?.tip && count > CHUNK + 1 ? chunkBoxes(path) : null;
     let ax = offsetX + (path[0] - minX) * scale;
     let ay = offsetY + (maxY - path[1]) * scale;
     for (let i = 1; i < count; i += 1) {
+      if (boxes && (i - 1) % CHUNK === 0) {
+        const c = (i - 1) / CHUNK;
+        const end = Math.min(count - 1, i - 1 + CHUNK);
+        const after = index + end - (i - 1);
+        const missed =
+          offsetX + (boxes[c * 4 + 1] - minX) * scale < left ||
+          offsetX + (boxes[c * 4] - minX) * scale > right ||
+          offsetY + (maxY - boxes[c * 4 + 2]) * scale < top ||
+          offsetY + (maxY - boxes[c * 4 + 3]) * scale > bottom;
+        if (missed && index >= start && after <= stop) {
+          index = after;
+          i = end;
+          ax = offsetX + (path[end * 2] - minX) * scale;
+          ay = offsetY + (maxY - path[end * 2 + 1]) * scale;
+          if (index >= stop) break;
+          continue;
+        }
+      }
       const bx = offsetX + (path[i * 2] - minX) * scale;
       const by = offsetY + (maxY - path[i * 2 + 1]) * scale;
       if (index >= start) {
@@ -305,7 +359,11 @@ export function drawPaths(paletteId, ctx, paths, width, height, bounds, range) {
           (ax > bx ? ax : bx) >= left && (ax < bx ? ax : bx) <= right &&
           (ay > by ? ay : by) >= top && (ay < by ? ay : by) <= bottom;
         if (inside) {
-          const color = index + 1 < max ? colors[index + 1] : INSIDE_RGB;
+          let color = INSIDE_RGB;
+          if (index + 1 < max) {
+            color = colors[index + 1];
+            if (color === undefined) color = colors[index + 1] = rgb(colorSample(paletteId, index + 1, max, -1));
+          }
           if (color !== style) {
             ctx.strokeStyle = color;
             style = color;
