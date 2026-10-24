@@ -422,7 +422,11 @@ canvas.exploring:active {
   font-size: 0.85rem;
   letter-spacing: 0.04em;
   text-transform: lowercase;
-  pointer-events: none;
+  cursor: pointer;
+}
+
+.mode-badge[aria-pressed="false"] {
+  color: var(--muted);
 }
 
 .param {
