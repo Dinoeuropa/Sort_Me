@@ -115,25 +115,9 @@ export function paintEscape(
   floorIter = 0,
   topIter = null,
 ) {
-  paletteById(paletteId);
   const data = new Uint8ClampedArray(width * height * 4);
   const limit = Math.max(0, Math.min(height, rowLimit));
-  const max = Math.max(1, shownIter);
-  const span = max + 1;
-  const floor = Math.min(Math.max(0, floorIter | 0), max - 1);
-  const top = topIter == null ? max : Math.min(max, Math.max(floor + 1, topIter | 0));
-  const range = top - floor;
-  const lut = new Uint8ClampedArray(4 * span * 3);
-  for (let iter = 0; iter < span; iter += 1) {
-    const lifted = Math.max(0, iter - floor);
-    const inside = iter >= max;
-    const value = inside ? lifted : Math.min(lifted, range);
-    const over = inside ? lifted : top < max ? range + 1 : range;
-    writeLut(lut, span, 3, iter, colorSample(paletteId, value, over, -1));
-    for (let basin = 0; basin < 3; basin += 1) {
-      writeLut(lut, span, basin, iter, colorSample(paletteId, value, over, basin));
-    }
-  }
+  const { lut, span, max } = escapeLut(paletteId, shownIter, floorIter, topIter);
   const revealing = revealIter != null;
   for (let y = 0; y < height; y += 1) {
     const row = y * width;
@@ -167,6 +151,31 @@ export function paintEscape(
     }
   }
   return data;
+}
+
+/**
+ * Every color an escape picture can take, three channels each: rows for basins 0, 1, 2, then the
+ * ordinary ramp, one column per iteration up to the cap. Floor and top as in paintEscape.
+ */
+export function escapeLut(paletteId, shownIter, floorIter = 0, topIter = null) {
+  paletteById(paletteId);
+  const max = Math.max(1, shownIter);
+  const span = max + 1;
+  const floor = Math.min(Math.max(0, floorIter | 0), max - 1);
+  const top = topIter == null ? max : Math.min(max, Math.max(floor + 1, topIter | 0));
+  const range = top - floor;
+  const lut = new Uint8ClampedArray(4 * span * 3);
+  for (let iter = 0; iter < span; iter += 1) {
+    const lifted = Math.max(0, iter - floor);
+    const inside = iter >= max;
+    const value = inside ? lifted : Math.min(lifted, range);
+    const over = inside ? lifted : top < max ? range + 1 : range;
+    writeLut(lut, span, 3, iter, colorSample(paletteId, value, over, -1));
+    for (let basin = 0; basin < 3; basin += 1) {
+      writeLut(lut, span, basin, iter, colorSample(paletteId, value, over, basin));
+    }
+  }
+  return { lut, span, max };
 }
 
 function writeLut(lut, span, slot, iter, rgb) {
