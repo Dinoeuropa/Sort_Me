@@ -26,6 +26,8 @@ export const ZOOMS = [
     endScale: 0.18,
     baseIterations: 72,
     src: "/media/mandelbrot-zoom.mp4",
+    screen: "/media/mandelbrot-zoom-screen.mp4",
+    lite: "/media/mandelbrot-zoom-lite.mp4",
     poster: "/media/mandelbrot-zoom.jpg",
     duration: FILM_MS,
   },
@@ -41,6 +43,8 @@ export const ZOOMS = [
     cx: -0.123,
     cy: 0.745,
     src: "/media/julia-zoom.mp4",
+    screen: "/media/julia-zoom-screen.mp4",
+    lite: "/media/julia-zoom-lite.mp4",
     poster: "/media/julia-zoom.jpg",
     duration: FILM_MS,
   },
@@ -55,6 +59,8 @@ export const ZOOMS = [
     baseIterations: 64,
     flipY: true,
     src: "/media/burning-zoom.mp4",
+    screen: "/media/burning-zoom-screen.mp4",
+    lite: "/media/burning-zoom-lite.mp4",
     poster: "/media/burning-zoom.jpg",
     duration: FILM_MS,
   },
@@ -102,6 +108,8 @@ const zoomScenes = ZOOMS.map((zoom) => ({
   kind: "zoom",
   fractalId: zoom.fractalId,
   src: zoom.src,
+  screen: zoom.screen,
+  lite: zoom.lite,
   poster: zoom.poster,
   duration: zoom.duration,
 }));
@@ -248,4 +256,30 @@ export function zoomCamera(sceneId, progress) {
 /** `still` holds the opening frame. `play` runs the films. */
 export function showMode(reduced) {
   return reduced ? "still" : "play";
+}
+
+/**
+ * Which copy of a film to fetch. The 4K masters stay on disk; the page never streams them.
+ * A narrow screen, Save-Data, a 2G/3G label, or a measured link under 8 Mbps gets the phone copy.
+ * Any other wide screen gets the 1080p copy, including when the browser does not report a speed.
+ * `downlink` is megabits per second. Zero means the browser did not say.
+ */
+export function filmBudget({ width, saveData, effectiveType, downlink }) {
+  const narrow = !(width >= 1200);
+  const type = String(effectiveType || "");
+  const slowType = type === "slow-2g" || type === "2g" || type === "3g";
+  const rate = Number(downlink);
+  const slowRate = Number.isFinite(rate) && rate > 0 && rate < 8;
+  if (narrow || saveData || slowType || slowRate) return "lite";
+  return "screen";
+}
+
+/**
+ * The file to play. Sorting films have one small file, so they stay on it.
+ * Zoom films use the phone copy or the 1080p copy. `scene.src` is the 4K master and is not played.
+ */
+export function filmSrc(scene, budget) {
+  if (budget === "lite" && scene.lite) return scene.lite;
+  if (scene.screen) return scene.screen;
+  return scene.src;
 }
