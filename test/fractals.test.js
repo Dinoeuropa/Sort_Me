@@ -352,9 +352,9 @@ test("the arrowhead is a path under the gasket and the peano curve fills a 3-gri
   const head = buildGeometry("sierpinski", "arrowhead", 2);
   assert.equal(head.mode, "polyline");
   assert.ok(head.paths[0].length > buildGeometry("sierpinski", "arrowhead", 1).paths[0].length);
-  const wide = bounds(buildGeometry("sierpinski", "arrowhead", 3).paths[0]);
-  const again = bounds(buildGeometry("sierpinski", "arrowhead", 4).paths[0]);
-  assert.ok(Math.abs(wide.maxX - wide.minX - (again.maxX - again.minX)) < 1e-6);
+  const odd = buildGeometry("sierpinski", "arrowhead", 3).paths[0];
+  const even = buildGeometry("sierpinski", "arrowhead", 4).paths[0];
+  assert.deepEqual([odd[0], odd[1], odd.at(-2), odd.at(-1)], [even[0], even[1], even.at(-2), even.at(-1)]);
   const peano = pairs(buildGeometry("hilbert", "peano", 1).paths[0]);
   assert.equal(peano.length, 9);
   const seen = new Set(peano.map(([x, y]) => `${x},${y}`));

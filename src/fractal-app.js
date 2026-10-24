@@ -10,6 +10,7 @@ import {
   paletteRange,
   fractalById,
   iterateIfs,
+  levelFrame,
   newtonCursor,
   presetById,
 } from "./fractals.js";
@@ -32,7 +33,7 @@ import {
   escapeMagnification,
   escapeWindow,
   levelBlend,
-  mapPointsInto,
+  placeLevel,
   panBounds,
   panEscape,
   DRAW_RASTER_EDGE,
@@ -168,6 +169,7 @@ const REACTIVE = new Set(["mandelbrot", "julia", "burning", "newton"]);
 const glide = { factor: 1, px: 0, py: 0, panX: 0, panY: 0, raf: 0, movedAt: 0 };
 let curveFrame = 0;
 const levelCache = new Map();
+let homeFrame = null;
 
 for (const fractal of FRACTALS) {
   const option = document.createElement("option");
@@ -362,6 +364,7 @@ function resetProgress() {
   state.cursorDirty = false;
   state.cursorRedraw = false;
   levelCache.clear();
+  homeFrame = null;
   state.finished = false;
   state.paused = false;
   state.samples = 0;
@@ -811,7 +814,7 @@ function exploredLevel() {
     return escapeIterationCap(state.fractalId, base, magnification);
   }
   if (fractal.kind === "ifs") return pointBudget(base, magnification, 80000);
-  return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth);
+  return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth, state.presetId);
 }
 
 /** The note never changes during auto zoom, so the frame above it keeps its size while the view moves. */
@@ -1018,7 +1021,7 @@ function paintSettled(box) {
     paintPoints(box);
     return;
   }
-  const blend = levelBlend(fractal.id, currentMagnification());
+  const blend = levelBlend(fractal.id, currentMagnification(), state.presetId);
   const base = clampNumber((state.baseDepth || depthValue()) + blend.extra, fractal.minDepth, fractal.maxDepth);
   const next = Math.min(fractal.maxDepth, base + 1);
   drawStored(geometryAt(base), box, true);
@@ -1049,7 +1052,7 @@ function geometryAt(level) {
   let geometry = levelCache.get(key);
   if (!geometry) {
     geometry = buildGeometry(state.fractalId, state.presetId, level);
-    if (growsInPlace(state.fractalId)) geometry = placeGeometry(geometry, state.home);
+    if (growsInPlace(state.fractalId)) geometry = placeGeometry(geometry);
     levelCache.set(key, geometry);
   }
   return geometry;
@@ -1182,7 +1185,7 @@ function redrawExplored() {
     state.samples = state.total;
   } else {
     let geometry = buildGeometry(state.fractalId, state.presetId, level);
-    if (growsInPlace(fractal.id)) geometry = placeGeometry(geometry, state.home);
+    if (growsInPlace(fractal.id)) geometry = placeGeometry(geometry);
     if (geometry.mode === "triangles") {
       state.vertices = geometry.vertices;
       state.paths = null;
@@ -1208,13 +1211,13 @@ function growsInPlace(fractalId) {
   return fractalId === "dragon" || fractalId === "hilbert" || fractalId === "gosper" || fractalId === "levy" || fractalId === "tree";
 }
 
-function placeGeometry(geometry, home) {
-  const source = geometry.mode === "polyline" ? geometry.paths : [geometry.vertices];
-  const native = boundsOf(source);
-  if (geometry.mode === "polyline") {
-    return { mode: "polyline", paths: source.map((path) => mapPointsInto(path, native, home)) };
+/** A level carried into the coordinates of the level the zoom started from, where it lies on that level. */
+function placeGeometry(geometry) {
+  if (!homeFrame) {
+    const home = buildGeometry(state.fractalId, state.presetId, state.baseDepth || depthValue());
+    homeFrame = levelFrame(state.fractalId, state.presetId, home);
   }
-  return { mode: "triangles", vertices: mapPointsInto(geometry.vertices, native, home) };
+  return placeLevel(geometry, levelFrame(state.fractalId, state.presetId, geometry), homeFrame);
 }
 
 function renderJob(view = pictureView() || state.view) {

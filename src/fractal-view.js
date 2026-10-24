@@ -22,6 +22,20 @@ const RATIOS = {
   tree: 1.5,
 };
 
+/** Presets whose segments shrink by a different factor per level than the rest of their fractal. */
+const PRESET_RATIOS = {
+  "koch:cesaro": 2 * (1 + Math.cos((85 * Math.PI) / 180)),
+  "koch:island": 2 * (1 + Math.cos((85 * Math.PI) / 180)),
+  "koch:minkowski": 4,
+  "dragon:terdragon": Math.sqrt(3),
+  "hilbert:peano": 3,
+};
+
+/** How much the view must grow before the next level of a curve is needed. */
+export function levelRatio(fractalId, presetId) {
+  return PRESET_RATIOS[`${fractalId}:${presetId}`] || RATIOS[fractalId];
+}
+
 export function escapeWindow(preset) {
   return {
     centerX: preset.centerX,
@@ -460,8 +474,8 @@ export function escapeBlitRect(plate, view, width, height) {
 }
 
 /** Fractional progress toward the next generation, so a level change is a fade. */
-export function levelBlend(fractalId, magnification) {
-  const ratio = RATIOS[fractalId];
+export function levelBlend(fractalId, magnification, presetId) {
+  const ratio = levelRatio(fractalId, presetId);
   if (!ratio || !(magnification > 0)) return { extra: 0, fade: 0 };
   const t = Math.log(Math.max(1, magnification)) / Math.log(ratio);
   if (!Number.isFinite(t) || t <= 0) return { extra: 0, fade: 0 };
@@ -470,8 +484,8 @@ export function levelBlend(fractalId, magnification) {
   return { extra, fade: fade < 1e-9 ? 0 : fade };
 }
 
-export function recursionLevel(fractalId, baseDepth, magnification, minDepth, maxDepth) {
-  const ratio = RATIOS[fractalId];
+export function recursionLevel(fractalId, baseDepth, magnification, minDepth, maxDepth, presetId) {
+  const ratio = levelRatio(fractalId, presetId);
   const extra = ratio
     ? Math.max(0, Math.floor(Math.log(Math.max(1, magnification)) / Math.log(ratio) + 1e-9))
     : 0;
@@ -550,6 +564,35 @@ export function mapPointsInto(points, native, home) {
     out[i + 1] = oy + (points[i + 1] - native.minY) * scale;
   }
   return out;
+}
+
+/**
+ * A curve level carried from its own frame (see levelFrame) into the native coordinates of the
+ * level whose frame is `home`. The home level itself comes back untouched.
+ */
+export function placeLevel(geometry, frame, home) {
+  if (frame.re === home.re && frame.im === home.im && frame.x === home.x && frame.y === home.y) return geometry;
+  const norm = home.re * home.re + home.im * home.im;
+  const invRe = home.re / norm;
+  const invIm = -home.im / norm;
+  const re = invRe * frame.re - invIm * frame.im;
+  const im = invRe * frame.im + invIm * frame.re;
+  const sx = frame.x - home.x;
+  const sy = frame.y - home.y;
+  const x = invRe * sx - invIm * sy;
+  const y = invRe * sy + invIm * sx;
+  const move = (points) => {
+    const out = new Float64Array(points.length);
+    for (let i = 0; i < points.length; i += 2) {
+      const px = points[i];
+      const py = points[i + 1];
+      out[i] = re * px - im * py + x;
+      out[i + 1] = im * px + re * py + y;
+    }
+    return out;
+  };
+  if (geometry.mode === "polyline") return { mode: "polyline", paths: geometry.paths.map(move) };
+  return { mode: "triangles", vertices: move(geometry.vertices) };
 }
 
 /** Pixel of a point given by its offset from the camera center. */
