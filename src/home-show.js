@@ -12,7 +12,7 @@ export const FILM_MS = Math.round((FRAME_COUNT / FRAME_RATE) * 1000);
 
 /**
  * Zoom films. The center stays put for the whole film, and the scale moves in toward it.
- * Mandelbrot and the Julia set use the classic brass coloring. The burning ship uses heat.
+ * Mandelbrot and the Julia set use the classic coloring. The burning ship uses heat.
  * Three sorting films follow them. Every boundary eases across {@link FADE_MS}.
  */
 export const ZOOMS = [

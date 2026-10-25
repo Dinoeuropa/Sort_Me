@@ -136,8 +136,13 @@ async function record(zoom) {
 }
 
 await mkdir(new URL("../media/", import.meta.url), { recursive: true });
+const chosen = process.argv.slice(2);
+const zooms = chosen.length === 0 ? ZOOMS : ZOOMS.filter((zoom) => chosen.includes(zoom.id));
+if (chosen.length > 0 && zooms.length !== chosen.length) {
+  throw new Error(`Unknown zoom: ${chosen.filter((id) => !zooms.some((zoom) => zoom.id === id)).join(", ")}`);
+}
 try {
-  for (const zoom of ZOOMS) await record(zoom);
+  for (const zoom of zooms) await record(zoom);
 } finally {
   for (const worker of workers) await worker.terminate();
 }

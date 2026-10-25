@@ -62,6 +62,7 @@ import { hasDeepCenter, viewOffset } from "./precision.js";
 import {
   PALETTES,
   boundsOf,
+  colorSample,
   drawPaths,
   drawPoints,
   drawTriangles,
@@ -274,6 +275,17 @@ function syncDepthControls() {
   depthLabel.textContent = fractal.depthLabel;
 }
 
+function legendInk(iteration, max) {
+  const [red, green, blue] = colorSample(state.paletteId, iteration, max, -1);
+  return `rgb(${red}, ${green}, ${blue})`;
+}
+
+function paintLegend() {
+  document.querySelector(".swatch.inside").style.background = legendInk(24, 24);
+  document.querySelector(".swatch.early").style.background = legendInk(6, 24);
+  document.querySelector(".swatch.late").style.background = legendInk(21, 24);
+}
+
 function renderChrome() {
   const fractal = currentFractal();
   const palette = PALETTES.find((item) => item.id === state.paletteId);
@@ -285,6 +297,7 @@ function renderChrome() {
   fractal.legend.forEach((label, index) => {
     legend[index].textContent = label;
   });
+  paintLegend();
   syncDepthControls();
   const depth = depthValue();
   const drawing = state.running || state.paused || state.finished;
