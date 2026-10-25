@@ -472,8 +472,8 @@ canvas.exploring:active {
 .swatch.pivot { background: var(--violet); }
 .swatch.sorted { background: var(--teal); }
 .swatch.inside { background: #100e0c; box-shadow: inset 0 0 0 1px #6d6254; }
-.swatch.early { background: var(--coral); }
-.swatch.late { background: var(--text); }
+.swatch.early { background: var(--brass); }
+.swatch.late { background: var(--coral); }
 
 canvas.pixelated { image-rendering: pixelated; }
 
