@@ -11,7 +11,7 @@ export const PALETTES = [
   {
     id: "classic",
     name: "Classic",
-    blurb: "Dark ground through coral and brass to a cream boundary.",
+    blurb: "Brass on a dark ground, through coral, to a cream boundary.",
     paint: classicPaint,
   },
   {
@@ -477,15 +477,16 @@ function rgb(channels) {
 function classicPaint(iter, max) {
   const t = Math.min(1, iter / Math.max(1, max));
   const dark = [24, 20, 16];
-  const coral = [239, 111, 76];
   const brass = [226, 182, 87];
+  const coral = [239, 111, 76];
   const cream = [246, 239, 228];
-  // Luminance only rises: dark, coral, brass, cream. A zoom therefore cannot
-  // pulse bright and dark. The three inks stay far enough apart that the copies
-  // of the set remain distinct from the field around them.
-  if (t < 0.34) return mix(dark, coral, t / 0.34);
-  if (t < 0.67) return mix(coral, brass, (t - 0.34) / 0.33);
-  return mix(brass, cream, (t - 0.67) / 0.33);
+  // The original classic inks, in their original order. The sine that striped
+  // them is gone, so neighboring iterations stay close and a zoom cannot flash.
+  // Coral is darker than brass, so luminance dips once on that leg, then rises
+  // through cream. One turn is the hue change, not a pulse.
+  if (t < 0.35) return mix(dark, brass, t / 0.35);
+  if (t < 0.75) return mix(brass, coral, (t - 0.35) / 0.4);
+  return mix(coral, cream, (t - 0.75) / 0.25);
 }
 
 function heatPaint(iter, max) {

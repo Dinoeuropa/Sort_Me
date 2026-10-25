@@ -47,44 +47,48 @@ test("escape colors stay in range, share an interior, and separate iterations", 
   }
 });
 
-test("classic brightens along the escape, and the field stays distinct from the boundary", () => {
+test("classic walks dark, brass, coral, then cream, without pulsing", () => {
   const lum = (color) => 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
+  const apart = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const brass = [226, 182, 87];
+  const coral = [239, 111, 76];
+  const cap = 4800;
+  assert.ok(apart(colorSample("classic", 0.35 * cap, cap), brass) <= 1);
+  assert.ok(apart(colorSample("classic", 0.75 * cap, cap), coral) <= 1);
+  assert.ok(colorSample("classic", 0.2 * cap, cap)[1] > 100);
+
   for (const max of [48, 160, 4800]) {
-    let drop = 0;
+    let reversals = 0;
+    let direction = 0;
     let step = 0;
     let stepAt = 0;
     for (let iter = 1; iter < max - 1; iter += 1) {
       const a = colorSample("classic", iter, max);
       const b = colorSample("classic", iter + 1, max);
-      drop = Math.min(drop, lum(b) - lum(a));
+      const delta = lum(b) - lum(a);
+      if (Math.abs(delta) > 0.5) {
+        const sign = delta > 0 ? 1 : -1;
+        if (direction !== 0 && sign !== direction) reversals += 1;
+        direction = sign;
+      }
       for (let channel = 0; channel < 3; channel += 1) {
-        const delta = Math.abs(a[channel] - b[channel]);
-        if (delta > step) {
-          step = delta;
+        const jump = Math.abs(a[channel] - b[channel]);
+        if (jump > step) {
+          step = jump;
           stepAt = iter;
         }
       }
     }
-    assert.ok(drop > -1.5, `luminance drop ${drop} at cap ${max}`);
-    const limit = max >= 4800 ? 2 : 16;
+    assert.ok(reversals <= 2, `luminance reversals ${reversals} at cap ${max}`);
+    const limit = max >= 4800 ? 2 : max >= 160 ? 6 : 16;
     assert.ok(step <= limit, `step ${step} at ${stepAt}, cap ${max}`);
   }
 
   const max = 240;
   const field = colorSample("classic", Math.round(max * 0.25), max);
   const edge = colorSample("classic", Math.round(max * 0.85), max);
-  const apart = Math.hypot(field[0] - edge[0], field[1] - edge[1], field[2] - edge[2]);
-  assert.ok(apart > 70, `field and boundary are ${apart} apart`);
+  assert.ok(apart(field, edge) > 70, `field and boundary are ${apart(field, edge)} apart`);
   assert.notDeepEqual(colorSample("classic", Math.round(max * 0.05), max), edge);
-
-  const brass = [226, 182, 87];
-  let nearest = Infinity;
-  for (let iter = 1; iter < 4800; iter += 1) {
-    const color = colorSample("classic", iter, 4800);
-    const distance = Math.hypot(color[0] - brass[0], color[1] - brass[1], color[2] - brass[2]);
-    if (distance < nearest) nearest = distance;
-  }
-  assert.ok(nearest <= 1, `nearest brass distance ${nearest}`);
 });
 
 test("newton basins take different colors from the same palette", () => {
