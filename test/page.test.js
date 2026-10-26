@@ -166,3 +166,14 @@ test("public paths replace the html addresses", async () => {
     child.kill();
   }
 });
+
+test("sound is an icon at the top left of the sorting frame", () => {
+  const controls = page.slice(page.indexOf('class="controls"'), page.indexOf('class="compare"'));
+  assert.doesNotMatch(controls, /id="sound"/);
+  const frame = page.slice(page.indexOf('class="canvas-frame"'), page.indexOf('id="viz-dock"'));
+  assert.match(frame, /id="sound" class="sound-toggle" aria-pressed="false" aria-label="Sound"/);
+  assert.match(frame, /class="sound-icon sound-off"/);
+  const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.doesNotMatch(app, /soundButton\.textContent/);
+  assert.match(app, /speaker\.setEnabled\(on\)/);
+});

@@ -188,3 +188,18 @@ test("a blank fractal canvas shows an enlarged Draw in the frame", () => {
   assert.match(fractalApp, /stageDraw\.hidden = !canvasIsBlank\(\)/);
   assert.match(fractalApp, /stageDraw\.addEventListener\("click", toggle\)/);
 });
+
+test("sound is an icon at the top left of the fractal frame", () => {
+  const controls = fractals.slice(fractals.indexOf('class="controls"'), fractals.indexOf('id="error"'));
+  assert.doesNotMatch(controls, /id="sound"/);
+  const frame = fractals.slice(fractals.indexOf('class="canvas-frame"'), fractals.indexOf('id="viz-dock"'));
+  assert.match(frame, /id="sound" class="sound-toggle" aria-pressed="false" aria-label="Sound"/);
+  assert.match(frame, /class="sound-icon sound-on"/);
+  assert.match(frame, /class="sound-icon sound-off"/);
+  assert.match(frame, /d="M20 7 8 17"/);
+  const rule = css.slice(css.indexOf(".sound-toggle {"), css.indexOf(".sound-toggle {") + 700);
+  assert.match(rule, /top:\s*0\.7rem/);
+  assert.match(rule, /left:\s*0\.8rem/);
+  assert.match(rule, /\.sound-toggle\[aria-pressed="false"\] \.sound-off/);
+  assert.doesNotMatch(fractalApp, /soundButton\.textContent/);
+});

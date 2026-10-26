@@ -687,7 +687,6 @@ compareList.addEventListener("change", syncCompareBoxes);
 soundButton.addEventListener("click", () => {
   const on = soundButton.getAttribute("aria-pressed") !== "true";
   soundButton.setAttribute("aria-pressed", String(on));
-  soundButton.textContent = on ? "Sound on" : "Sound";
   speaker.setEnabled(on);
 });
 stepButton.addEventListener("click", () => {

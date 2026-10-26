@@ -75,7 +75,6 @@
           <div class="row">
             <button type="button" id="toggle" class="primary">Sort</button>
             <button type="button" id="step">Step</button>
-            <button type="button" id="sound" aria-pressed="false">Sound</button>
           </div>
         </div>
 
@@ -92,6 +91,17 @@
 
       <main class="stage">
         <div class="canvas-frame">
+          <button type="button" id="sound" class="sound-toggle" aria-pressed="false" aria-label="Sound">
+            <svg class="sound-icon sound-on" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" d="M3.5 9.5h3.2L11 6v12l-4.3-3.5H3.5z"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M15 9.2a3.2 3.2 0 0 1 0 5.6"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M17.4 7a6.2 6.2 0 0 1 0 10"/>
+            </svg>
+            <svg class="sound-icon sound-off" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" d="M3.5 9.5h3.2L11 6v12l-4.3-3.5H3.5z"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M20 7 8 17"/>
+            </svg>
+          </button>
           <canvas id="canvas" width="900" height="520" aria-label="Sorting visualization"></canvas>
         </div>
         <aside id="viz-dock" class="viz-dock" hidden>
