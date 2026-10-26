@@ -223,6 +223,7 @@ test("compare sits beside Sort and Sort Me runs the programs chosen in the frame
   assert.doesNotMatch(aside, /id="compare-list"/);
   assert.doesNotMatch(aside, /Compare programs/);
   assert.doesNotMatch(aside, /id="compare"/);
+  assert.match(aside, /<button type="button" id="side-compare">Compare<\/button>/);
   const frame = page.slice(page.indexOf('class="canvas-frame"'), page.indexOf('id="viz-dock"'));
   assert.match(frame, /id="stage-actions"/);
   const actions = frame.slice(frame.indexOf('id="stage-actions"'), frame.indexOf('id="compare-panel"'));
@@ -235,6 +236,7 @@ test("compare sits beside Sort and Sort Me runs the programs chosen in the frame
   assert.match(frame, /id="compare-back"/);
   const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /compareButton\.addEventListener\("click", openCompare\)/);
+  assert.match(app, /sideCompare\.addEventListener\("click", openCompare\)/);
   assert.match(app, /compareRun\.addEventListener\("click", runComparison\)/);
   assert.match(app, /compareBack\.addEventListener\("click", closeCompare\)/);
   assert.match(app, /comparePanel\.hidden = !state\.compareOpen/);
@@ -251,6 +253,7 @@ test("compare sits beside Sort and Sort Me runs the programs chosen in the frame
   assert.match(css, /\.compare-panel\s*\{[^}]*position:\s*absolute/);
   const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
   assert.match(readme, /Press Compare beside Sort/);
+  assert.match(readme, /side panel keeps a Compare button/);
   assert.match(readme, /Sort Me/);
   assert.doesNotMatch(readme, /press Compare, then press Sort/);
 });

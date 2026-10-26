@@ -23,6 +23,7 @@ const stageActions = document.querySelector("#stage-actions");
 const stageSort = document.querySelector("#stage-sort");
 const stepButton = document.querySelector("#step");
 const compareButton = document.querySelector("#compare");
+const sideCompare = document.querySelector("#side-compare");
 const comparePanel = document.querySelector("#compare-panel");
 const compareRun = document.querySelector("#compare-run");
 const compareBack = document.querySelector("#compare-back");
@@ -363,6 +364,8 @@ function renderChrome() {
   comparePanel.hidden = !state.compareOpen;
   compareButton.setAttribute("aria-expanded", String(state.compareOpen));
   compareButton.setAttribute("aria-controls", "compare-panel");
+  sideCompare.setAttribute("aria-expanded", String(state.compareOpen));
+  sideCompare.setAttribute("aria-controls", "compare-panel");
   dockSpeed.value = speedInput.value;
 
   if (state.shuffler && state.running) statusEl.textContent = "Shuffling";
@@ -763,6 +766,7 @@ document.addEventListener("click", (event) => {
 toggleButton.addEventListener("click", toggle);
 stageSort.addEventListener("click", toggle);
 compareButton.addEventListener("click", openCompare);
+sideCompare.addEventListener("click", openCompare);
 compareRun.addEventListener("click", runComparison);
 compareBack.addEventListener("click", closeCompare);
 compareList.addEventListener("change", syncCompareBoxes);

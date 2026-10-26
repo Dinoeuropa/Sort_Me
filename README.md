@@ -26,7 +26,7 @@ Sorting programs: bubble, selection, insertion, gnome, shell, merge, timsort, qu
 
 Visualization programs: bars, dots, heat strip, scatter, radial, slope, and color wheel. The heat strip keeps a value color after a cell is placed, so counting sort and the radix sorts finish as a cyan-to-red gradient instead of a solid bar. The color wheel lays those hues around a circle.
 
-Press Compare beside Sort on the chart. Choose two to four programs in that panel, then press Sort Me to run them. Back returns to the chart. After the first run, Compare stays at the corner of the chart. Resume appears only after Pause. Each lane keeps its own status, counts, and lower-bound meter. Each status card shrinks as more programs are compared: the card, the type, and the meter get smaller together so the chart keeps the room. A fifth box stays disabled until you clear one.
+Press Compare beside Sort on the chart, or the Compare button in the side panel. Choose two to four programs in that panel, then press Sort Me to run them. Back returns to the chart. The side panel keeps a Compare button, so a later comparison can be opened from there. After the first run, Compare also stays at the corner of the chart. Resume appears only after Pause. Each lane keeps its own status, counts, and lower-bound meter. Each status card shrinks as more programs are compared: the card, the type, and the meter get smaller together so the chart keeps the room. A fifth box stays disabled until you clear one.
 
 Radial and color wheel comparisons split two programs across the canvas and use quarters for three or four. The other views stay in rows. On a narrow screen the settings sit above the chart. Sort and Resume scroll the chart into view and open a small speed and pause rail beside it.
 
