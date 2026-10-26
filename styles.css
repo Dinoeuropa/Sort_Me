@@ -86,6 +86,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-weight: 700;
 }
 
+.site-nav a.home-link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  padding: 0.45rem;
+}
+
+.home-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: block;
+}
+
 .eyebrow {
   margin: 0;
   letter-spacing: 0.16em;
@@ -337,6 +352,57 @@ output {
   gap: 0.45rem;
 }
 
+.preset-menu {
+  position: relative;
+  align-self: start;
+}
+
+#randomise::after {
+  content: "";
+  display: inline-block;
+  margin-left: 0.5rem;
+  border-right: 5px solid transparent;
+  border-left: 5px solid transparent;
+  border-top: 6px solid currentColor;
+  transform: translateY(1px);
+}
+
+.preset-pop {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 12rem;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.4rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.preset-pop button {
+  text-align: left;
+}
+
+.preset-pop button[aria-checked="true"] {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+#explore {
+  flex-wrap: nowrap;
+}
+
+.zoom-sign {
+  width: 2.65rem;
+  height: 2.65rem;
+  padding: 0;
+  font-size: 1.45rem;
+  line-height: 2.65rem;
+}
+
 button {
   background: var(--panel-2);
   border: 1px solid var(--line);
@@ -408,6 +474,44 @@ canvas.reactive {
 canvas.exploring:active {
   cursor: grabbing;
 }
+
+.stage-draw {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.85rem;
+  letter-spacing: 0.02em;
+  padding: 1.05rem 2.6rem;
+  min-width: 10.5rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.sound-toggle {
+  position: absolute;
+  z-index: 2;
+  top: 0.7rem;
+  left: 0.8rem;
+  width: 2.55rem;
+  height: 2.55rem;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(16, 14, 12, 0.82);
+  color: var(--muted);
+}
+
+.sound-toggle .sound-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: none;
+}
+
+.sound-toggle[aria-pressed="true"] .sound-on { display: block; }
+
+.sound-toggle[aria-pressed="false"] .sound-off { display: block; }
 
 .mode-badge {
   position: absolute;
@@ -538,39 +642,49 @@ canvas.pixelated { image-rendering: pixelated; }
   .lane-card .readout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat { min-width: 0; }
   .stat span { letter-spacing: 0.02em; }
-  .stage:has(#viz-dock:not([hidden])) { padding-right: 5rem; }
+  .stage { position: relative; }
+  .stage:has(#viz-dock:not([hidden])) { padding-right: 4.5rem; }
   .viz-dock:not([hidden]) {
     display: flex;
-    position: fixed;
+    position: absolute;
     z-index: 4;
-    right: 0.55rem;
-    top: 42%;
-    transform: translateY(-50%);
+    top: 1.2rem;
+    right: 0.4rem;
+    height: max(240px, 46vh);
+    transform: none;
     flex-direction: column;
     align-items: center;
-    gap: 0.55rem;
-    width: 4.4rem;
-    padding: 0.7rem 0.4rem;
+    justify-content: space-between;
+    gap: 0.4rem;
+    width: 3.7rem;
+    padding: 0.5rem 0.22rem 0.4rem;
     border: 1px solid var(--line);
-    border-radius: 18px;
+    border-radius: 16px;
     background: rgba(28, 24, 20, 0.94);
   }
   .viz-dock label {
-    justify-items: center;
-    font-size: 0.68rem;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 0;
+    width: 100%;
+    font-size: 0.62rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .viz-dock input[type="range"] {
     writing-mode: vertical-lr;
     direction: rtl;
-    width: 1.4rem;
-    height: 7.5rem;
-    margin: 0.2rem 0;
+    flex: 1 1 auto;
+    width: 1.15rem;
+    height: auto;
+    min-height: 0;
+    margin: 0.35rem 0 0.15rem;
   }
   .viz-dock button {
-    padding: 0.4rem 0.35rem;
-    font-size: 0.75rem;
+    padding: 0.35rem 0.2rem;
+    font-size: 0.72rem;
   }
 }
 

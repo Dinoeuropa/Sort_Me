@@ -16,7 +16,11 @@
     <div class="shell">
       <aside class="panel">
         <nav class="site-nav" aria-label="Sort Me pages">
-          <a href="/">Home</a>
+          <a href="/" class="home-link" aria-label="Home">
+            <svg class="home-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" d="M4 11.2 12 4l8 7.2V20a1 1 0 0 1-1 1h-5.2v-6.2H10.2V21H5a1 1 0 0 1-1-1z"/>
+            </svg>
+          </a>
           <a href="/sorting" aria-current="page">Sorting</a>
           <a href="/fractals">Fractals</a>
         </nav>
@@ -62,16 +66,20 @@
             <input id="speed" type="range" min="1" max="100" value="25" />
           </div>
 
-          <div class="row" role="group" aria-label="Array presets">
-            <button type="button" id="preset-random" aria-pressed="true">Random</button>
-            <button type="button" id="preset-reversed" aria-pressed="false">Reversed</button>
-            <button type="button" id="preset-nearly" aria-pressed="false">Nearly sorted</button>
+          <div class="preset-menu">
+            <button type="button" id="randomise" aria-haspopup="menu" aria-expanded="false" aria-controls="preset-menu">
+              Randomise
+            </button>
+            <div id="preset-menu" class="preset-pop" role="menu" hidden>
+              <button type="button" role="menuitemradio" data-preset="random" aria-checked="true">Random</button>
+              <button type="button" role="menuitemradio" data-preset="reversed" aria-checked="false">Reversed</button>
+              <button type="button" role="menuitemradio" data-preset="nearly" aria-checked="false">Nearly sorted</button>
+            </div>
           </div>
 
           <div class="row">
             <button type="button" id="toggle" class="primary">Sort</button>
             <button type="button" id="step">Step</button>
-            <button type="button" id="sound" aria-pressed="false">Sound</button>
           </div>
         </div>
 
@@ -88,6 +96,17 @@
 
       <main class="stage">
         <div class="canvas-frame">
+          <button type="button" id="sound" class="sound-toggle" aria-pressed="false" aria-label="Sound">
+            <svg class="sound-icon sound-on" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" d="M3.5 9.5h3.2L11 6v12l-4.3-3.5H3.5z"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M15 9.2a3.2 3.2 0 0 1 0 5.6"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M17.4 7a6.2 6.2 0 0 1 0 10"/>
+            </svg>
+            <svg class="sound-icon sound-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" d="M3.5 9.5h3.2L11 6v12l-4.3-3.5H3.5z"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M20 7 8 17"/>
+            </svg>
+          </button>
           <canvas id="canvas" width="900" height="520" aria-label="Sorting visualization"></canvas>
         </div>
         <aside id="viz-dock" class="viz-dock" hidden>

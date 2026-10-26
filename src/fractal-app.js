@@ -87,6 +87,7 @@ const blurb = document.querySelector("#blurb");
 const paletteBlurb = document.querySelector("#palette-blurb");
 const presets = document.querySelector("#presets");
 const toggleButton = document.querySelector("#toggle");
+const stageDraw = document.querySelector("#stage-draw");
 const stepButton = document.querySelector("#step");
 const soundButton = document.querySelector("#sound");
 const dock = document.querySelector("#viz-dock");
@@ -254,13 +255,12 @@ function renderPresets() {
   }
   presets.replaceChildren();
   for (const preset of fractal.presets) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = preset.name;
-    button.dataset.preset = preset.id;
-    button.setAttribute("aria-pressed", String(preset.id === state.presetId));
-    presets.append(button);
+    const option = document.createElement("option");
+    option.value = preset.id;
+    option.textContent = preset.name;
+    presets.append(option);
   }
+  presets.value = state.presetId;
 }
 
 function syncDepthControls() {
@@ -310,15 +310,14 @@ function renderChrome() {
   samplesEl.textContent = state.samples.toLocaleString();
   kindEl.textContent = KIND[fractal.kind];
   presetStat.textContent = preset.name;
-  for (const button of presets.querySelectorAll("button")) {
-    button.setAttribute("aria-pressed", String(button.dataset.preset === state.presetId));
-  }
+  presets.value = state.presetId;
   const pace = paceLabel(fractal);
   speedOut.textContent = pace;
   const control = runControlLabel({ running: state.running, paused: state.paused, idle: "Draw" });
   toggleButton.textContent = control;
   dockToggle.textContent = control;
   dock.hidden = !state.dock;
+  stageDraw.hidden = !canvasIsBlank();
   dockSpeed.value = speedInput.value;
   if (state.autoZoom) statusEl.textContent = "Auto zoom";
   else if (state.exploring && !state.cursorRedraw) statusEl.textContent = "Zooming";
@@ -335,8 +334,9 @@ function renderChrome() {
   autoZoomButton.disabled = !(state.finished && !state.running && canAutoZoom());
   autoZoomButton.setAttribute("aria-pressed", String(state.autoZoom));
   modeBadge.hidden = !(canAutoZoom() && state.finished && !state.running);
-  modeBadge.setAttribute("aria-pressed", String(state.reactive));
-  modeBadge.textContent = state.reactive ? "reactive on" : "reactive off";
+  modeBadge.setAttribute("aria-pressed", String(reactive));
+  modeBadge.textContent = reactive ? "reactive on" : "reactive off";
+  modeBadge.disabled = state.autoZoom;
   canvas.classList.toggle("exploring", canZoom && !reactive);
   canvas.classList.toggle("reactive", state.finished && !state.running && reactive);
   const box = viewBox();
@@ -861,6 +861,10 @@ function zoomNote(fractal) {
   return `${fractal.note} View is ${shown} closer, drawn at level ${exploredLevel().toLocaleString()}.`;
 }
 
+function canvasIsBlank() {
+  return !state.running && !state.paused && !state.finished;
+}
+
 function canExplore() {
   return state.finished && !state.running && state.home && state.view && !state.autoZoom;
 }
@@ -870,7 +874,7 @@ function canAutoZoom(id = state.fractalId) {
 }
 
 function isReactive(id = state.fractalId) {
-  return canAutoZoom(id) && state.reactive;
+  return canAutoZoom(id) && state.reactive && !state.autoZoom;
 }
 
 function formatMag(mag) {
@@ -1210,6 +1214,7 @@ function resetExplore() {
   state.view = { ...state.home };
   if (currentFractal().kind === "escape") scheduleEscape();
   else redrawExplored();
+  renderChrome();
 }
 
 function redrawExplored() {
@@ -2082,17 +2087,15 @@ dockSpeed.addEventListener("input", () => {
   renderChrome();
 });
 dockToggle.addEventListener("click", toggle);
-presets.addEventListener("click", (event) => {
-  const button = event.target.closest("button");
-  if (!button) return;
-  state.presetId = button.dataset.preset;
+presets.addEventListener("change", () => {
+  state.presetId = presets.value || currentFractal().presets[0].id;
   arm();
 });
 toggleButton.addEventListener("click", toggle);
+stageDraw.addEventListener("click", toggle);
 soundButton.addEventListener("click", () => {
   const on = soundButton.getAttribute("aria-pressed") !== "true";
   soundButton.setAttribute("aria-pressed", String(on));
-  soundButton.textContent = on ? "Sound on" : "Sound";
   speaker.setEnabled(on);
 });
 stepButton.addEventListener("click", () => {

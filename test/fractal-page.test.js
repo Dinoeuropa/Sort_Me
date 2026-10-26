@@ -51,15 +51,33 @@ test("the fractal page mirrors the sorting controls", () => {
   assert.doesNotMatch(fractals, /id="compare"/);
 });
 
+test("zoom in, zoom out, and auto zoom sit together as signs", () => {
+  const explore = fractals.slice(fractals.indexOf('id="explore"'), fractals.indexOf('class="legend"'));
+  assert.match(
+    explore,
+    /id="zoom-in"[^>]*>\+<\/button>\s*<button[^>]*id="zoom-out"[^>]*>-<\/button>\s*<button[^>]*id="auto-zoom"/,
+  );
+  assert.match(explore, /aria-label="Zoom in"/);
+  assert.match(explore, /aria-label="Zoom out"/);
+  assert.doesNotMatch(explore, />Zoom in</);
+  assert.doesNotMatch(explore, />Zoom out</);
+  assert.match(css, /#explore\s*\{[^}]*flex-wrap:\s*nowrap/);
+});
+
 test("selecting a fractal waits for Draw", () => {
   const select = fractalApp.slice(fractalApp.indexOf('fractalSelect.addEventListener("change"'));
   const selectBody = select.slice(0, select.indexOf("paletteSelect"));
   assert.match(selectBody, /arm\(\)/);
   assert.doesNotMatch(selectBody, /restart\(\)/);
-  const preset = fractalApp.slice(fractalApp.indexOf('presets.addEventListener("click"'));
+  const preset = fractalApp.slice(fractalApp.indexOf('presets.addEventListener("change"'));
   const presetBody = preset.slice(0, preset.indexOf("toggleButton"));
   assert.match(presetBody, /arm\(\)/);
   assert.doesNotMatch(presetBody, /restart\(\)/);
+  assert.match(fractals, /<label>\s*Variation\s*<select id="presets"><\/select>/);
+  assert.match(fractalApp, /state\.presetId = currentFractal\(\)\.presets\[0\]\.id/);
+  assert.match(fractalApp, /option\.value = preset\.id/);
+  assert.match(fractalApp, /presets\.value = state\.presetId/);
+  assert.doesNotMatch(fractalApp, /presets\.querySelectorAll\("button"\)/);
   assert.match(fractalApp, /depthInput\.addEventListener\("change", \(\) => arm\(\)\)/);
   assert.match(
     fractalApp,
@@ -171,4 +189,52 @@ test("a deep GPU dive refits its palette each quarter octave and eases into it",
   assert.ok(key, "the refit key holds the quarter octave");
   assert.doesNotMatch(key[1], /\bcap\b/, "the cap rises every frame of a dive, so it must not force a refit");
   assert.match(fit[0], /easeWindow\(/);
+});
+
+test("a blank fractal canvas shows an enlarged Draw in the frame", () => {
+  const frame = fractals.slice(fractals.indexOf('class="canvas-frame"'), fractals.indexOf('id="viz-dock"'));
+  assert.match(frame, /<button type="button" id="stage-draw" class="primary stage-draw">Draw<\/button>/);
+  assert.match(fractals, /id="toggle" class="primary">Draw<\/button>/);
+  const rule = css.slice(css.indexOf(".stage-draw {"), css.indexOf(".stage-draw {") + 400);
+  assert.match(rule, /left:\s*50%/);
+  assert.match(rule, /top:\s*50%/);
+  assert.match(rule, /transform:\s*translate\(-50%, -50%\)/);
+  assert.match(rule, /font-size:\s*1\.85rem/);
+  assert.match(rule, /z-index:\s*2/);
+  assert.match(fractalApp, /const stageDraw = document\.querySelector\("#stage-draw"\)/);
+  assert.match(fractalApp, /function canvasIsBlank\(\) \{\s*return !state\.running && !state\.paused && !state\.finished;\s*\}/);
+  assert.match(fractalApp, /stageDraw\.hidden = !canvasIsBlank\(\)/);
+  assert.match(fractalApp, /stageDraw\.addEventListener\("click", toggle\)/);
+});
+
+test("sound is an icon at the top left of the fractal frame", () => {
+  const controls = fractals.slice(fractals.indexOf('class="controls"'), fractals.indexOf('id="error"'));
+  assert.doesNotMatch(controls, /id="sound"/);
+  const frame = fractals.slice(fractals.indexOf('class="canvas-frame"'), fractals.indexOf('id="viz-dock"'));
+  assert.match(frame, /id="sound" class="sound-toggle" aria-pressed="false" aria-label="Sound"/);
+  assert.match(frame, /class="sound-icon sound-on"/);
+  assert.match(frame, /class="sound-icon sound-off"/);
+  assert.match(frame, /d="M20 7 8 17"/);
+  const rule = css.slice(css.indexOf(".sound-toggle {"), css.indexOf(".sound-toggle {") + 700);
+  assert.match(rule, /top:\s*0\.7rem/);
+  assert.match(rule, /left:\s*0\.8rem/);
+  assert.match(rule, /\.sound-toggle\[aria-pressed="false"\] \.sound-off/);
+  assert.doesNotMatch(fractalApp, /soundButton\.textContent/);
+});
+
+test("auto zoom turns cursor reaction off without forgetting the preference", () => {
+  const gate = fractalApp.slice(fractalApp.indexOf("function isReactive"), fractalApp.indexOf("function formatMag"));
+  assert.match(gate, /canAutoZoom\(id\) && state\.reactive && !state\.autoZoom/);
+  const chrome = fractalApp.slice(fractalApp.indexOf("function renderChrome"), fractalApp.indexOf("function paceLabel"));
+  assert.match(chrome, /modeBadge\.setAttribute\("aria-pressed", String\(reactive\)\)/);
+  assert.match(chrome, /modeBadge\.textContent = reactive \? "reactive on" : "reactive off"/);
+  assert.match(chrome, /modeBadge\.disabled = state\.autoZoom/);
+  const start = fractalApp.slice(fractalApp.indexOf("function startAutoZoom"), fractalApp.indexOf("const AUTO_FADE_MS"));
+  assert.doesNotMatch(start, /state\.reactive = false/);
+});
+
+test("reset during auto zoom refreshes the reactive badge", () => {
+  const reset = fractalApp.slice(fractalApp.indexOf("function resetExplore"), fractalApp.indexOf("function redrawExplored"));
+  assert.match(reset, /haltAutoZoom\(\);/);
+  assert.match(reset, /renderChrome\(\);/);
 });

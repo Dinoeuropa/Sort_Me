@@ -37,12 +37,36 @@ test("the page is a self-contained document with selectable programs", () => {
   assert.match(page, /font-src 'self'/);
 });
 
+test("array presets open from one Randomise menu", () => {
+  assert.match(page, /id="randomise"/);
+  assert.match(page, />\s*Randomise\s*</);
+  assert.match(page, /aria-haspopup="menu"/);
+  assert.match(page, /aria-controls="preset-menu"/);
+  assert.match(page, /id="preset-menu" class="preset-pop" role="menu" hidden/);
+  assert.doesNotMatch(page, /id="preset-random"/);
+  const menu = page.slice(page.indexOf('id="preset-menu"'), page.indexOf('id="toggle"'));
+  assert.match(menu, /data-preset="random"[^>]*>Random</);
+  assert.match(menu, /data-preset="reversed"[^>]*>Reversed</);
+  assert.match(menu, /data-preset="nearly"[^>]*>Nearly sorted</);
+  const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /applyPreset\(button\.dataset\.preset\)/);
+  assert.match(app, /randomiseButton\.setAttribute\("aria-expanded"/);
+  assert.match(css, /\.preset-pop\s*\{[^}]*position:\s*absolute/);
+  assert.doesNotMatch(app, /presetButtons/);
+});
+
 test("mobile keeps the chart under the settings and offers a viz rail", () => {
   assert.doesNotMatch(page, /id="reset"/);
   assert.match(page, /id="viz-dock"/);
   assert.match(page, /id="dock-speed"/);
   assert.match(page, /id="dock-toggle"/);
   assert.doesNotMatch(css, /order:\s*-1/);
+  const rail = css.slice(css.indexOf(".viz-dock:not([hidden]) {"), css.indexOf(".viz-dock label {"));
+  assert.match(rail, /position:\s*absolute/);
+  assert.match(rail, /top:\s*1\.2rem/);
+  assert.match(rail, /height:\s*max\(240px, 46vh\)/);
+  assert.match(rail, /width:\s*3\.7rem/);
+  assert.doesNotMatch(rail, /position:\s*fixed/);
 });
 
 function request(port, urlPath) {
@@ -165,4 +189,16 @@ test("public paths replace the html addresses", async () => {
   } finally {
     child.kill();
   }
+});
+
+test("sound is an icon at the top left of the sorting frame", () => {
+  const controls = page.slice(page.indexOf('class="controls"'), page.indexOf('class="compare"'));
+  assert.doesNotMatch(controls, /id="sound"/);
+  const frame = page.slice(page.indexOf('class="canvas-frame"'), page.indexOf('id="viz-dock"'));
+  assert.match(frame, /id="sound" class="sound-toggle" aria-pressed="false" aria-label="Sound"/);
+  assert.match(frame, /class="sound-icon sound-off"/);
+  assert.match(frame, /class="sound-icon sound-on"/);
+  const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.doesNotMatch(app, /soundButton\.textContent/);
+  assert.match(app, /speaker\.setEnabled\(on\)/);
 });
