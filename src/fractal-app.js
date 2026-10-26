@@ -333,7 +333,7 @@ function renderChrome() {
   stageDraw.hidden = !canvasIsBlank();
   blankShow.setVisible(canvasIsBlank());
   dockSpeed.value = speedInput.value;
-  if (state.autoZoom) statusEl.textContent = "Auto zoom";
+  if (state.autoZoom) statusEl.textContent = "Deep zoom";
   else if (state.exploring && !state.cursorRedraw) statusEl.textContent = "Zooming";
   else if (state.running) statusEl.textContent = "Drawing";
   else if (state.paused) statusEl.textContent = "Paused";
@@ -910,7 +910,7 @@ function formatComplex(x, y) {
 }
 
 function autoZoomBadge() {
-  return `Auto zoom ${formatMag(currentMagnification())} · ${exploredLevel().toLocaleString()} iterations`;
+  return `Deep zoom ${formatMag(currentMagnification())} · ${exploredLevel().toLocaleString()} iterations`;
 }
 
 function formatParam() {

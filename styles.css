@@ -513,6 +513,88 @@ canvas.exploring:active {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
+.stage-actions {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  top: 0.7rem;
+  right: 0.8rem;
+}
+
+.stage-actions.waiting {
+  top: 50%;
+  right: auto;
+  left: 50%;
+  width: min(100% - 1.5rem, 28rem);
+  transform: translate(-50%, -50%);
+}
+
+.stage-actions .stage-draw {
+  position: static;
+  left: auto;
+  top: auto;
+  transform: none;
+  min-width: 0;
+  box-shadow: none;
+  font-size: 0.95rem;
+  padding: 0.45rem 0.9rem;
+}
+
+.stage-actions.waiting .stage-draw {
+  flex: 1 1 9rem;
+  min-width: 8.5rem;
+  font-size: clamp(1.25rem, 4vw, 1.85rem);
+  letter-spacing: 0.02em;
+  padding: 1.05rem 1.4rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.stage-actions:not(.waiting) #compare {
+  background: rgba(16, 14, 12, 0.92);
+  border-color: var(--brass);
+  color: var(--brass);
+  font-weight: 700;
+}
+
+.compare-panel {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.1rem;
+  background: rgba(23, 20, 15, 0.94);
+  overflow: auto;
+}
+
+.compare-panel .compare {
+  width: min(36rem, 100%);
+  max-height: 100%;
+  overflow: auto;
+  background: var(--panel);
+}
+
+.compare-panel .compare-list {
+  max-height: min(42vh, 22rem);
+  overflow: auto;
+  align-content: start;
+}
+
+.compare-panel .row {
+  position: sticky;
+  bottom: 0;
+  padding-top: 0.35rem;
+  background: var(--panel);
+}
+
+.compare-panel #compare-run {
+  font-size: 1.15rem;
+  padding: 0.75rem 1.4rem;
+}
+
 .sound-toggle {
   position: absolute;
   z-index: 2;

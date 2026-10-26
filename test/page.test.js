@@ -192,7 +192,7 @@ test("public paths replace the html addresses", async () => {
 });
 
 test("sound is an icon at the top left of the sorting frame", () => {
-  const controls = page.slice(page.indexOf('class="controls"'), page.indexOf('class="compare"'));
+  const controls = page.slice(page.indexOf('class="controls"'), page.indexOf("</aside>"));
   assert.doesNotMatch(controls, /id="sound"/);
   const frame = page.slice(page.indexOf('class="canvas-frame"'), page.indexOf('id="viz-dock"'));
   assert.match(frame, /id="sound" class="sound-toggle" aria-pressed="false" aria-label="Sound"/);
@@ -216,4 +216,44 @@ test("a waiting array keeps its picture and offers Sort on the frame", () => {
   assert.match(rule, /left:\s*50%/);
   assert.match(rule, /top:\s*50%/);
   assert.match(rule, /z-index:\s*2/);
+});
+
+test("compare sits beside Sort and Sort Me runs the programs chosen in the frame", () => {
+  const aside = page.slice(page.indexOf("<aside"), page.indexOf("</aside>"));
+  assert.doesNotMatch(aside, /id="compare-list"/);
+  assert.doesNotMatch(aside, /Compare programs/);
+  assert.doesNotMatch(aside, /id="compare"/);
+  assert.match(aside, /<button type="button" id="side-compare">Compare<\/button>/);
+  const frame = page.slice(page.indexOf('class="canvas-frame"'), page.indexOf('id="viz-dock"'));
+  assert.match(frame, /id="stage-actions"/);
+  const actions = frame.slice(frame.indexOf('id="stage-actions"'), frame.indexOf('id="compare-panel"'));
+  assert.match(actions, /<button type="button" id="stage-sort" class="primary stage-draw">Sort<\/button>/);
+  assert.match(actions, /<button type="button" id="compare" class="stage-draw">Compare<\/button>/);
+  assert.match(frame, /id="compare-panel" class="compare-panel" hidden/);
+  assert.match(frame, /<legend>Compare programs<\/legend>/);
+  assert.match(frame, /id="compare-list" class="compare-list"/);
+  assert.match(frame, /<button type="button" id="compare-run" class="primary">Sort Me<\/button>/);
+  assert.match(frame, /id="compare-back"/);
+  const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /compareButton\.addEventListener\("click", openCompare\)/);
+  assert.match(app, /sideCompare\.addEventListener\("click", openCompare\)/);
+  assert.match(app, /compareRun\.addEventListener\("click", runComparison\)/);
+  assert.match(app, /compareBack\.addEventListener\("click", closeCompare\)/);
+  assert.match(app, /comparePanel\.hidden = !state\.compareOpen/);
+  assert.match(app, /stageActions\.hidden = state\.compareOpen/);
+  assert.match(app, /stageActions\.classList\.toggle\("waiting", sortIsWaiting\(\)\)/);
+  assert.match(app, /stageSort\.hidden = !sortIsWaiting\(\)/);
+  const run = app.slice(app.indexOf("function runComparison"), app.indexOf("function syncCompareBoxes"));
+  assert.match(run, /if \(!beginCompare\(\)\) return/);
+  assert.match(run, /state\.compareOpen = false/);
+  assert.match(run, /startLoop\(\)/);
+  assert.match(css, /\.stage-actions\s*\{[^}]*display:\s*flex/);
+  assert.match(css, /\.stage-actions\.waiting\s*\{[^}]*top:\s*50%/);
+  assert.match(css, /\.stage-actions \.stage-draw\s*\{[^}]*position:\s*static/);
+  assert.match(css, /\.compare-panel\s*\{[^}]*position:\s*absolute/);
+  const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /Press Compare beside Sort/);
+  assert.match(readme, /side panel keeps a Compare button/);
+  assert.match(readme, /Sort Me/);
+  assert.doesNotMatch(readme, /press Compare, then press Sort/);
 });

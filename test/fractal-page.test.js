@@ -52,6 +52,22 @@ test("the fractal page mirrors the sorting controls", () => {
   assert.doesNotMatch(fractals, /id="compare"/);
 });
 
+test("the glide control is labeled Deep zoom", () => {
+  assert.match(fractals, /id="auto-zoom"[^>]*>Deep zoom<\/button>/);
+  assert.doesNotMatch(fractals, />Auto zoom</);
+  assert.match(fractalApp, /statusEl\.textContent = "Deep zoom"/);
+  assert.match(fractalApp, /`Deep zoom \$\{formatMag\(currentMagnification\(\)\)\}/);
+  assert.doesNotMatch(fractalApp, /"Auto zoom"/);
+  assert.doesNotMatch(fractalApp, /`Auto zoom /);
+  const fractalsJs = fs.readFileSync(new URL("../src/fractals.js", import.meta.url), "utf8");
+  assert.match(fractalsJs, /Deep zoom then dives/);
+  assert.doesNotMatch(fractalsJs, /Auto zoom then dives/);
+  const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /Deep zoom on those four/);
+  assert.doesNotMatch(readme, /Auto zoom/);
+  assert.doesNotMatch(readme, /auto zoom/);
+});
+
 test("zoom in, zoom out, and auto zoom sit together as signs", () => {
   const explore = fractals.slice(fractals.indexOf('id="explore"'), fractals.indexOf('class="legend"'));
   assert.match(
