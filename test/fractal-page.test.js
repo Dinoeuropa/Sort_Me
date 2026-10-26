@@ -172,3 +172,19 @@ test("a deep GPU dive refits its palette each quarter octave and eases into it",
   assert.doesNotMatch(key[1], /\bcap\b/, "the cap rises every frame of a dive, so it must not force a refit");
   assert.match(fit[0], /easeWindow\(/);
 });
+
+test("a blank fractal canvas shows an enlarged Draw in the frame", () => {
+  const frame = fractals.slice(fractals.indexOf('class="canvas-frame"'), fractals.indexOf('id="viz-dock"'));
+  assert.match(frame, /<button type="button" id="stage-draw" class="primary stage-draw">Draw<\/button>/);
+  assert.match(fractals, /id="toggle" class="primary">Draw<\/button>/);
+  const rule = css.slice(css.indexOf(".stage-draw {"), css.indexOf(".stage-draw {") + 400);
+  assert.match(rule, /left:\s*50%/);
+  assert.match(rule, /top:\s*50%/);
+  assert.match(rule, /transform:\s*translate\(-50%, -50%\)/);
+  assert.match(rule, /font-size:\s*1\.85rem/);
+  assert.match(rule, /z-index:\s*2/);
+  assert.match(fractalApp, /const stageDraw = document\.querySelector\("#stage-draw"\)/);
+  assert.match(fractalApp, /function canvasIsBlank\(\) \{\s*return !state\.running && !state\.paused && !state\.finished;\s*\}/);
+  assert.match(fractalApp, /stageDraw\.hidden = !canvasIsBlank\(\)/);
+  assert.match(fractalApp, /stageDraw\.addEventListener\("click", toggle\)/);
+});

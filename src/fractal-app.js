@@ -87,6 +87,7 @@ const blurb = document.querySelector("#blurb");
 const paletteBlurb = document.querySelector("#palette-blurb");
 const presets = document.querySelector("#presets");
 const toggleButton = document.querySelector("#toggle");
+const stageDraw = document.querySelector("#stage-draw");
 const stepButton = document.querySelector("#step");
 const soundButton = document.querySelector("#sound");
 const dock = document.querySelector("#viz-dock");
@@ -319,6 +320,7 @@ function renderChrome() {
   toggleButton.textContent = control;
   dockToggle.textContent = control;
   dock.hidden = !state.dock;
+  stageDraw.hidden = !canvasIsBlank();
   dockSpeed.value = speedInput.value;
   if (state.autoZoom) statusEl.textContent = "Auto zoom";
   else if (state.exploring && !state.cursorRedraw) statusEl.textContent = "Zooming";
@@ -859,6 +861,10 @@ function zoomNote(fractal) {
     ? formatMag(magnification)
     : `${magnification >= 10 ? Math.round(magnification) : Math.round(magnification * 10) / 10}×`;
   return `${fractal.note} View is ${shown} closer, drawn at level ${exploredLevel().toLocaleString()}.`;
+}
+
+function canvasIsBlank() {
+  return !state.running && !state.paused && !state.finished;
 }
 
 function canExplore() {
@@ -2089,6 +2095,7 @@ presets.addEventListener("click", (event) => {
   arm();
 });
 toggleButton.addEventListener("click", toggle);
+stageDraw.addEventListener("click", toggle);
 soundButton.addEventListener("click", () => {
   const on = soundButton.getAttribute("aria-pressed") !== "true";
   soundButton.setAttribute("aria-pressed", String(on));

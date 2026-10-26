@@ -409,6 +409,19 @@ canvas.exploring:active {
   cursor: grabbing;
 }
 
+.stage-draw {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.85rem;
+  letter-spacing: 0.02em;
+  padding: 1.05rem 2.6rem;
+  min-width: 10.5rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
 .mode-badge {
   position: absolute;
   z-index: 1;
