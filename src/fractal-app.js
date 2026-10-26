@@ -73,6 +73,7 @@ import {
   strokeWidth,
 } from "./palettes.js";
 import { runControlLabel } from "./session.js";
+import { createBlankShow } from "./blank-show.js";
 import { createSpeaker } from "./sound.js";
 
 const fractalSelect = document.querySelector("#fractal");
@@ -89,6 +90,7 @@ const variationButton = document.querySelector("#variation");
 const presets = document.querySelector("#presets");
 const toggleButton = document.querySelector("#toggle");
 const stageDraw = document.querySelector("#stage-draw");
+const blankShow = createBlankShow(document.querySelector("#blank-show"));
 const stepButton = document.querySelector("#step");
 const soundButton = document.querySelector("#sound");
 const dock = document.querySelector("#viz-dock");
@@ -329,6 +331,7 @@ function renderChrome() {
   dockToggle.textContent = control;
   dock.hidden = !state.dock;
   stageDraw.hidden = !canvasIsBlank();
+  blankShow.setVisible(canvasIsBlank());
   dockSpeed.value = speedInput.value;
   if (state.autoZoom) statusEl.textContent = "Auto zoom";
   else if (state.exploring && !state.cursorRedraw) statusEl.textContent = "Zooming";
