@@ -69,15 +69,19 @@ test("selecting a fractal waits for Draw", () => {
   const selectBody = select.slice(0, select.indexOf("paletteSelect"));
   assert.match(selectBody, /arm\(\)/);
   assert.doesNotMatch(selectBody, /restart\(\)/);
-  const preset = fractalApp.slice(fractalApp.indexOf('presets.addEventListener("change"'));
+  const preset = fractalApp.slice(fractalApp.indexOf('presets.addEventListener("click"'));
   const presetBody = preset.slice(0, preset.indexOf("toggleButton"));
   assert.match(presetBody, /arm\(\)/);
   assert.doesNotMatch(presetBody, /restart\(\)/);
-  assert.match(fractals, /<label>\s*Variation\s*<select id="presets"><\/select>/);
+  assert.match(fractals, /id="variation"/);
+  assert.match(fractals, /id="presets" class="preset-pop" role="menu"/);
+  const controls = fractals.slice(fractals.indexOf('id="palette-blurb"'), fractals.indexOf('id="toggle"'));
+  assert.ok(controls.indexOf('id="variation"') < controls.indexOf('id="depth-label"'));
+  assert.match(fractals, />\s*Variation\s*</);
   assert.match(fractalApp, /state\.presetId = currentFractal\(\)\.presets\[0\]\.id/);
-  assert.match(fractalApp, /option\.value = preset\.id/);
-  assert.match(fractalApp, /presets\.value = state\.presetId/);
-  assert.doesNotMatch(fractalApp, /presets\.querySelectorAll\("button"\)/);
+  assert.match(fractalApp, /button\.dataset\.preset = preset\.id/);
+  assert.match(fractalApp, /setAttribute\("aria-checked", String\(preset\.id === state\.presetId\)\)/);
+  assert.match(css, /\.preset-menu > button::after/);
   assert.match(fractalApp, /depthInput\.addEventListener\("change", \(\) => arm\(\)\)/);
   assert.match(
     fractalApp,
@@ -114,7 +118,7 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /paintGpuEscape/);
   assert.match(fractalApp, /gpuDepthMode/);
   assert.match(css, /touch-action:\s*none/);
-  assert.match(fractals, /drag or pinch to move and scroll to zoom/);
+  assert.match(fractals, /Drag or scroll to explore/);
   assert.match(fractalApp, /cursorParameter/);
   assert.match(fractalApp, /newtonCursor/);
   assert.match(fractalApp, /autoZoom/);

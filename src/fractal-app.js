@@ -85,6 +85,7 @@ const speedOut = document.querySelector("#speed-out");
 const complexityEl = document.querySelector("#complexity");
 const blurb = document.querySelector("#blurb");
 const paletteBlurb = document.querySelector("#palette-blurb");
+const variationButton = document.querySelector("#variation");
 const presets = document.querySelector("#presets");
 const toggleButton = document.querySelector("#toggle");
 const stageDraw = document.querySelector("#stage-draw");
@@ -255,12 +256,19 @@ function renderPresets() {
   }
   presets.replaceChildren();
   for (const preset of fractal.presets) {
-    const option = document.createElement("option");
-    option.value = preset.id;
-    option.textContent = preset.name;
-    presets.append(option);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "menuitemradio");
+    button.dataset.preset = preset.id;
+    button.textContent = preset.name;
+    button.setAttribute("aria-checked", String(preset.id === state.presetId));
+    presets.append(button);
   }
-  presets.value = state.presetId;
+}
+
+function setVariationMenu(open) {
+  variationButton.setAttribute("aria-expanded", String(open));
+  presets.hidden = !open;
 }
 
 function syncDepthControls() {
@@ -310,7 +318,10 @@ function renderChrome() {
   samplesEl.textContent = state.samples.toLocaleString();
   kindEl.textContent = KIND[fractal.kind];
   presetStat.textContent = preset.name;
-  presets.value = state.presetId;
+  for (const button of presets.querySelectorAll("button")) {
+    button.setAttribute("aria-checked", String(button.dataset.preset === state.presetId));
+  }
+  variationButton.setAttribute("aria-label", `Variation, ${preset.name}`);
   const pace = paceLabel(fractal);
   speedOut.textContent = pace;
   const control = runControlLabel({ running: state.running, paused: state.paused, idle: "Draw" });
@@ -2087,9 +2098,41 @@ dockSpeed.addEventListener("input", () => {
   renderChrome();
 });
 dockToggle.addEventListener("click", toggle);
-presets.addEventListener("change", () => {
-  state.presetId = presets.value || currentFractal().presets[0].id;
+variationButton.addEventListener("click", () => {
+  const open = variationButton.getAttribute("aria-expanded") !== "true";
+  setVariationMenu(open);
+  if (open) presets.querySelector('[aria-checked="true"]')?.focus();
+});
+variationButton.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown") return;
+  event.preventDefault();
+  setVariationMenu(true);
+  presets.querySelector("button")?.focus();
+});
+presets.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  state.presetId = button.dataset.preset || currentFractal().presets[0].id;
+  setVariationMenu(false);
+  variationButton.focus();
   arm();
+});
+presets.addEventListener("keydown", (event) => {
+  const items = [...presets.querySelectorAll("button")];
+  const index = items.indexOf(document.activeElement);
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setVariationMenu(false);
+    variationButton.focus();
+    return;
+  }
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  event.preventDefault();
+  const step = event.key === "ArrowDown" ? 1 : -1;
+  items[(index + step + items.length) % items.length]?.focus();
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".preset-menu")) setVariationMenu(false);
 });
 toggleButton.addEventListener("click", toggle);
 stageDraw.addEventListener("click", toggle);
