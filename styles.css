@@ -642,39 +642,49 @@ canvas.pixelated { image-rendering: pixelated; }
   .lane-card .readout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat { min-width: 0; }
   .stat span { letter-spacing: 0.02em; }
-  .stage:has(#viz-dock:not([hidden])) { padding-right: 5rem; }
+  .stage { position: relative; }
+  .stage:has(#viz-dock:not([hidden])) { padding-right: 4.5rem; }
   .viz-dock:not([hidden]) {
     display: flex;
-    position: fixed;
+    position: absolute;
     z-index: 4;
-    right: 0.55rem;
-    top: 42%;
-    transform: translateY(-50%);
+    top: 1.2rem;
+    right: 0.4rem;
+    height: max(240px, 46vh);
+    transform: none;
     flex-direction: column;
     align-items: center;
-    gap: 0.55rem;
-    width: 4.4rem;
-    padding: 0.7rem 0.4rem;
+    justify-content: space-between;
+    gap: 0.4rem;
+    width: 3.7rem;
+    padding: 0.5rem 0.22rem 0.4rem;
     border: 1px solid var(--line);
-    border-radius: 18px;
+    border-radius: 16px;
     background: rgba(28, 24, 20, 0.94);
   }
   .viz-dock label {
-    justify-items: center;
-    font-size: 0.68rem;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 0;
+    width: 100%;
+    font-size: 0.62rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .viz-dock input[type="range"] {
     writing-mode: vertical-lr;
     direction: rtl;
-    width: 1.4rem;
-    height: 7.5rem;
-    margin: 0.2rem 0;
+    flex: 1 1 auto;
+    width: 1.15rem;
+    height: auto;
+    min-height: 0;
+    margin: 0.35rem 0 0.15rem;
   }
   .viz-dock button {
-    padding: 0.4rem 0.35rem;
-    font-size: 0.75rem;
+    padding: 0.35rem 0.2rem;
+    font-size: 0.72rem;
   }
 }
 

@@ -61,6 +61,12 @@ test("mobile keeps the chart under the settings and offers a viz rail", () => {
   assert.match(page, /id="dock-speed"/);
   assert.match(page, /id="dock-toggle"/);
   assert.doesNotMatch(css, /order:\s*-1/);
+  const rail = css.slice(css.indexOf(".viz-dock:not([hidden]) {"), css.indexOf(".viz-dock label {"));
+  assert.match(rail, /position:\s*absolute/);
+  assert.match(rail, /top:\s*1\.2rem/);
+  assert.match(rail, /height:\s*max\(240px, 46vh\)/);
+  assert.match(rail, /width:\s*3\.7rem/);
+  assert.doesNotMatch(rail, /position:\s*fixed/);
 });
 
 function request(port, urlPath) {
