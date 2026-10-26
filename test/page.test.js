@@ -37,6 +37,24 @@ test("the page is a self-contained document with selectable programs", () => {
   assert.match(page, /font-src 'self'/);
 });
 
+test("array presets open from one Randomise menu", () => {
+  assert.match(page, /id="randomise"/);
+  assert.match(page, />\s*Randomise\s*</);
+  assert.match(page, /aria-haspopup="menu"/);
+  assert.match(page, /aria-controls="preset-menu"/);
+  assert.match(page, /id="preset-menu" class="preset-pop" role="menu" hidden/);
+  assert.doesNotMatch(page, /id="preset-random"/);
+  const menu = page.slice(page.indexOf('id="preset-menu"'), page.indexOf('id="toggle"'));
+  assert.match(menu, /data-preset="random"[^>]*>Random</);
+  assert.match(menu, /data-preset="reversed"[^>]*>Reversed</);
+  assert.match(menu, /data-preset="nearly"[^>]*>Nearly sorted</);
+  const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /applyPreset\(button\.dataset\.preset\)/);
+  assert.match(app, /randomiseButton\.setAttribute\("aria-expanded"/);
+  assert.match(css, /\.preset-pop\s*\{[^}]*position:\s*absolute/);
+  assert.doesNotMatch(app, /presetButtons/);
+});
+
 test("mobile keeps the chart under the settings and offers a viz rail", () => {
   assert.doesNotMatch(page, /id="reset"/);
   assert.match(page, /id="viz-dock"/);

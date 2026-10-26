@@ -39,11 +39,9 @@ const readout = document.querySelector("#readout");
 const meter = document.querySelector("#meter");
 const meterFill = document.querySelector("#meter-fill");
 const note = document.querySelector("#note");
-const presetButtons = {
-  random: document.querySelector("#preset-random"),
-  reversed: document.querySelector("#preset-reversed"),
-  nearly: document.querySelector("#preset-nearly"),
-};
+const randomiseButton = document.querySelector("#randomise");
+const presetMenu = document.querySelector("#preset-menu");
+const presetNames = { random: "Random", reversed: "Reversed", nearly: "Nearly sorted" };
 
 const ctx = canvas.getContext("2d");
 const speaker = createSpeaker();
@@ -344,9 +342,10 @@ function renderChrome() {
   sizeOut.value = sizeInput.value;
   speedOut.textContent = `${stepsFor(speedInput.value)} / frame`;
 
-  for (const [name, button] of Object.entries(presetButtons)) {
-    button.setAttribute("aria-pressed", String(state.preset === name));
+  for (const button of presetMenu.querySelectorAll("button")) {
+    button.setAttribute("aria-checked", String(button.dataset.preset === state.preset));
   }
+  randomiseButton.setAttribute("aria-label", `Randomise, ${presetNames[state.preset]}`);
 
   const control = runControlLabel(state);
   toggleButton.textContent = control;
@@ -680,9 +679,46 @@ dockSpeed.addEventListener("input", () => {
 dockToggle.addEventListener("click", toggle);
 sizeInput.addEventListener("change", () => applyPreset(state.preset));
 
-presetButtons.random.addEventListener("click", () => applyPreset("random"));
-presetButtons.reversed.addEventListener("click", () => applyPreset("reversed"));
-presetButtons.nearly.addEventListener("click", () => applyPreset("nearly"));
+function setPresetMenu(open) {
+  randomiseButton.setAttribute("aria-expanded", String(open));
+  presetMenu.hidden = !open;
+}
+
+randomiseButton.addEventListener("click", () => {
+  const open = randomiseButton.getAttribute("aria-expanded") !== "true";
+  setPresetMenu(open);
+  if (open) presetMenu.querySelector('[aria-checked="true"]')?.focus();
+});
+randomiseButton.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown") return;
+  event.preventDefault();
+  setPresetMenu(true);
+  presetMenu.querySelector("button")?.focus();
+});
+presetMenu.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  applyPreset(button.dataset.preset);
+  setPresetMenu(false);
+  randomiseButton.focus();
+});
+presetMenu.addEventListener("keydown", (event) => {
+  const items = [...presetMenu.querySelectorAll("button")];
+  const index = items.indexOf(document.activeElement);
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setPresetMenu(false);
+    randomiseButton.focus();
+    return;
+  }
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  event.preventDefault();
+  const step = event.key === "ArrowDown" ? 1 : -1;
+  items[(index + step + items.length) % items.length]?.focus();
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".preset-menu")) setPresetMenu(false);
+});
 toggleButton.addEventListener("click", toggle);
 compareButton.addEventListener("click", beginCompare);
 compareList.addEventListener("change", syncCompareBoxes);

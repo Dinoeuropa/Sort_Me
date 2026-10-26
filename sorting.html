@@ -66,10 +66,15 @@
             <input id="speed" type="range" min="1" max="100" value="25" />
           </div>
 
-          <div class="row" role="group" aria-label="Array presets">
-            <button type="button" id="preset-random" aria-pressed="true">Random</button>
-            <button type="button" id="preset-reversed" aria-pressed="false">Reversed</button>
-            <button type="button" id="preset-nearly" aria-pressed="false">Nearly sorted</button>
+          <div class="preset-menu">
+            <button type="button" id="randomise" aria-haspopup="menu" aria-expanded="false" aria-controls="preset-menu">
+              Randomise
+            </button>
+            <div id="preset-menu" class="preset-pop" role="menu" hidden>
+              <button type="button" role="menuitemradio" data-preset="random" aria-checked="true">Random</button>
+              <button type="button" role="menuitemradio" data-preset="reversed" aria-checked="false">Reversed</button>
+              <button type="button" role="menuitemradio" data-preset="nearly" aria-checked="false">Nearly sorted</button>
+            </div>
           </div>
 
           <div class="row">
