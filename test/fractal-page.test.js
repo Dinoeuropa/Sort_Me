@@ -214,3 +214,9 @@ test("auto zoom turns cursor reaction off without forgetting the preference", ()
   const start = fractalApp.slice(fractalApp.indexOf("function startAutoZoom"), fractalApp.indexOf("const AUTO_FADE_MS"));
   assert.doesNotMatch(start, /state\.reactive = false/);
 });
+
+test("reset during auto zoom refreshes the reactive badge", () => {
+  const reset = fractalApp.slice(fractalApp.indexOf("function resetExplore"), fractalApp.indexOf("function redrawExplored"));
+  assert.match(reset, /haltAutoZoom\(\);/);
+  assert.match(reset, /renderChrome\(\);/);
+});

@@ -1217,6 +1217,7 @@ function resetExplore() {
   state.view = { ...state.home };
   if (currentFractal().kind === "escape") scheduleEscape();
   else redrawExplored();
+  renderChrome();
 }
 
 function redrawExplored() {

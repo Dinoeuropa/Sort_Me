@@ -202,7 +202,7 @@ function drawScatter(ctx, frame, width, height) {
   ctx.fillStyle = "#b3a694";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.fillText(String(maxOf(frame)), 6, pad - 2);
+  ctx.fillText(String(maxOf(frame)), 64, pad - 2);
   ctx.textBaseline = "bottom";
   ctx.fillText("1", 18, height - 8);
   const radius = n > 240 ? 1.8 : 3.4;

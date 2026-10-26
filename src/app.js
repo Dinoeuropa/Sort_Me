@@ -173,7 +173,8 @@ function drawQuadrants(width, height) {
     ctx.translate(cell.x, cell.y);
     draw(state.viewId, ctx, frame, cell.width, cell.height);
     ctx.restore();
-    drawLaneLabel(programById(lane.id).name, cell.x + 14, cell.y + 12, lane.finished);
+    const labelX = cell.x === 0 && cell.y === 0 ? cell.x + 64 : cell.x + 14;
+    drawLaneLabel(programById(lane.id).name, labelX, cell.y + 12, lane.finished);
   });
   ctx.strokeStyle = "#3d342b";
   ctx.lineWidth = 1;
@@ -215,8 +216,9 @@ function drawLanes(width, height) {
   ctx.textAlign = "left";
   state.lanes.forEach((lane, index) => {
     const y = index * laneHeight + laneHeight / 2;
+    const x = index === 0 && y < 68 ? 64 : 10;
     ctx.fillStyle = lane.finished ? "#79c2a8" : "#f6efe4";
-    ctx.fillText(programById(lane.id).name, 10, y);
+    ctx.fillText(programById(lane.id).name, x, y);
   });
 }
 

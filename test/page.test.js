@@ -173,6 +173,7 @@ test("sound is an icon at the top left of the sorting frame", () => {
   const frame = page.slice(page.indexOf('class="canvas-frame"'), page.indexOf('id="viz-dock"'));
   assert.match(frame, /id="sound" class="sound-toggle" aria-pressed="false" aria-label="Sound"/);
   assert.match(frame, /class="sound-icon sound-off"/);
+  assert.match(frame, /class="sound-icon sound-on"/);
   const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.doesNotMatch(app, /soundButton\.textContent/);
   assert.match(app, /speaker\.setEnabled\(on\)/);
