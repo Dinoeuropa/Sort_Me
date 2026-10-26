@@ -19,9 +19,13 @@ const boundFormula = document.querySelector("#bound-formula");
 const blurb = document.querySelector("#blurb");
 const viewBlurb = document.querySelector("#view-blurb");
 const toggleButton = document.querySelector("#toggle");
+const stageActions = document.querySelector("#stage-actions");
 const stageSort = document.querySelector("#stage-sort");
 const stepButton = document.querySelector("#step");
 const compareButton = document.querySelector("#compare");
+const comparePanel = document.querySelector("#compare-panel");
+const compareRun = document.querySelector("#compare-run");
+const compareBack = document.querySelector("#compare-back");
 const dock = document.querySelector("#viz-dock");
 const dockSpeed = document.querySelector("#dock-speed");
 const dockToggle = document.querySelector("#dock-toggle");
@@ -64,6 +68,7 @@ const state = {
   shuffleResult: null,
   pendingCompare: null,
   dock: false,
+  compareOpen: false,
 };
 
 sizeInput.max = String(MAX_LENGTH);
@@ -352,7 +357,12 @@ function renderChrome() {
   toggleButton.textContent = control;
   dockToggle.textContent = control;
   dock.hidden = !state.dock;
+  stageActions.hidden = state.compareOpen;
+  stageActions.classList.toggle("waiting", sortIsWaiting());
   stageSort.hidden = !sortIsWaiting();
+  comparePanel.hidden = !state.compareOpen;
+  compareButton.setAttribute("aria-expanded", String(state.compareOpen));
+  compareButton.setAttribute("aria-controls", "compare-panel");
   dockSpeed.value = speedInput.value;
 
   if (state.shuffler && state.running) statusEl.textContent = "Shuffling";
@@ -597,6 +607,7 @@ function startLoop() {
 }
 
 function toggle() {
+  state.compareOpen = false;
   if (state.running) {
     stop();
     state.paused = true;
@@ -615,28 +626,15 @@ function toggle() {
   renderChrome();
 }
 
-function syncCompareBoxes() {
-  const boxes = [...compareList.querySelectorAll("input")];
-  const checked = boxes.filter((box) => box.checked);
-  if (checked.length > MAX_COMPARE) {
-    checked.slice(MAX_COMPARE).forEach((box) => {
-      box.checked = false;
-    });
-    error.textContent = "Compare at most four sorting programs.";
-  }
-  const full = boxes.filter((box) => box.checked).length >= MAX_COMPARE;
-  for (const box of boxes) box.disabled = full && !box.checked;
-}
-
 function beginCompare() {
   const ids = selectedCompareIds();
   if (ids.length < 2) {
     error.textContent = "Pick at least two sorting programs.";
-    return;
+    return false;
   }
   if (ids.length > MAX_COMPARE) {
     error.textContent = "Compare at most four sorting programs.";
-    return;
+    return false;
   }
   stop();
   state.paused = false;
@@ -651,6 +649,43 @@ function beginCompare() {
   error.textContent = "";
   paint();
   renderChrome();
+  return true;
+}
+
+function openCompare() {
+  state.compareOpen = true;
+  error.textContent = "";
+  renderChrome();
+  comparePanel.querySelector("input")?.focus();
+}
+
+function closeCompare() {
+  state.compareOpen = false;
+  error.textContent = "";
+  renderChrome();
+  compareButton.focus();
+}
+
+function runComparison() {
+  if (!beginCompare()) return;
+  state.compareOpen = false;
+  state.dock = true;
+  revealVisualization();
+  startLoop();
+  renderChrome();
+}
+
+function syncCompareBoxes() {
+  const boxes = [...compareList.querySelectorAll("input")];
+  const checked = boxes.filter((box) => box.checked);
+  if (checked.length > MAX_COMPARE) {
+    checked.slice(MAX_COMPARE).forEach((box) => {
+      box.checked = false;
+    });
+    error.textContent = "Compare at most four sorting programs.";
+  }
+  const full = boxes.filter((box) => box.checked).length >= MAX_COMPARE;
+  for (const box of boxes) box.disabled = full && !box.checked;
 }
 
 programSelect.addEventListener("change", () => {
@@ -727,20 +762,28 @@ document.addEventListener("click", (event) => {
 });
 toggleButton.addEventListener("click", toggle);
 stageSort.addEventListener("click", toggle);
-compareButton.addEventListener("click", beginCompare);
+compareButton.addEventListener("click", openCompare);
+compareRun.addEventListener("click", runComparison);
+compareBack.addEventListener("click", closeCompare);
 compareList.addEventListener("change", syncCompareBoxes);
+comparePanel.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  closeCompare();
+});
 soundButton.addEventListener("click", () => {
   const on = soundButton.getAttribute("aria-pressed") !== "true";
   soundButton.setAttribute("aria-pressed", String(on));
   speaker.setEnabled(on);
 });
 stepButton.addEventListener("click", () => {
+  state.compareOpen = false;
   stop();
   advance(1);
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.target.closest("button, input, select, textarea, a")) return;
+  if (event.target.closest("button, input, select, textarea, a, #compare-panel")) return;
   if (event.code === "Space") {
     event.preventDefault();
     toggle();

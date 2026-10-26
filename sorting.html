@@ -82,16 +82,6 @@
             <button type="button" id="step">Step</button>
           </div>
         </div>
-
-        <fieldset class="compare">
-          <legend>Compare programs</legend>
-          <p class="hint">Up to four programs. Length and presets keep the comparison going.</p>
-          <div id="compare-list" class="compare-list"></div>
-          <div class="row">
-            <button type="button" id="compare">Compare</button>
-          </div>
-          <p id="error" class="error" role="alert"></p>
-        </fieldset>
       </aside>
 
       <main class="stage">
@@ -108,7 +98,22 @@
             </svg>
           </button>
           <canvas id="canvas" width="900" height="520" aria-label="Sorting visualization"></canvas>
-          <button type="button" id="stage-sort" class="primary stage-draw">Sort</button>
+          <div id="stage-actions" class="stage-actions waiting">
+            <button type="button" id="stage-sort" class="primary stage-draw">Sort</button>
+            <button type="button" id="compare" class="stage-draw">Compare</button>
+          </div>
+          <div id="compare-panel" class="compare-panel" hidden role="dialog" aria-label="Compare programs">
+            <fieldset class="compare">
+              <legend>Compare programs</legend>
+              <p class="hint">Up to four programs. Length and presets keep the comparison going.</p>
+              <div id="compare-list" class="compare-list"></div>
+              <p id="error" class="error" role="alert"></p>
+              <div class="row">
+                <button type="button" id="compare-run" class="primary">Sort Me</button>
+                <button type="button" id="compare-back">Back</button>
+              </div>
+            </fieldset>
+          </div>
         </div>
         <aside id="viz-dock" class="viz-dock" hidden>
           <label>
