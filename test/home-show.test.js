@@ -11,6 +11,7 @@ import {
   FRAME_RATE,
   FRAME_WIDTH,
   SCENES,
+  ZOOM_SCENES,
   SORTS,
   fadeAmount,
   filmBudget,
@@ -207,6 +208,23 @@ test("a narrow screen or a slow link plays the light film", () => {
     assert.equal(filmSrc(scene, "lite"), scene.src);
     assert.equal(filmSrc(scene, "screen"), scene.src);
   }
+});
+
+test("zoom films cycle on their own, without the sorting films", () => {
+  assert.deepEqual(
+    ZOOM_SCENES.map((scene) => scene.id),
+    ["mandelbrot", "julia", "burning"],
+  );
+  const slot = FILM_MS - FADE_MS;
+  assert.equal(sceneAt(0, ZOOM_SCENES).id, "mandelbrot");
+  assert.equal(sceneAt(slot + 20, ZOOM_SCENES).id, "julia");
+  assert.equal(sceneAt(slot * 2 + 20, ZOOM_SCENES).id, "burning");
+  const wrap = sceneAt(slot * ZOOM_SCENES.length + FADE_MS / 2, ZOOM_SCENES);
+  assert.equal(wrap.id, "mandelbrot");
+  assert.equal(wrap.kind, "zoom");
+  assert.equal(filmLayer("burning", wrap, wrap.fade, ZOOM_SCENES), 1);
+  assert.equal(filmLayer("mandelbrot", wrap, wrap.fade, ZOOM_SCENES), 2);
+  assert.equal(filmLayer("quick", wrap, wrap.fade, ZOOM_SCENES), 0);
 });
 
 test("reduced motion holds a still picture", () => {

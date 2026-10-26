@@ -475,6 +475,31 @@ canvas.exploring:active {
   cursor: grabbing;
 }
 
+.blank-show {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--paper);
+}
+
+.blank-film {
+  position: absolute;
+  left: -12%;
+  top: -12%;
+  width: 124%;
+  height: 124%;
+  object-fit: cover;
+  filter: blur(14px);
+  opacity: 0;
+  background: var(--paper);
+}
+
+.blank-film[data-film="mandelbrot"] {
+  opacity: 1;
+}
+
 .stage-draw {
   position: absolute;
   z-index: 2;
