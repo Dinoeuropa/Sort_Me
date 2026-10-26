@@ -75,6 +75,8 @@ test("selecting a fractal waits for Draw", () => {
   assert.doesNotMatch(presetBody, /restart\(\)/);
   assert.match(fractals, /id="variation"/);
   assert.match(fractals, /id="presets" class="preset-pop" role="menu"/);
+  const controls = fractals.slice(fractals.indexOf('id="palette-blurb"'), fractals.indexOf('id="toggle"'));
+  assert.ok(controls.indexOf('id="variation"') < controls.indexOf('id="depth-label"'));
   assert.match(fractals, />\s*Variation\s*</);
   assert.match(fractalApp, /state\.presetId = currentFractal\(\)\.presets\[0\]\.id/);
   assert.match(fractalApp, /button\.dataset\.preset = preset\.id/);
@@ -116,7 +118,7 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /paintGpuEscape/);
   assert.match(fractalApp, /gpuDepthMode/);
   assert.match(css, /touch-action:\s*none/);
-  assert.match(fractals, /drag or pinch to move and scroll to zoom/);
+  assert.match(fractals, /Drag or scroll to explore/);
   assert.match(fractalApp, /cursorParameter/);
   assert.match(fractalApp, /newtonCursor/);
   assert.match(fractalApp, /autoZoom/);

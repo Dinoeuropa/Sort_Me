@@ -28,10 +28,9 @@
           <p class="eyebrow">Self-similar</p>
           <h1>Sort Me</h1>
           <p class="lede">
-            Pick a fractal and a coloring, then watch it built in the order the definition produces it.
-            On a finished Mandelbrot, Julia, burning ship, or Newton picture, moving the cursor changes the value.
-            Auto zoom glides into the edge of the set and keeps going. For every fractal, drag or pinch to move and scroll to zoom.
-            Sound follows the pen. Space plays, and the right arrow steps.
+            Pick a fractal and a coloring, then watch the definition draw it.
+            Drag or scroll to explore; on a finished picture the cursor changes the value.
+            Space plays, and the right arrow steps.
           </p>
         </header>
 
@@ -51,6 +50,13 @@
           </label>
           <p id="palette-blurb" class="blurb"></p>
 
+          <div class="preset-menu">
+            <button type="button" id="variation" aria-haspopup="menu" aria-expanded="false" aria-controls="presets">
+              Variation
+            </button>
+            <div id="presets" class="preset-pop" role="menu" hidden></div>
+          </div>
+
           <div class="field">
             <div class="slider-row">
               <label id="depth-label" for="depth">Depth</label>
@@ -65,13 +71,6 @@
               <output id="speed-out" for="speed">1 / frame</output>
             </div>
             <input id="speed" type="range" min="1" max="100" value="28" />
-          </div>
-
-          <div class="preset-menu">
-            <button type="button" id="variation" aria-haspopup="menu" aria-expanded="false" aria-controls="presets">
-              Variation
-            </button>
-            <div id="presets" class="preset-pop" role="menu" hidden></div>
           </div>
 
           <div class="row">
