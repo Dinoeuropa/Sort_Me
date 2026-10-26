@@ -69,10 +69,15 @@ test("selecting a fractal waits for Draw", () => {
   const selectBody = select.slice(0, select.indexOf("paletteSelect"));
   assert.match(selectBody, /arm\(\)/);
   assert.doesNotMatch(selectBody, /restart\(\)/);
-  const preset = fractalApp.slice(fractalApp.indexOf('presets.addEventListener("click"'));
+  const preset = fractalApp.slice(fractalApp.indexOf('presets.addEventListener("change"'));
   const presetBody = preset.slice(0, preset.indexOf("toggleButton"));
   assert.match(presetBody, /arm\(\)/);
   assert.doesNotMatch(presetBody, /restart\(\)/);
+  assert.match(fractals, /<label>\s*Variation\s*<select id="presets"><\/select>/);
+  assert.match(fractalApp, /state\.presetId = currentFractal\(\)\.presets\[0\]\.id/);
+  assert.match(fractalApp, /option\.value = preset\.id/);
+  assert.match(fractalApp, /presets\.value = state\.presetId/);
+  assert.doesNotMatch(fractalApp, /presets\.querySelectorAll\("button"\)/);
   assert.match(fractalApp, /depthInput\.addEventListener\("change", \(\) => arm\(\)\)/);
   assert.match(
     fractalApp,
