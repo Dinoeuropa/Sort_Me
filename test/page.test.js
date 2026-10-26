@@ -202,3 +202,18 @@ test("sound is an icon at the top left of the sorting frame", () => {
   assert.doesNotMatch(app, /soundButton\.textContent/);
   assert.match(app, /speaker\.setEnabled\(on\)/);
 });
+
+test("a waiting array keeps its picture and offers Sort on the frame", () => {
+  const frame = page.slice(page.indexOf('class="canvas-frame"'), page.indexOf('id="viz-dock"'));
+  assert.match(frame, /<button type="button" id="stage-sort" class="primary stage-draw">Sort<\/button>/);
+  assert.match(page, /id="toggle" class="primary">Sort<\/button>/);
+  const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /function sortIsWaiting\(\) \{\s*return !state\.running && !state\.paused && !state\.finished && !state\.lanes && !state\.generator && !state\.shuffler;\s*\}/);
+  assert.match(app, /stageSort\.hidden = !sortIsWaiting\(\)/);
+  assert.match(app, /stageSort\.addEventListener\("click", toggle\)/);
+  assert.doesNotMatch(app, /canvas\.hidden|clearPaper|#100e0c/);
+  const rule = css.slice(css.indexOf(".stage-draw {"), css.indexOf(".stage-draw {") + 400);
+  assert.match(rule, /left:\s*50%/);
+  assert.match(rule, /top:\s*50%/);
+  assert.match(rule, /z-index:\s*2/);
+});
