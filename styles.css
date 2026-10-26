@@ -357,7 +357,7 @@ output {
   align-self: start;
 }
 
-#randomise::after {
+.preset-menu > button::after {
   content: "";
   display: inline-block;
   margin-left: 0.5rem;

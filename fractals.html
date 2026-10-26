@@ -67,10 +67,12 @@
             <input id="speed" type="range" min="1" max="100" value="28" />
           </div>
 
-          <label>
-            Variation
-            <select id="presets"></select>
-          </label>
+          <div class="preset-menu">
+            <button type="button" id="variation" aria-haspopup="menu" aria-expanded="false" aria-controls="presets">
+              Variation
+            </button>
+            <div id="presets" class="preset-pop" role="menu" hidden></div>
+          </div>
 
           <div class="row">
             <button type="button" id="toggle" class="primary">Draw</button>
