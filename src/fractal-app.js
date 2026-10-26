@@ -337,8 +337,9 @@ function renderChrome() {
   autoZoomButton.disabled = !(state.finished && !state.running && canAutoZoom());
   autoZoomButton.setAttribute("aria-pressed", String(state.autoZoom));
   modeBadge.hidden = !(canAutoZoom() && state.finished && !state.running);
-  modeBadge.setAttribute("aria-pressed", String(state.reactive));
-  modeBadge.textContent = state.reactive ? "reactive on" : "reactive off";
+  modeBadge.setAttribute("aria-pressed", String(reactive));
+  modeBadge.textContent = reactive ? "reactive on" : "reactive off";
+  modeBadge.disabled = state.autoZoom;
   canvas.classList.toggle("exploring", canZoom && !reactive);
   canvas.classList.toggle("reactive", state.finished && !state.running && reactive);
   const box = viewBox();
@@ -876,7 +877,7 @@ function canAutoZoom(id = state.fractalId) {
 }
 
 function isReactive(id = state.fractalId) {
-  return canAutoZoom(id) && state.reactive;
+  return canAutoZoom(id) && state.reactive && !state.autoZoom;
 }
 
 function formatMag(mag) {

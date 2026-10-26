@@ -203,3 +203,14 @@ test("sound is an icon at the top left of the fractal frame", () => {
   assert.match(rule, /\.sound-toggle\[aria-pressed="false"\] \.sound-off/);
   assert.doesNotMatch(fractalApp, /soundButton\.textContent/);
 });
+
+test("auto zoom turns cursor reaction off without forgetting the preference", () => {
+  const gate = fractalApp.slice(fractalApp.indexOf("function isReactive"), fractalApp.indexOf("function formatMag"));
+  assert.match(gate, /canAutoZoom\(id\) && state\.reactive && !state\.autoZoom/);
+  const chrome = fractalApp.slice(fractalApp.indexOf("function renderChrome"), fractalApp.indexOf("function paceLabel"));
+  assert.match(chrome, /modeBadge\.setAttribute\("aria-pressed", String\(reactive\)\)/);
+  assert.match(chrome, /modeBadge\.textContent = reactive \? "reactive on" : "reactive off"/);
+  assert.match(chrome, /modeBadge\.disabled = state\.autoZoom/);
+  const start = fractalApp.slice(fractalApp.indexOf("function startAutoZoom"), fractalApp.indexOf("const AUTO_FADE_MS"));
+  assert.doesNotMatch(start, /state\.reactive = false/);
+});
