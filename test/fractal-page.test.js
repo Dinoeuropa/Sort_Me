@@ -51,6 +51,19 @@ test("the fractal page mirrors the sorting controls", () => {
   assert.doesNotMatch(fractals, /id="compare"/);
 });
 
+test("zoom in, zoom out, and auto zoom sit together as signs", () => {
+  const explore = fractals.slice(fractals.indexOf('id="explore"'), fractals.indexOf('class="legend"'));
+  assert.match(
+    explore,
+    /id="zoom-in"[^>]*>\+<\/button>\s*<button[^>]*id="zoom-out"[^>]*>-<\/button>\s*<button[^>]*id="auto-zoom"/,
+  );
+  assert.match(explore, /aria-label="Zoom in"/);
+  assert.match(explore, /aria-label="Zoom out"/);
+  assert.doesNotMatch(explore, />Zoom in</);
+  assert.doesNotMatch(explore, />Zoom out</);
+  assert.match(css, /#explore\s*\{[^}]*flex-wrap:\s*nowrap/);
+});
+
 test("selecting a fractal waits for Draw", () => {
   const select = fractalApp.slice(fractalApp.indexOf('fractalSelect.addEventListener("change"'));
   const selectBody = select.slice(0, select.indexOf("paletteSelect"));

@@ -352,6 +352,57 @@ output {
   gap: 0.45rem;
 }
 
+.preset-menu {
+  position: relative;
+  align-self: start;
+}
+
+#randomise::after {
+  content: "";
+  display: inline-block;
+  margin-left: 0.5rem;
+  border-right: 5px solid transparent;
+  border-left: 5px solid transparent;
+  border-top: 6px solid currentColor;
+  transform: translateY(1px);
+}
+
+.preset-pop {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 12rem;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.4rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.preset-pop button {
+  text-align: left;
+}
+
+.preset-pop button[aria-checked="true"] {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+#explore {
+  flex-wrap: nowrap;
+}
+
+.zoom-sign {
+  width: 2.65rem;
+  height: 2.65rem;
+  padding: 0;
+  font-size: 1.45rem;
+  line-height: 2.65rem;
+}
+
 button {
   background: var(--panel-2);
   border: 1px solid var(--line);
