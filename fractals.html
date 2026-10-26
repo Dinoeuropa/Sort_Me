@@ -95,6 +95,11 @@
             </svg>
           </button>
           <canvas id="canvas" width="900" height="520" aria-label="Fractal visualization"></canvas>
+          <div id="blank-show" class="blank-show" aria-hidden="true">
+            <video class="blank-film" data-film="mandelbrot" poster="/media/mandelbrot-zoom.jpg" muted playsinline preload="none"></video>
+            <video class="blank-film" data-film="julia" muted playsinline preload="none"></video>
+            <video class="blank-film" data-film="burning" muted playsinline preload="none"></video>
+          </div>
           <button type="button" id="stage-draw" class="primary stage-draw">Draw</button>
           <button type="button" id="mode-badge" class="mode-badge" hidden aria-pressed="true">reactive</button>
           <p id="param" class="param" hidden></p>

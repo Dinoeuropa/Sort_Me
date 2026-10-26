@@ -5,6 +5,7 @@ import test from "node:test";
 const sorting = fs.readFileSync(new URL("../sorting.html", import.meta.url), "utf8");
 const fractals = fs.readFileSync(new URL("../fractals.html", import.meta.url), "utf8");
 const fractalApp = fs.readFileSync(new URL("../src/fractal-app.js", import.meta.url), "utf8");
+const blankShow = fs.readFileSync(new URL("../src/blank-show.js", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 test("sorting and fractals are two pages that link to each other", () => {
@@ -208,7 +209,21 @@ test("a blank fractal canvas shows an enlarged Draw in the frame", () => {
   assert.match(fractalApp, /const stageDraw = document\.querySelector\("#stage-draw"\)/);
   assert.match(fractalApp, /function canvasIsBlank\(\) \{\s*return !state\.running && !state\.paused && !state\.finished;\s*\}/);
   assert.match(fractalApp, /stageDraw\.hidden = !canvasIsBlank\(\)/);
+  assert.match(fractalApp, /blankShow\.setVisible\(canvasIsBlank\(\)\)/);
   assert.match(fractalApp, /stageDraw\.addEventListener\("click", toggle\)/);
+  assert.match(frame, /id="blank-show" class="blank-show" aria-hidden="true"/);
+  assert.match(frame, /data-film="mandelbrot"/);
+  assert.match(frame, /data-film="julia"/);
+  assert.match(frame, /data-film="burning"/);
+  assert.doesNotMatch(frame, /data-film="quick"|data-film="merge"|data-film="heap"/);
+  assert.doesNotMatch(frame, /src="\/media\//);
+  const filmRule = css.slice(css.indexOf(".blank-film {"), css.indexOf(".blank-film {") + 280);
+  assert.match(filmRule, /filter:\s*blur\(14px\)/);
+  assert.match(blankShow, /ZOOM_SCENES/);
+  assert.match(blankShow, /sceneAt\(elapsed, ZOOM_SCENES\)/);
+  assert.match(blankShow, /prefers-reduced-motion/);
+  assert.match(blankShow, /showMode\(/);
+  assert.doesNotMatch(blankShow, /kind === "sort"|data-film="quick"/);
 });
 
 test("sound is an icon at the top left of the fractal frame", () => {

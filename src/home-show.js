@@ -103,7 +103,7 @@ export const SORTS = [
   },
 ];
 
-const zoomScenes = ZOOMS.map((zoom) => ({
+export const ZOOM_SCENES = ZOOMS.map((zoom) => ({
   id: zoom.id,
   kind: "zoom",
   fractalId: zoom.fractalId,
@@ -124,7 +124,7 @@ const sortScenes = SORTS.map((sort) => ({
   duration: sort.duration,
 }));
 
-export const SCENES = [...zoomScenes, ...sortScenes];
+export const SCENES = [...ZOOM_SCENES, ...sortScenes];
 
 function mulberry32(seed) {
   let state = seed >>> 0;
@@ -192,15 +192,16 @@ export function fadeAmount(linear) {
  * then the next one fades in across the frames the previous film still has left. Time wraps, so the
  * last film blends into the first the same way. `fade` is {@link fadeAmount} across {@link FADE_MS}.
  * `outgoingLeft` is how many milliseconds of the previous film remain.
+ * `scenes` defaults to the full screensaver. A shorter list, such as the zoom films alone, cycles only those.
  */
-export function sceneAt(elapsedMs) {
+export function sceneAt(elapsedMs, scenes = SCENES) {
   const slot = FILM_MS - FADE_MS;
-  const cycle = slot * SCENES.length;
+  const cycle = slot * scenes.length;
   let time = elapsedMs % cycle;
   if (time < 0) time += cycle;
-  const index = Math.min(SCENES.length - 1, Math.floor(time / slot));
+  const index = Math.min(scenes.length - 1, Math.floor(time / slot));
   const local = time - index * slot;
-  const scene = SCENES[index];
+  const scene = scenes[index];
   return {
     index,
     id: scene.id,
@@ -216,8 +217,8 @@ export function sceneAt(elapsedMs) {
  * that film is earlier in the document than the one it replaces. The spiral is last in the page,
  * and this is what lets Mandelbrot fade in over it. `fade` is the opacity actually shown.
  */
-export function filmLayer(filmId, schedule, fade = schedule.fade) {
-  const outgoing = SCENES[(schedule.index - 1 + SCENES.length) % SCENES.length].id;
+export function filmLayer(filmId, schedule, fade = schedule.fade, scenes = SCENES) {
+  const outgoing = scenes[(schedule.index - 1 + scenes.length) % scenes.length].id;
   if (filmId === schedule.id) return 2;
   if (filmId === outgoing && fade < 1) return 1;
   return 0;
