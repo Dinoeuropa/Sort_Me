@@ -19,6 +19,7 @@ const boundFormula = document.querySelector("#bound-formula");
 const blurb = document.querySelector("#blurb");
 const viewBlurb = document.querySelector("#view-blurb");
 const toggleButton = document.querySelector("#toggle");
+const stageSort = document.querySelector("#stage-sort");
 const stepButton = document.querySelector("#step");
 const compareButton = document.querySelector("#compare");
 const dock = document.querySelector("#viz-dock");
@@ -351,6 +352,7 @@ function renderChrome() {
   toggleButton.textContent = control;
   dockToggle.textContent = control;
   dock.hidden = !state.dock;
+  stageSort.hidden = !sortIsWaiting();
   dockSpeed.value = speedInput.value;
 
   if (state.shuffler && state.running) statusEl.textContent = "Shuffling";
@@ -381,6 +383,10 @@ function renderChrome() {
   meter.classList.toggle("over", meterState.over);
   meterFill.style.width = `${meterState.width}%`;
   note.textContent = meterState.note;
+}
+
+function sortIsWaiting() {
+  return !state.running && !state.paused && !state.finished && !state.lanes && !state.generator && !state.shuffler;
 }
 
 function stop() {
@@ -720,6 +726,7 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest(".preset-menu")) setPresetMenu(false);
 });
 toggleButton.addEventListener("click", toggle);
+stageSort.addEventListener("click", toggle);
 compareButton.addEventListener("click", beginCompare);
 compareList.addEventListener("change", syncCompareBoxes);
 soundButton.addEventListener("click", () => {
