@@ -86,6 +86,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-weight: 700;
 }
 
+.site-nav a.home-link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  padding: 0.45rem;
+}
+
+.home-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: block;
+}
+
 .eyebrow {
   margin: 0;
   letter-spacing: 0.16em;

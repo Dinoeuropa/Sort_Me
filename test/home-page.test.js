@@ -50,9 +50,13 @@ test("home type sits on the existing panel ink", () => {
 });
 
 test("the tool pages link back to home and mark themselves", () => {
-  assert.match(sorting, /href="\/">Home<\/a>/);
+  for (const page of [sorting, fractals]) {
+    assert.match(page, /<a href="\/" class="home-link" aria-label="Home">/);
+    assert.match(page, /class="home-icon"/);
+    assert.doesNotMatch(page, />Home</);
+  }
+  assert.match(css, /\.site-nav a\.home-link\s*\{[^}]*flex:\s*0 0 auto/);
   assert.match(sorting, /href="\/sorting" aria-current="page"/);
-  assert.match(fractals, /href="\/">Home<\/a>/);
   assert.match(fractals, /href="\/fractals" aria-current="page"/);
 });
 
