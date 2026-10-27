@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoZoomTarget, escapeValue, paletteRange } from "../src/fractals.js";
+import { autoZoomTarget, escapeValue, openPaletteProbe, paletteRange } from "../src/fractals.js";
 import { ddAdd, ddSub } from "../src/precision.js";
 import {
   fixedFromNumber,
@@ -92,4 +92,9 @@ test("a deep seahorse plate still spreads its palette past the old iteration cap
   const range = paletteRange("mandelbrot", view, 32, 24, 20000);
   assert.ok(range.floor > 2000, `floor ${range.floor}`);
   assert.ok(range.top > range.floor && range.top <= 20000, `top ${range.top}`);
+  const probe = openPaletteProbe("mandelbrot", view, 32, 24, 20000);
+  assert.equal(probe.step(), null);
+  let fitted = null;
+  for (let guard = 0; !fitted && guard < 32; guard += 1) fitted = probe.step();
+  assert.deepEqual(fitted, range);
 });

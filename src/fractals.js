@@ -486,6 +486,41 @@ function deepBand(fractalId, preset, width, height, cap, start, rows, iterations
 let cachedWindow = null;
 
 /**
+ * One cell of the palette grid, then the fitted window on the last cell. The reference orbit is
+ * built on the first step. A moving deep zoom calls step once a frame so the fit does not stall
+ * the picture; a plate walks the probe to the end.
+ */
+export function openPaletteProbe(fractalId, preset, width, height, maxIter) {
+  const deepMandelbrot = fractalId === "mandelbrot" && isSeahorseCenter(preset) && preset.scale < 1e-30;
+  const cap = deepMandelbrot
+    ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
+    : clampIter(maxIter);
+  if (!hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return null;
+  const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
+  if (!(depth > 0)) return null;
+  const spanY = preset.scale;
+  const spanX = preset.scale * (width / height);
+  const cells = deepMandelbrot ? 4 : 12;
+  const total = cells * cells;
+  const samples = [];
+  let index = 0;
+  let sample = null;
+  return {
+    step() {
+      if (index >= total) return paletteWindow(samples, cap, depth);
+      if (!sample) sample = deepSampler(fractalId, preset, cap, spanX, spanY, width);
+      const i = index % cells;
+      const j = (index / cells) | 0;
+      index += 1;
+      const value = sample(((i + 0.5) / cells - 0.5) * spanX, ((j + 0.5) / cells - 0.5) * spanY);
+      samples.push(fractalId === "newton" ? value.iteration : value);
+      if (index < total) return null;
+      return paletteWindow(samples, cap, depth);
+    },
+  };
+}
+
+/**
  * The range of iterations a plate's palette is spread over. The whole cap for an ordinary plate,
  * which leaves its colors as they are. A deep plate's pixels all land within a few percent of one
  * another, far below the cap for a Julia set or Newton's method and just under it for the
@@ -506,18 +541,9 @@ export function paletteRange(fractalId, preset, width, height, maxIter) {
     preset.cx, preset.cy, preset.px, preset.py, width, height, cap,
   ].join(":");
   if (cachedWindow && cachedWindow.key === key) return cachedWindow.window;
-  const spanY = preset.scale;
-  const spanX = preset.scale * (width / height);
-  const sample = deepSampler(fractalId, preset, cap, spanX, spanY, width);
-  const cells = 12;
-  const samples = [];
-  for (let j = 0; j < cells; j += 1) {
-    for (let i = 0; i < cells; i += 1) {
-      const value = sample(((i + 0.5) / cells - 0.5) * spanX, ((j + 0.5) / cells - 0.5) * spanY);
-      samples.push(fractalId === "newton" ? value.iteration : value);
-    }
-  }
-  const window = paletteWindow(samples, cap, depth);
+  const probe = openPaletteProbe(fractalId, preset, width, height, maxIter);
+  let window = null;
+  while (probe && !(window = probe.step())) { /* the plate can spend the whole grid */ }
   cachedWindow = { key, window };
   return window;
 }

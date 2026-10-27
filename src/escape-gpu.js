@@ -1,4 +1,4 @@
-import { DEEP_ITERATION_LIMIT, isSeahorseCenter, packBlocks, scaleParts, seahorseOrbit } from "./deep-float.js";
+import { DEEP_ITERATION_LIMIT, DEEP_SHADER_SCALE, isSeahorseCenter, packBlocks, scaleParts, seahorseOrbit } from "./deep-float.js";
 import { escapeLut } from "./palettes.js";
 import { ITERATION_LIMIT } from "./fractal-view.js";
 import {
@@ -657,7 +657,7 @@ function referenceCap(mode, cap, deep) {
 }
 
 function usesDeepReference(mode, preset) {
-  return mode === 0 && isSeahorseCenter(preset) && preset.scale < 1e-30;
+  return mode === 0 && isSeahorseCenter(preset) && preset.scale < DEEP_SHADER_SCALE;
 }
 
 function computeReference(mode, preset, cap) {
