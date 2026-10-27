@@ -51,6 +51,7 @@ import {
   gpuDepthMode,
   motionScale,
   rasterSize,
+  settledRaster,
   recursionLevel,
   wheelZoomFactor,
   zoomBounds,
@@ -239,10 +240,11 @@ function clampNumber(value, min, max) {
 
 function viewBox() {
   const rect = canvas.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const rawDpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(rawDpr, 2);
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
-  return { width, height, dpr };
+  return { width, height, dpr, rawDpr };
 }
 
 function renderMath(latex) {
@@ -1376,7 +1378,7 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
  */
 function paintGpuFrame(view, box, settle = false) {
   if (!view || state.running || !box) return false;
-  const dest = motionRaster(box);
+  const dest = settle ? settledRaster(box.width, box.height, box.rawDpr || box.dpr) : motionRaster(box);
   const cap = exploredLevel();
   const depth = gpuDepthMode(view, dest.height);
   if (cap > GPU_ITER_LIMIT || !depth) return false;

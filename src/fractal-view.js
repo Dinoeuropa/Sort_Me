@@ -404,6 +404,24 @@ export function motionScale(msPerMegapixel, pixels, budgetMs) {
   return Math.max(MOTION_SCALE_MIN, Math.sqrt(budgetMs / full));
 }
 
+export const SETTLED_DPR_MAX = 3;
+export const SETTLED_SUPERSAMPLE = 2;
+export const SETTLED_EDGE_MAX = 7680;
+
+/** Pixel size of a settled GPU frame: device pixels up to 3x, then doubled, then fit to 7680. */
+export function settledRaster(width, height, dpr = 1) {
+  const ratio = Math.min(Math.max(Number(dpr) || 1, 1), SETTLED_DPR_MAX);
+  let pixelW = Math.max(1, Math.floor(Math.max(0, width) * ratio * SETTLED_SUPERSAMPLE));
+  let pixelH = Math.max(1, Math.floor(Math.max(0, height) * ratio * SETTLED_SUPERSAMPLE));
+  const edge = Math.max(pixelW, pixelH);
+  if (edge > SETTLED_EDGE_MAX) {
+    const fit = SETTLED_EDGE_MAX / edge;
+    pixelW = Math.max(1, Math.floor(pixelW * fit));
+    pixelH = Math.max(1, Math.floor(pixelH * fit));
+  }
+  return { width: pixelW, height: pixelH };
+}
+
 function float32Ulp(value) {
   const mag = Math.abs(value);
   if (!(mag > 0) || !Number.isFinite(mag)) return 2 ** -149;

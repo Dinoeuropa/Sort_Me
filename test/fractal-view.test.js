@@ -44,6 +44,10 @@ import {
   gpuPrecisionHolds,
   rasterSize,
   recursionLevel,
+  SETTLED_DPR_MAX,
+  SETTLED_EDGE_MAX,
+  SETTLED_SUPERSAMPLE,
+  settledRaster,
   unproject,
   wheelZoomFactor,
   zoomBounds,
@@ -210,6 +214,19 @@ test("a finished escape picture is sampled at 4K", () => {
   assert.equal(SHARP_RASTER_EDGE, 3840);
   const moving = rasterSize(900, 520, 1, true, 1920);
   assert.equal(Math.max(moving.width, moving.height), 1920);
+});
+
+test("a settled raster is twice the device pixels, capped at 3x and a 7680 edge", () => {
+  assert.equal(SETTLED_DPR_MAX, 3);
+  assert.equal(SETTLED_SUPERSAMPLE, 2);
+  assert.equal(SETTLED_EDGE_MAX, 7680);
+  assert.deepEqual(settledRaster(800, 600, 1), { width: 1600, height: 1200 });
+  assert.deepEqual(settledRaster(800, 600, 2), { width: 3200, height: 2400 });
+  assert.deepEqual(settledRaster(800, 600, 4), { width: 4800, height: 3600 });
+  const wide = settledRaster(4000, 2000, 2);
+  assert.equal(Math.max(wide.width, wide.height), 7680);
+  assert.equal(wide.width / wide.height, 2);
+  assert.deepEqual(settledRaster(0, 10, 1), { width: 1, height: 20 });
 });
 
 test("a shallow escape view fits in float32 and a deep one does not", () => {
