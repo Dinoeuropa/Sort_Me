@@ -57,7 +57,7 @@ import {
   zoomEscape,
 } from "./fractal-view.js";
 import { renderEscape } from "./escape-pool.js";
-import { GPU_ITER_LIMIT, gpuAvailable, paintGpuEscape } from "./escape-gpu.js";
+import { GPU_ITER_LIMIT, gpuAvailable, paintGpuEscape, pollGpuCost } from "./escape-gpu.js";
 import { hasDeepCenter, viewOffset } from "./precision.js";
 import {
   PALETTES,
@@ -1333,11 +1333,9 @@ function cancelRefine() {
 }
 
 function timeGpu(width, height, cap, paint) {
-  const started = performance.now();
+  const sample = pollGpuCost();
   const sheet = paint();
-  const took = performance.now() - started;
-  if (sheet && took > 0) {
-    const sample = took / (((width * height) / 1e6) * Math.max(1, cap));
+  if (Number.isFinite(sample) && sample > 0) {
     gpuClock.cost = Number.isFinite(gpuClock.cost) ? gpuClock.cost * 0.5 + sample * 0.5 : sample;
   }
   return sheet;

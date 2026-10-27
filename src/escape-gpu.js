@@ -426,7 +426,7 @@ function boot() {
       antialias: false,
       depth: false,
       stencil: false,
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false,
       powerPreference: "high-performance",
     });
     if (!gl) {
@@ -461,7 +461,16 @@ function boot() {
     const orbit = texture(gl);
     gl.bindTexture(gl.TEXTURE_2D, orbit);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4));
-    gpu = { gl, canvas, programs, lut, lutKey: "", orbit, reference: null, probe: new Uint8Array(4) };
+    gpu = {
+      gl,
+      canvas,
+      programs,
+      lut,
+      lutKey: "",
+      orbit,
+      reference: null,
+      timerExt: gl.getExtension("EXT_disjoint_timer_query_webgl2"),
+    };
     return gpu;
   } catch {
     failed = true;
@@ -472,6 +481,26 @@ function boot() {
 /** True once WebGL2 and the shader are ready, so deep views can skip the workers. */
 export function gpuAvailable() {
   return Boolean(boot());
+}
+
+/**
+ * Milliseconds per million pixels per iteration of the draw that just finished on the GPU,
+ * or null when no completed timer sample is waiting.
+ */
+export function pollGpuCost() {
+  if (!gpu || !gpu.timerSample) return null;
+  const { gl, timerExt, timerSample } = gpu;
+  const { query, width, height, cap } = timerSample;
+  if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return null;
+  if (timerExt && gl.getParameter(timerExt.GPU_DISJOINT_EXT)) {
+    gl.deleteQuery(query);
+    gpu.timerSample = null;
+    return null;
+  }
+  const nanoseconds = gl.getQueryParameter(query, gl.QUERY_RESULT);
+  gl.deleteQuery(query);
+  gpu.timerSample = null;
+  return nanoseconds / 1e6 / (((width * height) / 1e6) * Math.max(1, cap));
 }
 
 /** Iterations a reference is computed for: rounded up, so a slowly rising cap reuses one orbit. */
@@ -610,8 +639,14 @@ export function paintGpuEscape({
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, session.orbit);
   gl.uniform1i(where.uOrbit, 1);
+  const ext = session.timerExt;
+  const timeThis = Boolean(ext) && !session.timerSample;
+  if (timeThis) {
+    const query = gl.createQuery();
+    gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
+    session.timerSample = { query, width, height, cap: iterations };
+  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
-  // Reading one pixel waits for the frame, so the caller's clock measures the real cost.
-  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, session.probe);
+  if (timeThis) gl.endQuery(ext.TIME_ELAPSED_EXT);
   return canvas;
 }

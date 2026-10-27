@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { paintEscape } from "../src/palettes.js";
 import { ITERATION_LIMIT } from "../src/fractal-view.js";
@@ -81,4 +82,12 @@ test("the shader loop is the smallest bucket that covers the cap", () => {
   assert.equal(loopLimitForCap(4097), 16384);
   assert.equal(loopLimitForCap(GPU_ITER_LIMIT), 16384);
   assert.equal(loopLimitForCap(999999), 16384);
+});
+
+test("a GPU frame is timed without reading a pixel back", () => {
+  const source = readFileSync(new URL("../src/escape-gpu.js", import.meta.url), "utf8");
+  assert.equal(source.includes("readPixels"), false);
+  assert.match(source, /EXT_disjoint_timer_query_webgl2/);
+  assert.match(source, /preserveDrawingBuffer:\s*false/);
+  assert.match(source, /export function pollGpuCost/);
 });
