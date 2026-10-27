@@ -4,11 +4,13 @@ import { createSpeaker, frequencyFor } from "../src/sound.js";
 
 function mockAudio() {
   const strikes = [];
+  const peaks = [];
   return {
     state: "running",
     currentTime: 0,
     destination: {},
     strikes,
+    peaks,
     resume() {
       this.state = "running";
     },
@@ -31,7 +33,9 @@ function mockAudio() {
       return {
         gain: {
           setValueAtTime() {},
-          exponentialRampToValueAtTime() {},
+          exponentialRampToValueAtTime(value) {
+            peaks.push(value);
+          },
         },
         connect() {},
       };
@@ -67,6 +71,8 @@ test("sound stays silent until it is switched on and can be switched off", () =>
   assert.equal(notes.length, 2);
   assert.ok(notes[1] > notes[0]);
   assert.equal(contexts[0].strikes.length, 2);
+  const peaks = contexts[0].peaks.filter((value) => value > 0.01);
+  assert.deepEqual(peaks, [0.072, 0.072]);
 
   speaker.setEnabled(false);
   assert.deepEqual(speaker.play(frame), []);
