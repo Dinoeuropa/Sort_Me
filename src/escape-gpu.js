@@ -107,6 +107,7 @@ precision highp int;
 precision highp sampler2D;
 uniform vec2 uResolution;
 uniform vec2 uBand;
+uniform vec2 uOrigin;
 uniform vec2 uCenter;
 uniform float uScale;
 uniform float uFlip;
@@ -386,9 +387,10 @@ void newtonPixel(vec2 p, vec2 u, int mode, int cap, out int outIter, out int out
 }
 
 void main() {
+  float px = uOrigin.x + gl_FragCoord.x;
   float py = uBand.x + uBand.y - gl_FragCoord.y;
+  float nx = px / uResolution.x - 0.5;
   float ny = uFlip > 0.5 ? py / uResolution.y - 0.5 : 0.5 - py / uResolution.y;
-  float nx = gl_FragCoord.x / uResolution.x - 0.5;
   vec2 u = vec2(nx * uScale * (uResolution.x / uResolution.y), ny * uScale);
   vec2 p = uCenter + u;
   int cap = uCap;
@@ -408,7 +410,7 @@ void main() {
 }
 
 const UNIFORMS = [
-  "uResolution", "uBand", "uCenter", "uScale", "uFlip", "uCap", "uMode", "uParam", "uLut", "uLutWidth", "uSpan",
+  "uResolution", "uBand", "uOrigin", "uCenter", "uScale", "uFlip", "uCap", "uMode", "uParam", "uLut", "uLutWidth", "uSpan",
   "uPerturb", "uOrbit", "uOrbitWidth", "uLast", "uRebaseAt", "uRebaseLast", "uOffset", "uSkip", "uSeries", "uSeries2",
 ];
 
@@ -577,7 +579,8 @@ function referenceFor(session, mode, preset, cap) {
  * Color the pixels on the GPU and return that canvas. `depth` is "direct" for plain float
  * coordinates or "perturb" for offsets from a double-double reference, from gpuDepthMode.
  * `rows` draws only a band of rows counted from the top, and the canvas returned is that band
- * alone, so a heavy frame can be drawn a band at a time. `floor` and `top` fit the
+ * alone, so a heavy frame can be drawn a band at a time. `cols` clips columns the same way,
+ * and both together return the intersection rectangle. `floor` and `top` fit the
  * palette as paintEscape does. Returns null where WebGL2 is missing or the cap is past the loop.
  */
 export function paintGpuEscape({
@@ -591,6 +594,7 @@ export function paintGpuEscape({
   floor = 0,
   top = null,
   rows = null,
+  cols = null,
 }) {
   const mode = gpuEscapeMode(fractalId, preset);
   const iterations = cap | 0;
@@ -611,14 +615,19 @@ export function paintGpuEscape({
   }
   const from = rows ? Math.max(0, Math.min(height - 1, rows.from | 0)) : 0;
   const to = rows ? Math.max(from + 1, Math.min(height, rows.to | 0)) : height;
+  const x0 = cols ? Math.max(0, Math.min(width, cols.from | 0)) : 0;
+  const x1 = cols ? Math.max(x0, Math.min(width, cols.to | 0)) : width;
   const tall = to - from;
-  if (canvas.width !== width || canvas.height !== tall) {
-    canvas.width = width;
+  const wide = x1 - x0;
+  if (wide < 1 || tall < 1) return null;
+  if (canvas.width !== wide || canvas.height !== tall) {
+    canvas.width = wide;
     canvas.height = tall;
   }
-  gl.viewport(0, 0, width, tall);
+  gl.viewport(0, 0, wide, tall);
   gl.useProgram(program);
   gl.uniform2f(where.uResolution, width, height);
+  gl.uniform2f(where.uOrigin, x0, 0);
   gl.uniform2f(where.uBand, from, tall);
   gl.uniform2f(where.uCenter, preset.centerX, preset.centerY);
   gl.uniform1f(where.uScale, preset.scale);
@@ -666,8 +675,8 @@ export function paintGpuEscape({
   gl.bindTexture(gl.TEXTURE_2D, session.orbit);
   gl.uniform1i(where.uOrbit, 1);
   const ext = session.timerExt;
-  // A band covers fewer pixels than the stored frame size, so timing it would understate cost.
-  const timeThis = Boolean(ext) && !session.timerSample && (!rows || (from === 0 && to === height));
+  // A band or strip covers fewer pixels than the stored frame size, so timing it would understate cost.
+  const timeThis = Boolean(ext) && !session.timerSample && (!rows || (from === 0 && to === height)) && (!cols || (x0 === 0 && x1 === width));
   if (timeThis) {
     const query = gl.createQuery();
     gl.beginQuery(ext.TIME_ELAPSED_EXT, query);

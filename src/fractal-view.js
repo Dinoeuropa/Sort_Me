@@ -554,6 +554,46 @@ export function panEscape(view, dx, dy, width, height) {
   return shiftView(view, -(dx / Math.max(1, width)) * spanX, ySign * (dy / Math.max(1, height)) * spanY);
 }
 
+export function panPixels(oldView, newView, width, height) {
+  if (!oldView || !newView || !(oldView.scale > 0) || oldView.scale !== newView.scale) return null;
+  if (Boolean(oldView.flipY) !== Boolean(newView.flipY)) return null;
+  const spanY = newView.scale;
+  const spanX = spanY * (width / Math.max(1, height));
+  const worldX = (newView.centerX + (newView.centerXLo || 0)) - (oldView.centerX + (oldView.centerXLo || 0));
+  const worldY = (newView.centerY + (newView.centerYLo || 0)) - (oldView.centerY + (oldView.centerYLo || 0));
+  const ySign = newView.flipY ? -1 : 1;
+  return {
+    x: Math.round((-worldX / spanX) * width),
+    y: Math.round((ySign * worldY / spanY) * height),
+  };
+}
+
+export function panRepaint(frameWidth, frameHeight, shiftX, shiftY) {
+  const sx = Math.round(shiftX);
+  const sy = Math.round(shiftY);
+  const width = frameWidth | 0;
+  const height = frameHeight | 0;
+  if (width < 1 || height < 1) return null;
+  if (sx === 0 && sy === 0) return null;
+  if (Math.abs(sx) > width / 2 || Math.abs(sy) > height / 2) return null;
+  const rects = [];
+  if (sx > 0) rects.push({ x: 0, y: 0, w: sx, h: height });
+  else if (sx < 0) rects.push({ x: width + sx, y: 0, w: -sx, h: height });
+  const overlapW = width - Math.abs(sx);
+  const overlapX = sx > 0 ? sx : 0;
+  if (sy > 0) rects.push({ x: overlapX, y: 0, w: overlapW, h: sy });
+  else if (sy < 0) rects.push({ x: overlapX, y: height + sy, w: overlapW, h: -sy });
+  const copy = {
+    sx: sx > 0 ? 0 : -sx,
+    sy: sy > 0 ? 0 : -sy,
+    sw: overlapW,
+    sh: height - Math.abs(sy),
+    dx: sx > 0 ? sx : 0,
+    dy: sy > 0 ? sy : 0,
+  };
+  return { copy, rects };
+}
+
 export function zoomBounds(bounds, factor, px, py, width, height, home) {
   const applied = appliedFactor(boundsMagnification(home, bounds), factor);
   const anchor = unproject(bounds, px, py, width, height);

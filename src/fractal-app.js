@@ -39,6 +39,8 @@ import {
   placeLevel,
   panBounds,
   panEscape,
+  panPixels,
+  panRepaint,
   DRAW_RASTER_EDGE,
   PLATE_EDGE_MAX,
   pickPlate,
@@ -181,6 +183,7 @@ const state = {
   gpuHold: false,
   gpuKey: "",
   gpuShare: 1,
+  gpuPan: null,
   reactiveView: null,
   autoHold: false,
   cursorDirty: false,
@@ -407,6 +410,7 @@ function resetProgress() {
   state.gpu = false;
   state.gpuHold = false;
   state.gpuKey = "";
+  state.gpuPan = null;
   cancelRefine();
   state.cursorDirty = false;
   state.cursorRedraw = false;
@@ -1327,6 +1331,7 @@ const BAND_SHARE = 16;
 const gpuClock = { cost: Number.NaN };
 const refine = { raf: 0, key: "" };
 const paletteFit = { key: "", window: null, scene: "", shown: null };
+let gpuPanScratch = null;
 
 function cancelRefine() {
   if (refine.raf) cancelAnimationFrame(refine.raf);
@@ -1377,11 +1382,23 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
  * Returns false where the GPU cannot draw the view, and the workers take over.
  */
 function paintGpuFrame(view, box, settle = false) {
-  if (!view || state.running || !box) return false;
+  if (!view || state.running || !box) {
+    state.gpuPan = null;
+    return false;
+  }
   const dest = settle ? settledRaster(box.width, box.height, box.rawDpr || box.dpr) : motionRaster(box);
+  if (
+    state.gpuPan
+    && (state.gpuPan.width !== dest.width || state.gpuPan.height !== dest.height || state.gpuPan.view.scale !== view.scale)
+  ) {
+    state.gpuPan = null;
+  }
   const cap = exploredLevel();
   const depth = gpuDepthMode(view, dest.height);
-  if (cap > GPU_ITER_LIMIT || !depth) return false;
+  if (cap > GPU_ITER_LIMIT || !depth) {
+    state.gpuPan = null;
+    return false;
+  }
   const job = renderJob(view);
   const key = [
     job.fractalId, view.centerX, view.centerXLo, view.centerY, view.centerYLo, view.scale,
@@ -1404,24 +1421,36 @@ function paintGpuFrame(view, box, settle = false) {
   if (!(settle && state.gpuKey === key && state.gpuShare < 1)) {
     const width = Math.max(1, Math.round(dest.width * share));
     const height = Math.max(1, Math.round(dest.height * share));
-    let sheet = null;
-    try {
-      sheet = timeGpu(width, height, cap, () => paintGpuEscape({ ...shared, width, height }));
-    } catch {
-      return false;
+    const panned = !settle && share === 1 && paintGpuPan(view, dest, shared);
+    if (!panned) {
+      let sheet = null;
+      try {
+        sheet = timeGpu(width, height, cap, () => paintGpuEscape({ ...shared, width, height }));
+      } catch {
+        state.gpuPan = null;
+        return false;
+      }
+      if (!sheet) {
+        state.gpuPan = null;
+        return false;
+      }
+      if (canvas.width !== dest.width || canvas.height !== dest.height) {
+        canvas.width = dest.width;
+        canvas.height = dest.height;
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(sheet, 0, 0, width, height, 0, 0, dest.width, dest.height);
     }
-    if (!sheet) return false;
-    if (canvas.width !== dest.width || canvas.height !== dest.height) {
-      canvas.width = dest.width;
-      canvas.height = dest.height;
-    }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(sheet, 0, 0, width, height, 0, 0, dest.width, dest.height);
     state.gpuKey = key;
     state.gpuShare = share;
+    if (share === 1) {
+      state.gpuPan = { view: { ...view }, width: dest.width, height: dest.height };
+    } else {
+      state.gpuPan = null;
+    }
   }
   if (settle && state.gpuShare < 1) sharpenGpuFrame(key, dest, shared);
   state.gpu = true;
@@ -1439,6 +1468,51 @@ function paintGpuFrame(view, box, settle = false) {
     newestBand = Math.max(newestBand, state.flightJob);
     state.flightJob = 0;
     state.flightView = null;
+  }
+  return true;
+}
+
+/**
+ * Reuse the last full-share GPU picture for a pan: copy the overlap, then redraw only the
+ * strips that came into view. Returns false when the pan cannot be applied, so the caller
+ * draws a full frame.
+ */
+function paintGpuPan(view, dest, shared) {
+  if (!state.gpuPan || state.gpuPan.width !== dest.width || state.gpuPan.height !== dest.height) return false;
+  if (canvas.width !== dest.width || canvas.height !== dest.height) return false;
+  const shift = panPixels(state.gpuPan.view, view, dest.width, dest.height);
+  if (!shift) return false;
+  const plan = panRepaint(dest.width, dest.height, shift.x, shift.y);
+  if (!plan) return false;
+  if (!gpuPanScratch) gpuPanScratch = document.createElement("canvas");
+  if (gpuPanScratch.width !== dest.width || gpuPanScratch.height !== dest.height) {
+    gpuPanScratch.width = dest.width;
+    gpuPanScratch.height = dest.height;
+  }
+  const scratchCtx = gpuPanScratch.getContext("2d");
+  scratchCtx.setTransform(1, 0, 0, 1, 0, 0);
+  scratchCtx.globalAlpha = 1;
+  scratchCtx.drawImage(canvas, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = false;
+  const { copy } = plan;
+  ctx.drawImage(gpuPanScratch, copy.sx, copy.sy, copy.sw, copy.sh, copy.dx, copy.dy, copy.sw, copy.sh);
+  for (const rect of plan.rects) {
+    let strip = null;
+    try {
+      strip = paintGpuEscape({
+        ...shared,
+        width: dest.width,
+        height: dest.height,
+        rows: { from: rect.y, to: rect.y + rect.h },
+        cols: { from: rect.x, to: rect.x + rect.w },
+      });
+    } catch {
+      strip = null;
+    }
+    if (!strip) return false;
+    ctx.drawImage(strip, rect.x, rect.y);
   }
   return true;
 }
@@ -1597,6 +1671,7 @@ function applyEscapeResult(result) {
   plate.getContext("2d").putImageData(new ImageData(pixels, width, height), 0, 0);
   state.gpu = false;
   state.gpuHold = false;
+  state.gpuPan = null;
   state.plate = { canvas: plate, ...finished };
   if (current && viewMoved(finished, current, 0.004)) blitPlate();
   else {

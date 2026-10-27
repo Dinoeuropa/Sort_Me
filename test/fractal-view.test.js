@@ -35,6 +35,8 @@ import {
   mapPointsInto,
   panBounds,
   panEscape,
+  panPixels,
+  panRepaint,
   plateCovers,
   pickPlate,
   plateBudget,
@@ -88,6 +90,22 @@ test("a burning-ship drag follows the flipped axis", () => {
   const ship = { centerX: -0.4, centerY: -0.5, scale: 3, flipY: true };
   const next = panEscape(ship, 0, 10, 100, 100);
   assert.ok(next.centerY < ship.centerY);
+});
+
+test("a pan names the new strips and the overlap to keep", () => {
+  const before = { centerX: 0, centerY: 0, scale: 2, flipY: false };
+  const after = panEscape(before, 30, -12, 300, 200);
+  const shift = panPixels(before, after, 300, 200);
+  assert.deepEqual(shift, { x: 30, y: -12 });
+  assert.equal(panPixels(before, { ...after, scale: 1 }, 300, 200), null);
+  const paint = panRepaint(300, 200, shift.x, shift.y);
+  assert.deepEqual(paint.copy, { sx: 0, sy: 12, sw: 270, sh: 188, dx: 30, dy: 0 });
+  assert.deepEqual(paint.rects, [
+    { x: 0, y: 0, w: 30, h: 200 },
+    { x: 30, y: 188, w: 270, h: 12 },
+  ]);
+  assert.equal(panRepaint(300, 200, 0, 0), null);
+  assert.equal(panRepaint(300, 200, 200, 0), null);
 });
 
 test("zooming a curve keeps the same pixel on the same point", () => {
