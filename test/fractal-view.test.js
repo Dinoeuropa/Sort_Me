@@ -280,7 +280,8 @@ test("the shader draws plain coordinates while they hold and offsets from a refe
     centerY: seahorse.y,
     centerYLo: seahorse.yLo,
   };
-  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "perturb");
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-6 }, 800), "perturb");
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "deep");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-40 }, 800), "deep");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-320 }, 800), null);
   assert.equal(gpuDepthMode(null, 800), null);
