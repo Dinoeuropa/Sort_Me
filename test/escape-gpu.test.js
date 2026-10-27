@@ -90,4 +90,5 @@ test("a GPU frame is timed without reading a pixel back", () => {
   assert.match(source, /EXT_disjoint_timer_query_webgl2/);
   assert.match(source, /preserveDrawingBuffer:\s*false/);
   assert.match(source, /export function pollGpuCost/);
+  assert.match(source, /timeThis = Boolean\(ext\) && !session\.timerSample && \(!rows \|\| \(from === 0 && to === height\)\)/);
 });

@@ -640,7 +640,8 @@ export function paintGpuEscape({
   gl.bindTexture(gl.TEXTURE_2D, session.orbit);
   gl.uniform1i(where.uOrbit, 1);
   const ext = session.timerExt;
-  const timeThis = Boolean(ext) && !session.timerSample;
+  // A band covers fewer pixels than the stored frame size, so timing it would understate cost.
+  const timeThis = Boolean(ext) && !session.timerSample && (!rows || (from === 0 && to === height));
   if (timeThis) {
     const query = gl.createQuery();
     gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
