@@ -1,5 +1,7 @@
 const LOW_HZ = 180;
 const HIGH_HZ = 1400;
+/** Peak of a note. Twenty percent above the previous 0.06 level. */
+const NOTE_PEAK = 0.06 * 1.2;
 
 export function frequencyFor(value, maxValue) {
   const span = Math.max(1, Number(maxValue) - 1);
@@ -26,7 +28,7 @@ function strike(ctx, frequency, delay = 0) {
   osc.type = "sine";
   osc.frequency.value = frequency;
   gain.gain.setValueAtTime(0.0001, start);
-  gain.gain.exponentialRampToValueAtTime(0.06, start + 0.008);
+  gain.gain.exponentialRampToValueAtTime(NOTE_PEAK, start + 0.008);
   gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.09);
   osc.connect(gain);
   gain.connect(ctx.destination);
