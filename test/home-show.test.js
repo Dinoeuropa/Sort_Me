@@ -11,7 +11,9 @@ import {
   FRAME_RATE,
   FRAME_WIDTH,
   SCENES,
+  SORT_SLOT_MS,
   ZOOM_SCENES,
+  ZOOM_SLOT_MS,
   SORTS,
   fadeAmount,
   filmBudget,
@@ -23,14 +25,14 @@ import {
   zoomCamera,
 } from "../src/home-show.js";
 
-test("the screensaver crossfades fractal zooms and three sorting films", () => {
+test("the screensaver leads with three sorting films, then fractal zooms", () => {
   assert.deepEqual(
     SCENES.map((scene) => scene.id),
-    ["mandelbrot", "julia", "burning", "quick", "merge", "heap"],
+    ["quick", "merge", "heap", "mandelbrot", "julia", "burning"],
   );
   assert.deepEqual(
     SCENES.map((scene) => scene.kind),
-    ["zoom", "zoom", "zoom", "sort", "sort", "sort"],
+    ["sort", "sort", "sort", "zoom", "zoom", "zoom"],
   );
   assert.equal(FRAME_WIDTH, 3840);
   assert.equal(FRAME_HEIGHT, 2160);
@@ -64,59 +66,79 @@ test("a crossfade eases in instead of cutting", () => {
   assert.ok(early < 0.25);
 
   const opening = sceneAt(0);
-  assert.equal(opening.id, "mandelbrot");
-  assert.equal(opening.kind, "zoom");
+  assert.equal(opening.id, "quick");
+  assert.equal(opening.kind, "sort");
   assert.equal(opening.fade, 0);
   assert.equal(opening.progress, 0);
 
   const mid = sceneAt(FADE_MS / 2);
-  assert.equal(mid.id, "mandelbrot");
+  assert.equal(mid.id, "quick");
   assert.ok(mid.fade > 0.45 && mid.fade < 0.55);
 
   const shown = sceneAt(FADE_MS + 40);
   assert.equal(shown.fade, 1);
-  assert.equal(shown.kind, "zoom");
+  assert.equal(shown.kind, "sort");
 
-  const slot = FILM_MS - FADE_MS;
-  const beforeHandoff = sceneAt(slot - 20);
-  assert.equal(beforeHandoff.id, "mandelbrot");
+  const sortSlot = FILM_MS - FADE_MS;
+  const zoomSlot = sortSlot / 2;
+  assert.equal(SORT_SLOT_MS, sortSlot);
+  assert.equal(ZOOM_SLOT_MS, zoomSlot);
+  assert.ok(zoomSlot < sortSlot);
+  assert.equal(sortSlot, 6200);
+  assert.equal(zoomSlot, 3100);
+
+  const beforeHandoff = sceneAt(sortSlot - 20);
+  assert.equal(beforeHandoff.id, "quick");
   assert.equal(beforeHandoff.fade, 1);
   assert.ok(beforeHandoff.progress < 1);
 
-  const following = sceneAt(slot + 20);
-  assert.equal(following.id, "julia");
-  assert.equal(following.kind, "zoom");
+  const following = sceneAt(sortSlot + 20);
+  assert.equal(following.id, "merge");
+  assert.equal(following.kind, "sort");
   assert.ok(following.fade < 0.2);
   assert.ok(following.outgoingLeft > FADE_MS - 40);
 
-  const overlap = sceneAt(slot + FADE_MS / 2);
-  assert.equal(overlap.id, "julia");
+  const overlap = sceneAt(sortSlot + FADE_MS / 2);
+  assert.equal(overlap.id, "merge");
   assert.ok(overlap.fade > 0.45 && overlap.fade < 0.55);
   assert.ok(Math.abs(overlap.outgoingLeft - FADE_MS / 2) < 1);
 
-  const sorts = sceneAt(slot * 3 + FADE_MS / 2);
-  assert.equal(sorts.id, "quick");
-  assert.equal(sorts.kind, "sort");
-  assert.ok(sorts.fade > 0.45 && sorts.fade < 0.55);
-  assert.ok(Math.abs(sorts.outgoingLeft - FADE_MS / 2) < 1);
+  const afterHeap = sceneAt(sortSlot * 3 + FADE_MS / 2);
+  assert.equal(afterHeap.id, "mandelbrot");
+  assert.equal(afterHeap.kind, "zoom");
+  assert.ok(afterHeap.fade > 0.45 && afterHeap.fade < 0.55);
+  assert.ok(Math.abs(afterHeap.outgoingLeft - FADE_MS / 2) < 1);
 
-  const cycle = slot * SCENES.length;
+  assert.equal(sceneAt(sortSlot * 3 - 20).id, "heap");
+  assert.equal(sceneAt(sortSlot * 3 + 20).id, "mandelbrot");
+  assert.equal(sceneAt(sortSlot * 3 + zoomSlot - 20).id, "mandelbrot");
+  assert.equal(sceneAt(sortSlot * 3 + zoomSlot + 20).id, "julia");
+  assert.equal(sceneAt(sortSlot * 3 + sortSlot / 2 + 20).id, "julia");
+
+  const zoomProgress = sceneAt(sortSlot * 3 + zoomSlot - 20);
+  assert.equal(zoomProgress.id, "mandelbrot");
+  assert.ok(zoomProgress.progress < 1);
+  assert.ok(zoomProgress.progress > 0.9);
+  assert.equal(zoomProgress.fade, 1);
+
+  const cycle = sortSlot * 3 + zoomSlot * 3;
+  assert.equal(cycle, 27900);
   const stillLast = sceneAt(cycle - 5);
-  assert.equal(stillLast.id, "heap");
+  assert.equal(stillLast.id, "burning");
   assert.equal(stillLast.fade, 1);
   assert.ok(stillLast.progress < 1);
 
   const wrap = sceneAt(cycle + FADE_MS / 2);
-  assert.equal(wrap.id, "mandelbrot");
-  assert.equal(wrap.kind, "zoom");
+  assert.equal(wrap.id, "quick");
+  assert.equal(wrap.kind, "sort");
   assert.ok(wrap.fade > 0.45 && wrap.fade < 0.55);
   assert.ok(Math.abs(wrap.outgoingLeft - FADE_MS / 2) < 1);
 
-  assert.equal(sceneAt(-5).id, "heap");
+  assert.equal(sceneAt(-5).id, "burning");
 
-  assert.ok(filmLayer("mandelbrot", wrap) > filmLayer("heap", wrap));
-  assert.equal(filmLayer("julia", wrap), 0);
-  assert.equal(filmLayer("quick", wrap), 0);
+  assert.ok(filmLayer("quick", wrap) > filmLayer("burning", wrap));
+  assert.equal(filmLayer("merge", wrap), 0);
+  assert.equal(filmLayer("mandelbrot", wrap), 0);
 });
 
 test("each film zooms on a fixed center", () => {

@@ -1,4 +1,4 @@
-/** Crossfade at the start of each zoom, in milliseconds. */
+/** Crossfade at the start of each film, in milliseconds. */
 export const FADE_MS = 1800;
 
 /** Pre-recorded plate. The page plays these files; it does not draw them. */
@@ -10,10 +10,17 @@ export const FRAME_COUNT = 192;
 /** Length of one film, matching FRAME_COUNT frames at FRAME_RATE. */
 export const FILM_MS = Math.round((FRAME_COUNT / FRAME_RATE) * 1000);
 
+/** On-screen slot for a sorting film: the plate minus the incoming crossfade. */
+export const SORT_SLOT_MS = FILM_MS - FADE_MS;
+
+/** On-screen slot for a home-page zoom: half a sort slot, so fractals stay the shorter tail. */
+export const ZOOM_SLOT_MS = SORT_SLOT_MS / 2;
+
 /**
  * Zoom films. The center stays put for the whole film, and the scale moves in toward it.
  * Mandelbrot and the Julia set use the classic coloring. The burning ship uses heat.
- * Three sorting films follow them. Every boundary eases across {@link FADE_MS}.
+ * On the home page they follow the three sorting films and use {@link ZOOM_SLOT_MS}.
+ * Every boundary eases across {@link FADE_MS}.
  */
 export const ZOOMS = [
   {
@@ -69,6 +76,7 @@ export const ZOOMS = [
 /**
  * Sorting films. Recorded offline, same length and plate as the zooms.
  * Quicksort uses bars, mergesort the slope, heapsort the radial view.
+ * They lead the home screensaver and keep {@link SORT_SLOT_MS}.
  */
 export const SORTS = [
   {
@@ -124,7 +132,7 @@ const sortScenes = SORTS.map((sort) => ({
   duration: sort.duration,
 }));
 
-export const SCENES = [...ZOOM_SCENES, ...sortScenes];
+export const SCENES = [...sortScenes, ...ZOOM_SCENES];
 
 function mulberry32(seed) {
   let state = seed >>> 0;
@@ -188,25 +196,50 @@ export function fadeAmount(linear) {
 }
 
 /**
- * Film playing at `elapsedMs`. A film keeps its own picture for {@link FILM_MS} minus {@link FADE_MS},
- * then the next one fades in across the frames the previous film still has left. Time wraps, so the
+ * How long a scene stays the incoming film. Sorts keep {@link SORT_SLOT_MS}. Zooms in a mixed
+ * playlist keep {@link ZOOM_SLOT_MS}. A zoom-only list, such as the Draw blank show, keeps the
+ * full sort slot so that cycle is unchanged.
+ */
+export function sceneSlot(scene, scenes = SCENES) {
+  if (scene.kind === "zoom" && scenes.some((item) => item.kind === "sort")) return ZOOM_SLOT_MS;
+  return SORT_SLOT_MS;
+}
+
+function cycleMs(scenes) {
+  let total = 0;
+  for (const scene of scenes) total += sceneSlot(scene, scenes);
+  return total;
+}
+
+/**
+ * Film playing at `elapsedMs`. A sorting film keeps its picture for {@link SORT_SLOT_MS}, then the
+ * next one fades in across {@link FADE_MS} while the previous film still has frames left. A home-page
+ * zoom uses {@link ZOOM_SLOT_MS} so the three fractals stay the shorter tail. Time wraps, so the
  * last film blends into the first the same way. `fade` is {@link fadeAmount} across {@link FADE_MS}.
  * `outgoingLeft` is how many milliseconds of the previous film remain.
  * `scenes` defaults to the full screensaver. A shorter list, such as the zoom films alone, cycles only those.
  */
 export function sceneAt(elapsedMs, scenes = SCENES) {
-  const slot = FILM_MS - FADE_MS;
-  const cycle = slot * scenes.length;
+  const cycle = cycleMs(scenes);
   let time = elapsedMs % cycle;
   if (time < 0) time += cycle;
-  const index = Math.min(scenes.length - 1, Math.floor(time / slot));
-  const local = time - index * slot;
+  let remaining = time;
+  let index = 0;
+  for (; index < scenes.length; index += 1) {
+    const slot = sceneSlot(scenes[index], scenes);
+    if (remaining < slot) break;
+    remaining -= slot;
+  }
+  if (index >= scenes.length) index = scenes.length - 1;
   const scene = scenes[index];
+  const slot = sceneSlot(scene, scenes);
+  const local = remaining;
+  const progressMs = slot === ZOOM_SLOT_MS ? slot : FILM_MS;
   return {
     index,
     id: scene.id,
     kind: scene.kind,
-    progress: FILM_MS === 0 ? 0 : Math.min(1, local / FILM_MS),
+    progress: progressMs === 0 ? 0 : Math.min(1, local / progressMs),
     fade: fadeAmount(Math.min(1, local / FADE_MS)),
     outgoingLeft: Math.max(0, FADE_MS - local),
   };
@@ -214,8 +247,8 @@ export function sceneAt(elapsedMs, scenes = SCENES) {
 
 /**
  * Paint order for one film. The incoming picture is in front, so a blend is visible even when
- * that film is earlier in the document than the one it replaces. The spiral is last in the page,
- * and this is what lets Mandelbrot fade in over it. `fade` is the opacity actually shown.
+ * that film is earlier in the document than the one it replaces. The last zoom is last in the page,
+ * and this is what lets quicksort fade in over it. `fade` is the opacity actually shown.
  */
 export function filmLayer(filmId, schedule, fade = schedule.fade, scenes = SCENES) {
   const outgoing = scenes[(schedule.index - 1 + scenes.length) % scenes.length].id;
