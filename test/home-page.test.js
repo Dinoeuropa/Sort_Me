@@ -16,12 +16,18 @@ test("the home page is a quiet chooser over the screensaver", () => {
   assert.match(home, /<h1>Sort Me<\/h1>/);
   assert.match(home, /class="home-card"/);
   assert.match(home, /class="home-film"/);
-  assert.match(home, /data-film="mandelbrot"/);
-  assert.match(home, /poster="\/media\/mandelbrot-zoom\.jpg"/);
+  assert.deepEqual(
+    [...home.matchAll(/data-film="([^"]+)"/g)].map((match) => match[1]),
+    ["quick", "merge", "heap", "mandelbrot", "julia", "burning"],
+  );
+  assert.match(home, /poster="\/media\/quick-sort\.jpg"/);
   assert.equal(home.match(/poster="/g).length, 1);
   assert.match(home, /data-film="quick"/);
   assert.match(home, /data-film="merge"/);
   assert.match(home, /data-film="heap"/);
+  assert.match(home, /data-film="mandelbrot"/);
+  assert.match(home, /data-film="julia"/);
+  assert.match(home, /data-film="burning"/);
   assert.match(home, /preload="none"/);
   assert.doesNotMatch(home, /src="\/media\//);
   assert.match(home, /aria-hidden="true"/);
