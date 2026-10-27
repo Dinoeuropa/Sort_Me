@@ -17,6 +17,12 @@ const HALF = 1n << BigInt(FRACTION_BITS - 1);
 export const MANDELBROT_ZOOM_FLOOR = 1e-290;
 
 /**
+ * Seahorse views closer than this skip blocks of iterations in the shader. Single-stepping a
+ * full frame past a few thousand iterations misses the frame budget.
+ */
+export const DEEP_SHADER_SCALE = 1e-8;
+
+/**
  * The published double-double of the seahorse center. The live camera stores this pair; the
  * fixed-point point above carries the digits past it. The two have to stay the same point.
  */

@@ -1,4 +1,4 @@
-import { DEEP_ITERATION_LIMIT, isSeahorseCenter } from "./deep-float.js";
+import { DEEP_ITERATION_LIMIT, DEEP_SHADER_SCALE, isSeahorseCenter } from "./deep-float.js";
 import { deepCenter, hasDeepCenter, shiftView, viewOffset } from "./precision.js";
 
 export { DEEP_ITERATION_LIMIT };
@@ -387,8 +387,6 @@ export function gpuPrecisionHolds(view, height) {
  */
 const GPU_PIXEL_FLOOR = 1e-34;
 
-/** Below this scale the seahorse reference no longer fits in a pair of doubles. */
-const DEEP_VIEW_SCALE = 1e-30;
 
 /**
  * How the shader can draw a view: "direct" from plain float32 coordinates, "perturb" as float32
@@ -399,7 +397,7 @@ export function gpuDepthMode(view, height) {
   if (!view || !(view.scale > 0) || !Number.isFinite(view.scale)) return null;
   if (gpuPrecisionHolds(view, height)) return "direct";
   if (!Number.isFinite(view.centerX) || !Number.isFinite(view.centerY)) return null;
-  if (isSeahorseCenter(view) && view.scale < DEEP_VIEW_SCALE && view.scale >= 1e-300) return "deep";
+  if (isSeahorseCenter(view) && view.scale < DEEP_SHADER_SCALE && view.scale >= 1e-300) return "deep";
   return view.scale / Math.max(1, height) >= GPU_PIXEL_FLOOR ? "perturb" : null;
 }
 
@@ -414,6 +412,21 @@ export function motionScale(msPerMegapixel, pixels, budgetMs) {
   const full = (msPerMegapixel * pixels) / 1e6;
   if (!(full > budgetMs)) return 1;
   return Math.max(MOTION_SCALE_MIN, Math.sqrt(budgetMs / full));
+}
+
+/** A refresh the dive can keep. A smooth 60Hz frame is about 17ms, so it does not count as late. */
+export const FRAME_PACE_MS = 20;
+
+/**
+ * Next share of a moving picture from how long the last frame actually took.
+ * A frame that misses the refresh shrinks; one that lands grows back toward full size.
+ * A gap long enough to be a paused tab is ignored. The GPU timer is not required.
+ */
+export function motionPace(share, elapsedMs, budgetMs = FRAME_PACE_MS) {
+  const held = Math.min(1, Math.max(MOTION_SCALE_MIN, Number.isFinite(share) && share > 0 ? share : 1));
+  if (!(elapsedMs > 0) || elapsedMs > 250 || !(budgetMs > 0)) return held;
+  const aimed = Math.min(1, Math.max(MOTION_SCALE_MIN, held * Math.sqrt(budgetMs / elapsedMs)));
+  return held + (aimed - held) * 0.5;
 }
 
 export const SETTLED_DPR_MAX = 3;

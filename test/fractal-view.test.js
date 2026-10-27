@@ -30,7 +30,9 @@ import {
   gpuDepthMode,
   ITERATION_LIMIT,
   iterationCap,
+  FRAME_PACE_MS,
   MOTION_SCALE_MIN,
+  motionPace,
   motionScale,
   incomingLevelFade,
   levelBlend,
@@ -280,7 +282,8 @@ test("the shader draws plain coordinates while they hold and offsets from a refe
     centerY: seahorse.y,
     centerYLo: seahorse.yLo,
   };
-  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "perturb");
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-6 }, 800), "perturb");
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "deep");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-40 }, 800), "deep");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-320 }, 800), null);
   assert.equal(gpuDepthMode(null, 800), null);
@@ -293,6 +296,17 @@ test("a moving picture is drawn at the share of full size that fits the frame bu
   assert.ok(Math.abs(slow - 0.5) < 1e-9);
   assert.equal(motionScale(1e6, 1e6, 14), MOTION_SCALE_MIN);
   assert.equal(motionScale(Number.NaN, 1e6, 14), 1);
+});
+
+test("a late zoom frame shrinks and a smooth one stays full size", () => {
+  assert.equal(motionPace(1, 16, FRAME_PACE_MS), 1);
+  assert.equal(motionPace(1, 0), 1);
+  assert.equal(motionPace(0.6, 1000), 0.6);
+  const late = motionPace(1, 80, FRAME_PACE_MS);
+  assert.ok(late < 0.8 && late > 0.6, `late share ${late}`);
+  const recovered = motionPace(late, 16, FRAME_PACE_MS);
+  assert.ok(recovered > late && recovered <= 1);
+  assert.ok(motionPace(0.25, 200, FRAME_PACE_MS) >= MOTION_SCALE_MIN);
 });
 
 test("a wheel notch is a small zoom in every delta mode", () => {
