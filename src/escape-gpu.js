@@ -125,6 +125,7 @@ uniform int uRebaseLast;
 uniform vec2 uOffset;
 uniform int uSkip;
 uniform vec2 uSeries;
+uniform vec2 uSeries2;
 out vec4 outColor;
 
 const int LOOP = ${loopLimit};
@@ -231,7 +232,7 @@ int escapePerturbed(vec2 u, int mode, int cap) {
     if (dot(z0, z0) > 4.0) return 0;
   }
   if (uSkip > 0 && uSkip < cap && uSkip < last) {
-    dz = cmul(uSeries, start);
+    dz = cmul(uSeries, start) + cmul(uSeries2, cmul(start, start));
     m = uSkip;
     iter = uSkip;
   }
@@ -408,7 +409,7 @@ void main() {
 
 const UNIFORMS = [
   "uResolution", "uBand", "uCenter", "uScale", "uFlip", "uCap", "uMode", "uParam", "uLut", "uLutWidth", "uSpan",
-  "uPerturb", "uOrbit", "uOrbitWidth", "uLast", "uRebaseAt", "uRebaseLast", "uOffset", "uSkip", "uSeries",
+  "uPerturb", "uOrbit", "uOrbitWidth", "uLast", "uRebaseAt", "uRebaseLast", "uOffset", "uSkip", "uSeries", "uSeries2",
 ];
 
 let gpu = null;
@@ -643,6 +644,11 @@ export function paintGpuEscape({
     const skip = reference.series ? seriesSkip(reference, radius) : 0;
     gl.uniform1i(where.uSkip, skip);
     gl.uniform2f(where.uSeries, skip > 0 ? reference.series[skip * 2] : 0, skip > 0 ? reference.series[skip * 2 + 1] : 0);
+    gl.uniform2f(
+      where.uSeries2,
+      skip > 0 && reference.quad ? reference.quad[skip * 2] : 0,
+      skip > 0 && reference.quad ? reference.quad[skip * 2 + 1] : 0,
+    );
   } else {
     gl.uniform1i(where.uOrbitWidth, 1);
     gl.uniform1i(where.uLast, 0);
@@ -651,6 +657,7 @@ export function paintGpuEscape({
     gl.uniform2f(where.uOffset, 0, 0);
     gl.uniform1i(where.uSkip, 0);
     gl.uniform2f(where.uSeries, 0, 0);
+    gl.uniform2f(where.uSeries2, 0, 0);
   }
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, lut);

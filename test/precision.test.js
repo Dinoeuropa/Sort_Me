@@ -155,6 +155,29 @@ test("the linear skip only reaches far when the plate is small next to the refer
   assert.equal(perturbIterations(escaping, 1e-31, 0, 4000, seriesSkip(escaping, 1e-30)), perturbIterations(escaping, 1e-31, 0, 4000));
 });
 
+test("the quadratic skip matches an unskipped perturbation on a small plate", () => {
+  const target = autoZoomTarget("mandelbrot", {});
+  const scale = 1e-12;
+  const cap = 2048;
+  const reference = referenceOrbit(target.x, target.xLo, target.y, target.yLo, cap);
+  assert.ok(reference.quad);
+  assert.equal(reference.quad.length, reference.series.length);
+  const skip = seriesSkip(reference, scale * Math.SQRT1_2);
+  assert.ok(skip > 0, `skip ${skip}`);
+  let same = 0;
+  const samples = 16;
+  for (let j = 0; j < 4; j += 1) {
+    for (let i = 0; i < 4; i += 1) {
+      const ux = ((i + 0.5) / 4 - 0.5) * scale;
+      const uy = ((j + 0.5) / 4 - 0.5) * scale;
+      const fast = perturbIterations(reference, ux, uy, cap, skip);
+      const exact = perturbIterations(reference, ux, uy, cap, 0);
+      if (fast === exact) same += 1;
+    }
+  }
+  assert.equal(same, samples);
+});
+
 test("a deep plate spreads the palette over the iterations it holds, and a shallow one is unchanged", () => {
   const target = autoZoomTarget("mandelbrot", {});
   const seahorse = presetById("mandelbrot", "seahorse");
