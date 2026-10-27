@@ -60,7 +60,7 @@ import {
   zoomEscape,
 } from "./fractal-view.js";
 import { renderEscape } from "./escape-pool.js";
-import { GPU_ITER_LIMIT, gpuAvailable, paintGpuEscape, pollGpuCost } from "./escape-gpu.js";
+import { GPU_ITER_LIMIT, gpuAvailable, gpuDrawLimit, paintGpuEscape, pollGpuCost } from "./escape-gpu.js";
 import { hasDeepCenter, viewOffset } from "./precision.js";
 import {
   PALETTES,
@@ -1376,9 +1376,9 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
 }
 
 /**
- * Color the pixels on screen from the formula, at the monitor's own resolution. Deep views are
- * offsets from a double-double reference orbit. A frame too heavy for the budget is drawn smaller
- * and stretched; a settled one then sharpens band by band at full size.
+ * Color the pixels on screen from the formula. A settled frame uses settledRaster, which can be larger than the screen and is limited by the GPU's drawing buffer.
+ * Deep views are offsets from a double-double reference orbit. A frame too heavy for the budget is
+ * drawn smaller and stretched; a settled one then sharpens band by band at full size.
  * Returns false where the GPU cannot draw the view, and the workers take over.
  */
 function paintGpuFrame(view, box, settle = false) {
@@ -1386,7 +1386,9 @@ function paintGpuFrame(view, box, settle = false) {
     state.gpuPan = null;
     return false;
   }
-  const dest = settle ? settledRaster(box.width, box.height, box.rawDpr || box.dpr) : motionRaster(box);
+  const dest = settle
+    ? settledRaster(box.width, box.height, box.rawDpr || box.dpr, gpuDrawLimit())
+    : motionRaster(box);
   if (
     state.gpuPan
     && (state.gpuPan.width !== dest.width || state.gpuPan.height !== dest.height || state.gpuPan.view.scale !== view.scale)

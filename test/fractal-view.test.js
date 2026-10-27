@@ -244,6 +244,9 @@ test("a settled raster is twice the device pixels, capped at 3x and a 7680 edge"
   const wide = settledRaster(4000, 2000, 2);
   assert.equal(Math.max(wide.width, wide.height), 7680);
   assert.equal(wide.width / wide.height, 2);
+  const gpuCapped = settledRaster(4000, 2000, 2, 4096);
+  assert.equal(Math.max(gpuCapped.width, gpuCapped.height), 4096);
+  assert.equal(gpuCapped.width / gpuCapped.height, 2);
   assert.deepEqual(settledRaster(0, 10, 1), { width: 1, height: 20 });
 });
 

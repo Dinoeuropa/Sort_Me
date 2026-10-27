@@ -505,6 +505,36 @@ export function gpuAvailable() {
   return Boolean(boot());
 }
 
+function positiveSize(value) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Largest square drawing buffer this GPU will actually back, or null without WebGL2.
+ * WebGL2 only promises 4096; asking for more silently shrinks the buffer and disagrees with uResolution.
+ */
+export function gpuDrawLimit() {
+  const session = boot();
+  if (!session) return null;
+  const { gl } = session;
+  const sizes = [];
+  try {
+    const renderbuffer = positiveSize(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+    if (renderbuffer) sizes.push(renderbuffer);
+  } catch { /* a missing parameter is not a limit */ }
+  try {
+    const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+    if (viewport) {
+      const wide = positiveSize(viewport[0]);
+      const tall = positiveSize(viewport[1]);
+      if (wide) sizes.push(wide);
+      if (tall) sizes.push(tall);
+    }
+  } catch { /* a missing parameter is not a limit */ }
+  return sizes.length ? Math.min(...sizes) : null;
+}
+
 /**
  * Milliseconds per million pixels per iteration of the draw that just finished on the GPU,
  * or null when no completed timer sample is waiting.
@@ -623,6 +653,13 @@ export function paintGpuEscape({
   if (canvas.width !== wide || canvas.height !== tall) {
     canvas.width = wide;
     canvas.height = tall;
+  }
+  if (
+    gl.drawingBufferWidth
+    && gl.drawingBufferHeight
+    && (gl.drawingBufferWidth < canvas.width || gl.drawingBufferHeight < canvas.height)
+  ) {
+    return null;
   }
   gl.viewport(0, 0, wide, tall);
   gl.useProgram(program);

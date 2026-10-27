@@ -408,14 +408,15 @@ export const SETTLED_DPR_MAX = 3;
 export const SETTLED_SUPERSAMPLE = 2;
 export const SETTLED_EDGE_MAX = 7680;
 
-/** Pixel size of a settled GPU frame: device pixels up to 3x, then doubled, then fit to 7680. */
-export function settledRaster(width, height, dpr = 1) {
+/** Pixel size of a settled GPU frame: device pixels up to 3x, then doubled, then fit to 7680 or edgeMax. */
+export function settledRaster(width, height, dpr = 1, edgeMax) {
   const ratio = Math.min(Math.max(Number(dpr) || 1, 1), SETTLED_DPR_MAX);
   let pixelW = Math.max(1, Math.floor(Math.max(0, width) * ratio * SETTLED_SUPERSAMPLE));
   let pixelH = Math.max(1, Math.floor(Math.max(0, height) * ratio * SETTLED_SUPERSAMPLE));
+  const cap = Number.isFinite(edgeMax) && edgeMax > 0 ? Math.min(SETTLED_EDGE_MAX, edgeMax) : SETTLED_EDGE_MAX;
   const edge = Math.max(pixelW, pixelH);
-  if (edge > SETTLED_EDGE_MAX) {
-    const fit = SETTLED_EDGE_MAX / edge;
+  if (edge > cap) {
+    const fit = cap / edge;
     pixelW = Math.max(1, Math.floor(pixelW * fit));
     pixelH = Math.max(1, Math.floor(pixelH * fit));
   }
