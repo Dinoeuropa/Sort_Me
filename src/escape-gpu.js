@@ -13,6 +13,17 @@ import {
 /** The shader loop stops here, the same cap the workers keep. */
 export const GPU_ITER_LIMIT = ITERATION_LIMIT;
 
+const LOOP_LIMITS = [256, 1024, 4096, 16384];
+
+/** Smallest compiled loop bound that can run this cap. */
+export function loopLimitForCap(cap) {
+  const n = cap | 0;
+  for (const limit of LOOP_LIMITS) {
+    if (n <= limit) return limit;
+  }
+  return LOOP_LIMITS[LOOP_LIMITS.length - 1];
+}
+
 /** Texels per row of the palette and orbit textures. WebGL2 promises at least 2048. */
 const LUT_WIDTH = 2048;
 const ORBIT_WIDTH = 1024;
@@ -89,12 +100,14 @@ void main() {
 }
 `;
 
-const FRAG = `#version 300 es
+function fragmentSource(loopLimit) {
+  return `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
 uniform vec2 uResolution;
 uniform vec2 uBand;
+uniform vec2 uOrigin;
 uniform vec2 uCenter;
 uniform float uScale;
 uniform float uFlip;
@@ -113,9 +126,10 @@ uniform int uRebaseLast;
 uniform vec2 uOffset;
 uniform int uSkip;
 uniform vec2 uSeries;
+uniform vec2 uSeries2;
 out vec4 outColor;
 
-const int LOOP = ${GPU_ITER_LIMIT};
+const int LOOP = ${loopLimit};
 // Past FAR, Newton's method only shrinks z by 2/3 a step; the rest is below float precision.
 const float FAR = 1e4;
 const float LN_FAR = 9.210340371976184;
@@ -169,16 +183,35 @@ int basinOf(vec2 z, float limit) {
   return 2;
 }
 
+bool mandelbrotBulb(vec2 c) {
+  float y2 = c.y * c.y;
+  float x1 = c.x - 0.25;
+  float q = x1 * x1 + y2;
+  if (q * (q + x1) <= 0.25 * y2) return true;
+  float xb = c.x + 1.0;
+  return xb * xb + y2 <= 0.0625;
+}
+
 int escapeDirect(vec2 p, int mode, int cap) {
   vec2 z = mode == 1 || mode == 3 ? p : vec2(0.0);
   vec2 c = mode == 0 || mode == 2 ? p : uParam;
   bool fold = mode >= 2;
   int iter = 0;
+  vec2 saved = vec2(0.0);
+  int check = 3;
+  if (mode == 0 && mandelbrotBulb(p)) return cap;
   for (int i = 0; i < LOOP; i++) {
     if (iter >= cap || dot(z, z) > 4.0) break;
     if (fold) z = abs(z);
     z = cmul(z, z) + c;
     iter += 1;
+    if (mode == 0) {
+      if (z == saved) return cap;
+      if (iter == check) {
+        saved = z;
+        check *= 2;
+      }
+    }
   }
   return iter;
 }
@@ -200,7 +233,7 @@ int escapePerturbed(vec2 u, int mode, int cap) {
     if (dot(z0, z0) > 4.0) return 0;
   }
   if (uSkip > 0 && uSkip < cap && uSkip < last) {
-    dz = cmul(uSeries, start);
+    dz = cmul(uSeries, start) + cmul(uSeries2, cmul(start, start));
     m = uSkip;
     iter = uSkip;
   }
@@ -354,9 +387,10 @@ void newtonPixel(vec2 p, vec2 u, int mode, int cap, out int outIter, out int out
 }
 
 void main() {
+  float px = uOrigin.x + gl_FragCoord.x;
   float py = uBand.x + uBand.y - gl_FragCoord.y;
+  float nx = px / uResolution.x - 0.5;
   float ny = uFlip > 0.5 ? py / uResolution.y - 0.5 : 0.5 - py / uResolution.y;
-  float nx = gl_FragCoord.x / uResolution.x - 0.5;
   vec2 u = vec2(nx * uScale * (uResolution.x / uResolution.y), ny * uScale);
   vec2 p = uCenter + u;
   int cap = uCap;
@@ -373,10 +407,11 @@ void main() {
   outColor = texelFetch(uLut, ivec2(index % uLutWidth, index / uLutWidth), 0);
 }
 `;
+}
 
 const UNIFORMS = [
-  "uResolution", "uBand", "uCenter", "uScale", "uFlip", "uCap", "uMode", "uParam", "uLut", "uLutWidth", "uSpan",
-  "uPerturb", "uOrbit", "uOrbitWidth", "uLast", "uRebaseAt", "uRebaseLast", "uOffset", "uSkip", "uSeries",
+  "uResolution", "uBand", "uOrigin", "uCenter", "uScale", "uFlip", "uCap", "uMode", "uParam", "uLut", "uLutWidth", "uSpan",
+  "uPerturb", "uOrbit", "uOrbitWidth", "uLast", "uRebaseAt", "uRebaseLast", "uOffset", "uSkip", "uSeries", "uSeries2",
 ];
 
 let gpu = null;
@@ -413,7 +448,7 @@ function boot() {
       antialias: false,
       depth: false,
       stencil: false,
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false,
       powerPreference: "high-performance",
     });
     if (!gl) {
@@ -421,26 +456,43 @@ function boot() {
       return null;
     }
     const vert = shader(gl, gl.VERTEX_SHADER, VERT);
-    const frag = shader(gl, gl.FRAGMENT_SHADER, FRAG);
-    if (!vert || !frag) {
+    if (!vert) {
       failed = true;
       return null;
     }
-    const program = gl.createProgram();
-    gl.attachShader(program, vert);
-    gl.attachShader(program, frag);
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      failed = true;
-      return null;
+    const programs = new Map();
+    for (const loopLimit of LOOP_LIMITS) {
+      const frag = shader(gl, gl.FRAGMENT_SHADER, fragmentSource(loopLimit));
+      if (!frag) {
+        failed = true;
+        return null;
+      }
+      const program = gl.createProgram();
+      gl.attachShader(program, vert);
+      gl.attachShader(program, frag);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        failed = true;
+        return null;
+      }
+      const where = {};
+      for (const name of UNIFORMS) where[name] = gl.getUniformLocation(program, name);
+      programs.set(loopLimit, { program, where });
     }
-    const where = {};
-    for (const name of UNIFORMS) where[name] = gl.getUniformLocation(program, name);
     const lut = texture(gl);
     const orbit = texture(gl);
     gl.bindTexture(gl.TEXTURE_2D, orbit);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4));
-    gpu = { gl, canvas, program, where, lut, lutKey: "", orbit, reference: null, probe: new Uint8Array(4) };
+    gpu = {
+      gl,
+      canvas,
+      programs,
+      lut,
+      lutKey: "",
+      orbit,
+      reference: null,
+      timerExt: gl.getExtension("EXT_disjoint_timer_query_webgl2"),
+    };
     return gpu;
   } catch {
     failed = true;
@@ -451,6 +503,56 @@ function boot() {
 /** True once WebGL2 and the shader are ready, so deep views can skip the workers. */
 export function gpuAvailable() {
   return Boolean(boot());
+}
+
+function positiveSize(value) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Largest square drawing buffer this GPU will actually back, or null without WebGL2.
+ * WebGL2 only promises 4096; asking for more silently shrinks the buffer and disagrees with uResolution.
+ */
+export function gpuDrawLimit() {
+  const session = boot();
+  if (!session) return null;
+  const { gl } = session;
+  const sizes = [];
+  try {
+    const renderbuffer = positiveSize(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+    if (renderbuffer) sizes.push(renderbuffer);
+  } catch { /* a missing parameter is not a limit */ }
+  try {
+    const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+    if (viewport) {
+      const wide = positiveSize(viewport[0]);
+      const tall = positiveSize(viewport[1]);
+      if (wide) sizes.push(wide);
+      if (tall) sizes.push(tall);
+    }
+  } catch { /* a missing parameter is not a limit */ }
+  return sizes.length ? Math.min(...sizes) : null;
+}
+
+/**
+ * Milliseconds per million pixels per iteration of the draw that just finished on the GPU,
+ * or null when no completed timer sample is waiting.
+ */
+export function pollGpuCost() {
+  if (!gpu || !gpu.timerSample) return null;
+  const { gl, timerExt, timerSample } = gpu;
+  const { query, width, height, cap } = timerSample;
+  if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return null;
+  if (timerExt && gl.getParameter(timerExt.GPU_DISJOINT_EXT)) {
+    gl.deleteQuery(query);
+    gpu.timerSample = null;
+    return null;
+  }
+  const nanoseconds = gl.getQueryParameter(query, gl.QUERY_RESULT);
+  gl.deleteQuery(query);
+  gpu.timerSample = null;
+  return nanoseconds / 1e6 / (((width * height) / 1e6) * Math.max(1, cap));
 }
 
 /** Iterations a reference is computed for: rounded up, so a slowly rising cap reuses one orbit. */
@@ -507,7 +609,8 @@ function referenceFor(session, mode, preset, cap) {
  * Color the pixels on the GPU and return that canvas. `depth` is "direct" for plain float
  * coordinates or "perturb" for offsets from a double-double reference, from gpuDepthMode.
  * `rows` draws only a band of rows counted from the top, and the canvas returned is that band
- * alone, so a heavy frame can be drawn a band at a time. `floor` and `top` fit the
+ * alone, so a heavy frame can be drawn a band at a time. `cols` clips columns the same way,
+ * and both together return the intersection rectangle. `floor` and `top` fit the
  * palette as paintEscape does. Returns null where WebGL2 is missing or the cap is past the loop.
  */
 export function paintGpuEscape({
@@ -521,6 +624,7 @@ export function paintGpuEscape({
   floor = 0,
   top = null,
   rows = null,
+  cols = null,
 }) {
   const mode = gpuEscapeMode(fractalId, preset);
   const iterations = cap | 0;
@@ -528,7 +632,9 @@ export function paintGpuEscape({
   if (depth !== "direct" && depth !== "perturb") return null;
   const session = boot();
   if (!session) return null;
-  const { gl, canvas, program, where, lut } = session;
+  const loopLimit = loopLimitForCap(iterations);
+  const { program, where } = session.programs.get(loopLimit);
+  const { gl, canvas, lut } = session;
   const lutKey = `${paletteId}:${iterations}:${floor}:${top}`;
   if (session.lutKey !== lutKey) {
     const table = buildPaletteLut(paletteId, iterations, floor, top);
@@ -539,14 +645,26 @@ export function paintGpuEscape({
   }
   const from = rows ? Math.max(0, Math.min(height - 1, rows.from | 0)) : 0;
   const to = rows ? Math.max(from + 1, Math.min(height, rows.to | 0)) : height;
+  const x0 = cols ? Math.max(0, Math.min(width, cols.from | 0)) : 0;
+  const x1 = cols ? Math.max(x0, Math.min(width, cols.to | 0)) : width;
   const tall = to - from;
-  if (canvas.width !== width || canvas.height !== tall) {
-    canvas.width = width;
+  const wide = x1 - x0;
+  if (wide < 1 || tall < 1) return null;
+  if (canvas.width !== wide || canvas.height !== tall) {
+    canvas.width = wide;
     canvas.height = tall;
   }
-  gl.viewport(0, 0, width, tall);
+  if (
+    gl.drawingBufferWidth
+    && gl.drawingBufferHeight
+    && (gl.drawingBufferWidth < canvas.width || gl.drawingBufferHeight < canvas.height)
+  ) {
+    return null;
+  }
+  gl.viewport(0, 0, wide, tall);
   gl.useProgram(program);
   gl.uniform2f(where.uResolution, width, height);
+  gl.uniform2f(where.uOrigin, x0, 0);
   gl.uniform2f(where.uBand, from, tall);
   gl.uniform2f(where.uCenter, preset.centerX, preset.centerY);
   gl.uniform1f(where.uScale, preset.scale);
@@ -572,6 +690,11 @@ export function paintGpuEscape({
     const skip = reference.series ? seriesSkip(reference, radius) : 0;
     gl.uniform1i(where.uSkip, skip);
     gl.uniform2f(where.uSeries, skip > 0 ? reference.series[skip * 2] : 0, skip > 0 ? reference.series[skip * 2 + 1] : 0);
+    gl.uniform2f(
+      where.uSeries2,
+      skip > 0 && reference.quad ? reference.quad[skip * 2] : 0,
+      skip > 0 && reference.quad ? reference.quad[skip * 2 + 1] : 0,
+    );
   } else {
     gl.uniform1i(where.uOrbitWidth, 1);
     gl.uniform1i(where.uLast, 0);
@@ -580,6 +703,7 @@ export function paintGpuEscape({
     gl.uniform2f(where.uOffset, 0, 0);
     gl.uniform1i(where.uSkip, 0);
     gl.uniform2f(where.uSeries, 0, 0);
+    gl.uniform2f(where.uSeries2, 0, 0);
   }
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, lut);
@@ -587,8 +711,15 @@ export function paintGpuEscape({
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, session.orbit);
   gl.uniform1i(where.uOrbit, 1);
+  const ext = session.timerExt;
+  // A band or strip covers fewer pixels than the stored frame size, so timing it would understate cost.
+  const timeThis = Boolean(ext) && !session.timerSample && (!rows || (from === 0 && to === height)) && (!cols || (x0 === 0 && x1 === width));
+  if (timeThis) {
+    const query = gl.createQuery();
+    gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
+    session.timerSample = { query, width, height, cap: iterations };
+  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
-  // Reading one pixel waits for the frame, so the caller's clock measures the real cost.
-  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, session.probe);
+  if (timeThis) gl.endQuery(ext.TIME_ELAPSED_EXT);
   return canvas;
 }

@@ -35,6 +35,8 @@ import {
   mapPointsInto,
   panBounds,
   panEscape,
+  panPixels,
+  panRepaint,
   plateCovers,
   pickPlate,
   plateBudget,
@@ -44,6 +46,10 @@ import {
   gpuPrecisionHolds,
   rasterSize,
   recursionLevel,
+  SETTLED_DPR_MAX,
+  SETTLED_EDGE_MAX,
+  SETTLED_SUPERSAMPLE,
+  settledRaster,
   unproject,
   wheelZoomFactor,
   zoomBounds,
@@ -84,6 +90,22 @@ test("a burning-ship drag follows the flipped axis", () => {
   const ship = { centerX: -0.4, centerY: -0.5, scale: 3, flipY: true };
   const next = panEscape(ship, 0, 10, 100, 100);
   assert.ok(next.centerY < ship.centerY);
+});
+
+test("a pan names the new strips and the overlap to keep", () => {
+  const before = { centerX: 0, centerY: 0, scale: 2, flipY: false };
+  const after = panEscape(before, 30, -12, 300, 200);
+  const shift = panPixels(before, after, 300, 200);
+  assert.deepEqual(shift, { x: 30, y: -12 });
+  assert.equal(panPixels(before, { ...after, scale: 1 }, 300, 200), null);
+  const paint = panRepaint(300, 200, shift.x, shift.y);
+  assert.deepEqual(paint.copy, { sx: 0, sy: 12, sw: 270, sh: 188, dx: 30, dy: 0 });
+  assert.deepEqual(paint.rects, [
+    { x: 0, y: 0, w: 30, h: 200 },
+    { x: 30, y: 188, w: 270, h: 12 },
+  ]);
+  assert.equal(panRepaint(300, 200, 0, 0), null);
+  assert.equal(panRepaint(300, 200, 200, 0), null);
 });
 
 test("zooming a curve keeps the same pixel on the same point", () => {
@@ -210,6 +232,22 @@ test("a finished escape picture is sampled at 4K", () => {
   assert.equal(SHARP_RASTER_EDGE, 3840);
   const moving = rasterSize(900, 520, 1, true, 1920);
   assert.equal(Math.max(moving.width, moving.height), 1920);
+});
+
+test("a settled raster is twice the device pixels, capped at 3x and a 7680 edge", () => {
+  assert.equal(SETTLED_DPR_MAX, 3);
+  assert.equal(SETTLED_SUPERSAMPLE, 2);
+  assert.equal(SETTLED_EDGE_MAX, 7680);
+  assert.deepEqual(settledRaster(800, 600, 1), { width: 1600, height: 1200 });
+  assert.deepEqual(settledRaster(800, 600, 2), { width: 3200, height: 2400 });
+  assert.deepEqual(settledRaster(800, 600, 4), { width: 4800, height: 3600 });
+  const wide = settledRaster(4000, 2000, 2);
+  assert.equal(Math.max(wide.width, wide.height), 7680);
+  assert.equal(wide.width / wide.height, 2);
+  const gpuCapped = settledRaster(4000, 2000, 2, 4096);
+  assert.equal(Math.max(gpuCapped.width, gpuCapped.height), 4096);
+  assert.equal(gpuCapped.width / gpuCapped.height, 2);
+  assert.deepEqual(settledRaster(0, 10, 1), { width: 1, height: 20 });
 });
 
 test("a shallow escape view fits in float32 and a deep one does not", () => {

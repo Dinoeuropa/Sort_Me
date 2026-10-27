@@ -102,8 +102,20 @@ export function ddEscapeIterations(zx, zxLo, zy, zyLo, cx, cxLo, cy, cyLo, maxIt
 const ORBIT_CACHE_SIZE = 6;
 const orbitCache = new Map();
 
-/** Largest offset, relative to the reference, at which its square is still dropped. */
+/** Largest omitted cubic, relative to the reference, at which the series skip still holds. */
 const SERIES_TOLERANCE = 1e-8;
+/** Kept linear and quadratic terms must stay this small a fraction of |Z|. */
+const SERIES_KEPT = 0.25;
+
+function skipError(radius, b, a, c) {
+  return Math.hypot(c[0], c[1]) * radius * radius * radius;
+}
+
+function cubicRatio(size, cx, cy) {
+  const mag = Math.hypot(cx, cy);
+  if (size > 0) return mag / size;
+  return mag > 0 ? Infinity : 0;
+}
 
 /**
  * The orbit of a reference point iterated in double-double and stored as doubles. It stops after
@@ -112,10 +124,11 @@ const SERIES_TOLERANCE = 1e-8;
  * (Julia), and `rebase` is the orbit a pixel moves onto when its own orbit nears the origin: the
  * critical orbit, which is the reference itself when the reference starts at zero.
  *
- * While a pixel's offset is tiny next to the reference, it grows linearly: δ_n = B_n · u with
- * B_{n+1} = 2 Z_n B_n + 1 for an offset in c and B_{n+1} = 2 Z_n B_n for an offset in z.
- * `series` holds B_n and `reach` the largest |B_k| / |Z_k| up to n, which says how big an offset
- * may be for the linear step to n to hold. The fold has no such series.
+ * While a pixel's offset is tiny next to the reference, it grows as δ_n = B_n u + A_n u², with
+ * B_{n+1} = 2 Z_n B_n + 1 for an offset in c and B_{n+1} = 2 Z_n B_n for an offset in z, and
+ * A_{n+1} = 2 Z_n A_n + B_n². `series` holds B_n, `quad` holds A_n, and `reach` the largest
+ * omitted cubic |C_k| / |Z_k| up to n, which says how big an offset may be for the skip to n to
+ * hold. The fold has no such series.
  * The last few orbits are kept, as one plate asks for them once per band.
  */
 function orbitOf(zx, zxLo, zy, zyLo, cx, cxLo, cy, cyLo, maxIter, fold, inC) {
@@ -125,6 +138,8 @@ function orbitOf(zx, zxLo, zy, zyLo, cx, cxLo, cy, cyLo, maxIter, fold, inC) {
   if (cached) return cached;
   const orbit = new Float64Array((cap + 1) * 2);
   const series = fold ? null : new Float64Array((cap + 1) * 2);
+  const quad = fold ? null : new Float64Array((cap + 1) * 2);
+  const cubic = fold ? null : new Float64Array((cap + 1) * 2);
   const reach = fold ? null : new Float64Array(cap + 1);
   let xhi = zx;
   let xlo = zxLo;
@@ -135,7 +150,7 @@ function orbitOf(zx, zxLo, zy, zyLo, cx, cxLo, cy, cyLo, maxIter, fold, inC) {
   if (series) {
     series[0] = inC ? 0 : 1;
     const size = Math.hypot(orbit[0], orbit[1]);
-    reach[0] = inC ? 0 : size > 0 ? 1 / size : Infinity;
+    reach[0] = cubicRatio(size, cubic[0], cubic[1]);
   }
   let count = 1;
   for (let n = 1; n <= cap; n += 1) {
@@ -144,8 +159,18 @@ function orbitOf(zx, zxLo, zy, zyLo, cx, cxLo, cy, cyLo, maxIter, fold, inC) {
       const py = orbit[n * 2 - 1];
       const bx = series[n * 2 - 2];
       const by = series[n * 2 - 1];
+      const ax = quad[n * 2 - 2];
+      const ay = quad[n * 2 - 1];
+      const cxn = cubic[n * 2 - 2];
+      const cyn = cubic[n * 2 - 1];
       series[n * 2] = 2 * (px * bx - py * by) + (inC ? 1 : 0);
       series[n * 2 + 1] = 2 * (px * by + py * bx);
+      const b2x = bx * bx - by * by;
+      const b2y = 2 * bx * by;
+      quad[n * 2] = 2 * (px * ax - py * ay) + b2x;
+      quad[n * 2 + 1] = 2 * (px * ay + py * ax) + b2y;
+      cubic[n * 2] = 2 * (px * cxn - py * cyn) + 2 * (ax * bx - ay * by);
+      cubic[n * 2 + 1] = 2 * (px * cyn + py * cxn) + 2 * (ax * by + ay * bx);
     }
     if (fold) {
       if (xhi < 0) {
@@ -171,13 +196,13 @@ function orbitOf(zx, zxLo, zy, zyLo, cx, cxLo, cy, cyLo, maxIter, fold, inC) {
     orbit[n * 2 + 1] = yhi + ylo;
     if (series) {
       const size = Math.hypot(orbit[n * 2], orbit[n * 2 + 1]);
-      const ratio = size > 0 ? Math.hypot(series[n * 2], series[n * 2 + 1]) / size : Infinity;
+      const ratio = cubicRatio(size, cubic[n * 2], cubic[n * 2 + 1]);
       reach[n] = Math.max(reach[n - 1], ratio);
     }
     count = n + 1;
     if (xhi * xhi + yhi * yhi > 4) break;
   }
-  const result = { orbit, series, reach, count, cap, fold, inC, rebase: null };
+  const result = { orbit, series, quad, reach, count, cap, fold, inC, rebase: null };
   result.rebase = zx === 0 && zxLo === 0 && zy === 0 && zyLo === 0
     ? result
     : orbitOf(0, 0, 0, 0, cx, cxLo, cy, cyLo, cap, fold, inC);
@@ -207,19 +232,32 @@ export function shipJuliaReference(zx, zxLo, zy, zyLo, cx, cy, maxIter) {
 }
 
 /**
- * How many iterations every pixel within `radius` of the reference may take in one linear step.
+ * How many iterations every pixel within `radius` of the reference may take in one quadratic step.
  * Zero when the plate is wide enough that offsets matter from the start, and for the fold.
  */
 export function seriesSkip(reference, radius) {
-  if (!(radius > 0) || !reference.series) return 0;
+  if (!(radius > 0) || !reference.series || !reference.quad) return 0;
   if (reference.skipRadius === radius) return reference.skip;
-  const reach = reference.reach;
   const limit = reference.count - 2;
   let skip = 0;
-  while (skip < limit && reach[skip + 1] * radius <= SERIES_TOLERANCE) skip += 1;
+  while (skip < limit && skipUsable(reference, skip + 1, radius)) skip += 1;
   reference.skipRadius = radius;
   reference.skip = skip;
   return skip;
+}
+
+function skipUsable(reference, n, radius) {
+  const size = Math.hypot(reference.orbit[n * 2], reference.orbit[n * 2 + 1]);
+  const b = [reference.series[n * 2], reference.series[n * 2 + 1]];
+  const a = [reference.quad[n * 2], reference.quad[n * 2 + 1]];
+  const kept = Math.hypot(b[0], b[1]) * radius + Math.hypot(a[0], a[1]) * radius * radius;
+  const c = [reference.reach[n] * size, 0];
+  return size > 0
+    && kept <= SERIES_KEPT * size
+    && skipError(radius, b, a, c) <= SERIES_TOLERANCE * size
+    // The cubic remainder alone would skip past where existing tests still match, so keep the
+    // previous linear bound as well.
+    && Math.hypot(b[0], b[1]) * radius <= SERIES_TOLERANCE * size;
 }
 
 /** |x + d| − |x|, exact in each case, so a fold near the axis does not cancel. */
@@ -234,7 +272,7 @@ function diffAbs(x, d) {
  * The offset from the reference orbit is iterated in plain doubles, and whenever the pixel's own
  * orbit comes closer to the origin than its offset, or the reference runs out, the pixel becomes
  * an offset from the start of the critical orbit. That rebasing keeps the offset small, so no
- * glitches appear. `skip` iterations, from seriesSkip, are taken at once as a linear step.
+ * glitches appear. `skip` iterations, from seriesSkip, are taken at once as a quadratic step.
  */
 export function perturbIterations(reference, ux, uy, maxIter, skip = 0) {
   const inC = reference.inC;
@@ -252,11 +290,15 @@ export function perturbIterations(reference, ux, uy, maxIter, skip = 0) {
     const zy0 = orbit[1] + dy;
     if (zx0 * zx0 + zy0 * zy0 > 4) return 0;
   }
-  if (skip > 0 && skip < maxIter && skip < last && reference.series) {
+  if (skip > 0 && skip < maxIter && skip < last && reference.series && reference.quad) {
+    const ux2 = ux * ux - uy * uy;
+    const uy2 = 2 * ux * uy;
     const bx = reference.series[skip * 2];
     const by = reference.series[skip * 2 + 1];
-    dx = bx * ux - by * uy;
-    dy = bx * uy + by * ux;
+    const ax = reference.quad[skip * 2];
+    const ay = reference.quad[skip * 2 + 1];
+    dx = bx * ux - by * uy + ax * ux2 - ay * uy2;
+    dy = bx * uy + by * ux + ax * uy2 + ay * ux2;
     m = skip;
     iter = skip;
   }

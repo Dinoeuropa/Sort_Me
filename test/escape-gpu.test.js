@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { paintEscape } from "../src/palettes.js";
 import { ITERATION_LIMIT } from "../src/fractal-view.js";
 import { juliaReference, newtonReference, referenceOrbit } from "../src/precision.js";
-import { GPU_ITER_LIMIT, buildPaletteLut, gpuEscapeMode, packOrbit } from "../src/escape-gpu.js";
+import { GPU_ITER_LIMIT, buildPaletteLut, gpuDrawLimit, gpuEscapeMode, loopLimitForCap, packOrbit } from "../src/escape-gpu.js";
 
 function painted(cap, iteration, basin, floor, top) {
   return paintEscape("classic", [iteration], [basin], 1, 1, cap, 1, null, floor, top);
@@ -69,4 +70,44 @@ test("each escape fractal picks the shader that matches its formula", () => {
   assert.equal(gpuEscapeMode("newton", {}), 4);
   assert.equal(gpuEscapeMode("newton", { px: 0.1, py: 0 }), 5);
   assert.equal(gpuEscapeMode("koch", {}), -1);
+});
+
+test("the shader loop is the smallest bucket that covers the cap", () => {
+  assert.equal(loopLimitForCap(1), 256);
+  assert.equal(loopLimitForCap(256), 256);
+  assert.equal(loopLimitForCap(257), 1024);
+  assert.equal(loopLimitForCap(1024), 1024);
+  assert.equal(loopLimitForCap(1025), 4096);
+  assert.equal(loopLimitForCap(4096), 4096);
+  assert.equal(loopLimitForCap(4097), 16384);
+  assert.equal(loopLimitForCap(GPU_ITER_LIMIT), 16384);
+  assert.equal(loopLimitForCap(999999), 16384);
+});
+
+test("a GPU frame is timed without reading a pixel back", () => {
+  const source = readFileSync(new URL("../src/escape-gpu.js", import.meta.url), "utf8");
+  assert.equal(source.includes("readPixels"), false);
+  assert.match(source, /EXT_disjoint_timer_query_webgl2/);
+  assert.match(source, /preserveDrawingBuffer:\s*false/);
+  assert.match(source, /export function pollGpuCost/);
+  assert.match(source, /timeThis = Boolean\(ext\) && !session\.timerSample && \(!rows \|\| \(from === 0 && to === height\)\)/);
+});
+
+test("gpuDrawLimit is the smallest drawing-buffer guarantee, or null without WebGL2", () => {
+  assert.equal(gpuDrawLimit(), null);
+  const source = readFileSync(new URL("../src/escape-gpu.js", import.meta.url), "utf8");
+  assert.match(source, /export function gpuDrawLimit/);
+  assert.match(source, /MAX_RENDERBUFFER_SIZE/);
+  assert.match(source, /MAX_VIEWPORT_DIMS/);
+  const paint = source.slice(source.indexOf("export function paintGpuEscape"));
+  assert.match(paint, /drawingBufferWidth/);
+  assert.match(paint, /drawingBufferHeight/);
+  assert.match(
+    paint,
+    /drawingBufferWidth[\s\S]{0,200}drawingBufferHeight[\s\S]{0,200}return null/,
+  );
+  const app = readFileSync(new URL("../src/fractal-app.js", import.meta.url), "utf8");
+  assert.match(app, /settledRaster\([^;]*gpuDrawLimit\(\)/);
+  assert.doesNotMatch(app, /at the monitor's own resolution/);
+  assert.match(app, /settledRaster, which can be larger than the screen and is limited by the GPU's drawing buffer/);
 });
