@@ -52,6 +52,7 @@ import {
   plateRasterEdge,
   pointBudget,
   gpuDepthMode,
+  motionPace,
   motionScale,
   rasterSize,
   settledRaster,
@@ -1437,7 +1438,12 @@ function paintGpuFrame(view, box, settle = false) {
     floor: fit.floor,
     top: fit.top,
   };
-  const share = motionScale(gpuClock.cost * cap, dest.width * dest.height, MOTION_BUDGET_MS);
+  const budgeted = motionScale(gpuClock.cost * cap, dest.width * dest.height, MOTION_BUDGET_MS);
+  let share = budgeted;
+  if (state.autoZoom && !settle) {
+    state.zoomPace = motionPace(state.zoomPace, state.frameMs);
+    share = Math.min(budgeted, state.zoomPace);
+  }
   if (settle && refine.key === key) return true;
   cancelRefine();
   if (!(settle && state.gpuKey === key && state.gpuShare < 1)) {
@@ -1800,6 +1806,8 @@ function startAutoZoom() {
   state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), 1)));
   state.plateTook = 0;
   state.exploring = false;
+  state.zoomPace = 1;
+  state.frameMs = 0;
   state.zoomStamp = performance.now();
   const token = ++state.autoToken;
   state.exploreToken += 1;
@@ -1822,7 +1830,9 @@ let plateSerial = 1;
  */
 function stepAutoZoom(token) {
   const now = performance.now();
-  const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
+  const raw = now - (state.zoomStamp || now);
+  state.frameMs = state.zoomStamp ? raw : 0;
+  const elapsed = Math.min(120, Math.max(16, raw));
   state.zoomStamp = now;
   const frames = elapsed / 16.7;
   const path = state.autoPath;

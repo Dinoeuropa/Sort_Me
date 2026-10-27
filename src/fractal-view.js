@@ -414,6 +414,21 @@ export function motionScale(msPerMegapixel, pixels, budgetMs) {
   return Math.max(MOTION_SCALE_MIN, Math.sqrt(budgetMs / full));
 }
 
+/** A refresh the dive can keep. A smooth 60Hz frame is about 17ms, so it does not count as late. */
+export const FRAME_PACE_MS = 20;
+
+/**
+ * Next share of a moving picture from how long the last frame actually took.
+ * A frame that misses the refresh shrinks; one that lands grows back toward full size.
+ * A gap long enough to be a paused tab is ignored. The GPU timer is not required.
+ */
+export function motionPace(share, elapsedMs, budgetMs = FRAME_PACE_MS) {
+  const held = Math.min(1, Math.max(MOTION_SCALE_MIN, Number.isFinite(share) && share > 0 ? share : 1));
+  if (!(elapsedMs > 0) || elapsedMs > 250 || !(budgetMs > 0)) return held;
+  const aimed = Math.min(1, Math.max(MOTION_SCALE_MIN, held * Math.sqrt(budgetMs / elapsedMs)));
+  return held + (aimed - held) * 0.5;
+}
+
 export const SETTLED_DPR_MAX = 3;
 export const SETTLED_SUPERSAMPLE = 2;
 export const SETTLED_EDGE_MAX = 7680;
