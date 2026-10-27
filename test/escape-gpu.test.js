@@ -3,7 +3,7 @@ import test from "node:test";
 import { paintEscape } from "../src/palettes.js";
 import { ITERATION_LIMIT } from "../src/fractal-view.js";
 import { juliaReference, newtonReference, referenceOrbit } from "../src/precision.js";
-import { GPU_ITER_LIMIT, buildPaletteLut, gpuEscapeMode, packOrbit } from "../src/escape-gpu.js";
+import { GPU_ITER_LIMIT, buildPaletteLut, gpuEscapeMode, loopLimitForCap, packOrbit } from "../src/escape-gpu.js";
 
 function painted(cap, iteration, basin, floor, top) {
   return paintEscape("classic", [iteration], [basin], 1, 1, cap, 1, null, floor, top);
@@ -69,4 +69,16 @@ test("each escape fractal picks the shader that matches its formula", () => {
   assert.equal(gpuEscapeMode("newton", {}), 4);
   assert.equal(gpuEscapeMode("newton", { px: 0.1, py: 0 }), 5);
   assert.equal(gpuEscapeMode("koch", {}), -1);
+});
+
+test("the shader loop is the smallest bucket that covers the cap", () => {
+  assert.equal(loopLimitForCap(1), 256);
+  assert.equal(loopLimitForCap(256), 256);
+  assert.equal(loopLimitForCap(257), 1024);
+  assert.equal(loopLimitForCap(1024), 1024);
+  assert.equal(loopLimitForCap(1025), 4096);
+  assert.equal(loopLimitForCap(4096), 4096);
+  assert.equal(loopLimitForCap(4097), 16384);
+  assert.equal(loopLimitForCap(GPU_ITER_LIMIT), 16384);
+  assert.equal(loopLimitForCap(999999), 16384);
 });

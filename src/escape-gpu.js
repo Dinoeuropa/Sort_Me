@@ -13,6 +13,17 @@ import {
 /** The shader loop stops here, the same cap the workers keep. */
 export const GPU_ITER_LIMIT = ITERATION_LIMIT;
 
+const LOOP_LIMITS = [256, 1024, 4096, 16384];
+
+/** Smallest compiled loop bound that can run this cap. */
+export function loopLimitForCap(cap) {
+  const n = cap | 0;
+  for (const limit of LOOP_LIMITS) {
+    if (n <= limit) return limit;
+  }
+  return LOOP_LIMITS[LOOP_LIMITS.length - 1];
+}
+
 /** Texels per row of the palette and orbit textures. WebGL2 promises at least 2048. */
 const LUT_WIDTH = 2048;
 const ORBIT_WIDTH = 1024;
@@ -89,7 +100,8 @@ void main() {
 }
 `;
 
-const FRAG = `#version 300 es
+function fragmentSource(loopLimit) {
+  return `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -115,7 +127,7 @@ uniform int uSkip;
 uniform vec2 uSeries;
 out vec4 outColor;
 
-const int LOOP = ${GPU_ITER_LIMIT};
+const int LOOP = ${loopLimit};
 // Past FAR, Newton's method only shrinks z by 2/3 a step; the rest is below float precision.
 const float FAR = 1e4;
 const float LN_FAR = 9.210340371976184;
@@ -373,6 +385,7 @@ void main() {
   outColor = texelFetch(uLut, ivec2(index % uLutWidth, index / uLutWidth), 0);
 }
 `;
+}
 
 const UNIFORMS = [
   "uResolution", "uBand", "uCenter", "uScale", "uFlip", "uCap", "uMode", "uParam", "uLut", "uLutWidth", "uSpan",
@@ -421,26 +434,34 @@ function boot() {
       return null;
     }
     const vert = shader(gl, gl.VERTEX_SHADER, VERT);
-    const frag = shader(gl, gl.FRAGMENT_SHADER, FRAG);
-    if (!vert || !frag) {
+    if (!vert) {
       failed = true;
       return null;
     }
-    const program = gl.createProgram();
-    gl.attachShader(program, vert);
-    gl.attachShader(program, frag);
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      failed = true;
-      return null;
+    const programs = new Map();
+    for (const loopLimit of LOOP_LIMITS) {
+      const frag = shader(gl, gl.FRAGMENT_SHADER, fragmentSource(loopLimit));
+      if (!frag) {
+        failed = true;
+        return null;
+      }
+      const program = gl.createProgram();
+      gl.attachShader(program, vert);
+      gl.attachShader(program, frag);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        failed = true;
+        return null;
+      }
+      const where = {};
+      for (const name of UNIFORMS) where[name] = gl.getUniformLocation(program, name);
+      programs.set(loopLimit, { program, where });
     }
-    const where = {};
-    for (const name of UNIFORMS) where[name] = gl.getUniformLocation(program, name);
     const lut = texture(gl);
     const orbit = texture(gl);
     gl.bindTexture(gl.TEXTURE_2D, orbit);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4));
-    gpu = { gl, canvas, program, where, lut, lutKey: "", orbit, reference: null, probe: new Uint8Array(4) };
+    gpu = { gl, canvas, programs, lut, lutKey: "", orbit, reference: null, probe: new Uint8Array(4) };
     return gpu;
   } catch {
     failed = true;
@@ -528,7 +549,9 @@ export function paintGpuEscape({
   if (depth !== "direct" && depth !== "perturb") return null;
   const session = boot();
   if (!session) return null;
-  const { gl, canvas, program, where, lut } = session;
+  const loopLimit = loopLimitForCap(iterations);
+  const { program, where } = session.programs.get(loopLimit);
+  const { gl, canvas, lut } = session;
   const lutKey = `${paletteId}:${iterations}:${floor}:${top}`;
   if (session.lutKey !== lutKey) {
     const table = buildPaletteLut(paletteId, iterations, floor, top);
