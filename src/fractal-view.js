@@ -1,4 +1,7 @@
+import { DEEP_ITERATION_LIMIT, isSeahorseCenter } from "./deep-float.js";
 import { deepCenter, hasDeepCenter, shiftView, viewOffset } from "./precision.js";
+
+export { DEEP_ITERATION_LIMIT };
 
 /** Matches the padding drawPaths, drawTriangles, and drawPoints use. */
 export const FIT_PAD = 18;
@@ -86,6 +89,10 @@ export function iterationCap(baseDepth, magnification) {
 const NEWTON_STEPS_PER_OCTAVE = 5;
 
 export function escapeIterationCap(fractalId, baseDepth, magnification) {
+  if (fractalId === "mandelbrot") {
+    const extra = Math.max(0, Math.round(Math.log2(Math.max(1, magnification)) * 96));
+    return Math.min(DEEP_ITERATION_LIMIT, Math.max(1, baseDepth + extra));
+  }
   if (fractalId !== "newton") return iterationCap(baseDepth, magnification);
   const extra = Math.max(0, Math.round(Math.log2(Math.max(1, magnification)) * NEWTON_STEPS_PER_OCTAVE));
   return Math.min(ITERATION_LIMIT, Math.max(1, baseDepth + extra));
@@ -380,14 +387,19 @@ export function gpuPrecisionHolds(view, height) {
  */
 const GPU_PIXEL_FLOOR = 1e-34;
 
+/** Below this scale the seahorse reference no longer fits in a pair of doubles. */
+const DEEP_VIEW_SCALE = 1e-30;
+
 /**
  * How the shader can draw a view: "direct" from plain float32 coordinates, "perturb" as float32
- * offsets from a double-double reference orbit, or null when the view is past both.
+ * offsets from a double-double reference orbit, "deep" for the refined seahorse center once a
+ * pair of doubles can no longer name it, or null when the view is past all three.
  */
 export function gpuDepthMode(view, height) {
   if (!view || !(view.scale > 0) || !Number.isFinite(view.scale)) return null;
   if (gpuPrecisionHolds(view, height)) return "direct";
   if (!Number.isFinite(view.centerX) || !Number.isFinite(view.centerY)) return null;
+  if (isSeahorseCenter(view) && view.scale < DEEP_VIEW_SCALE && view.scale >= 1e-300) return "deep";
   return view.scale / Math.max(1, height) >= GPU_PIXEL_FLOOR ? "perturb" : null;
 }
 

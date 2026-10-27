@@ -223,8 +223,8 @@ test("the Mandelbrot dive target is a spiral center on the edge, held to double-
   const target = autoZoomTarget("mandelbrot", {});
   assert.ok(hasDeepCenter({ centerXLo: target.xLo }));
   assert.ok(Math.abs(target.xLo) > 0 && Math.abs(target.xLo) < 1e-16);
-  const floorCap = autoZoomIterations(48, 2.6 / autoZoomFloor("mandelbrot"));
-  assert.ok(ddMandelbrotIterations(target.x, target.xLo, target.y, target.yLo, 16384) > floorCap);
+  const classicDepth = autoZoomIterations(48, 2.6 / 1e-28);
+  assert.ok(ddMandelbrotIterations(target.x, target.xLo, target.y, target.yLo, 16384) > classicDepth);
   let previous = 0;
   for (const exponent of [9, 15, 21, 27]) {
     const d = 10 ** -exponent;
@@ -256,9 +256,9 @@ test("the Mandelbrot dive target is a spiral center on the edge, held to double-
   assert.ok(steps[62] > 1e-3);
   assert.ok(steps[63] < 1e-26);
   assert.ok(steps[69] < 1e-24);
-  assert.ok(autoZoomFloor("mandelbrot") <= 1e-28);
-  assert.equal(autoZoomFloor("julia"), autoZoomFloor("mandelbrot"));
-  assert.equal(autoZoomFloor("newton"), autoZoomFloor("mandelbrot"));
+  assert.ok(autoZoomFloor("mandelbrot") <= 1e-200);
+  assert.equal(autoZoomFloor("julia"), 1e-28);
+  assert.equal(autoZoomFloor("newton"), 1e-28);
 });
 
 test("double-double division carries the quotient's second double", () => {
@@ -577,7 +577,7 @@ test("the auto zoom path lands exactly on a double-double target", () => {
   const start = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
   const target = autoZoomTarget("mandelbrot", {});
   const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot"));
-  assert.ok(path.maxOctave > 90);
+  assert.ok(path.maxOctave > 900);
   const first = autoZoomView(path, 0);
   assert.ok(Math.abs(first.centerX - start.centerX) < 1e-12);
   assert.ok(Math.abs(first.centerY - start.centerY) < 1e-12);
@@ -589,7 +589,7 @@ test("the auto zoom path lands exactly on a double-double target", () => {
   assert.ok(Math.abs(miss.dy) < 1e-31);
   assert.ok(Math.abs(deep.scale - 2.6 * 2 ** -80) < 1e-40);
   const bottom = autoZoomView(path, path.maxOctave);
-  assert.ok(bottom.scale >= 1e-28 * 0.999);
+  assert.ok(bottom.scale < 1e-200 && bottom.scale > 1e-305, `bottom scale ${bottom.scale}`);
   const shallow = autoZoomPath(start, { x: 0.3, y: 0.1 });
   assert.equal(hasDeepCenter(autoZoomView(shallow, 10)), false);
 });

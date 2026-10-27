@@ -1377,8 +1377,9 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
 
 /**
  * Color the pixels on screen from the formula. A settled frame uses settledRaster, which can be larger than the screen and is limited by the GPU's drawing buffer.
- * Deep views are offsets from a double-double reference orbit. A frame too heavy for the budget is
- * drawn smaller and stretched; a settled one then sharpens band by band at full size.
+ * Deep views are offsets from a reference orbit. Past a pair of doubles the Mandelbrot seahorse
+ * uses the refined center. During deep zoom every frame is drawn at full size. Otherwise a frame
+ * too heavy for the budget is drawn smaller and stretched; a settled one then sharpens band by band.
  * Returns false where the GPU cannot draw the view, and the workers take over.
  */
 function paintGpuFrame(view, box, settle = false) {
@@ -1397,7 +1398,7 @@ function paintGpuFrame(view, box, settle = false) {
   }
   const cap = exploredLevel();
   const depth = gpuDepthMode(view, dest.height);
-  if (cap > GPU_ITER_LIMIT || !depth) {
+  if (!depth || (depth !== "deep" && cap > GPU_ITER_LIMIT)) {
     state.gpuPan = null;
     return false;
   }
@@ -1417,7 +1418,7 @@ function paintGpuFrame(view, box, settle = false) {
     floor: fit.floor,
     top: fit.top,
   };
-  const share = motionScale(gpuClock.cost * cap, dest.width * dest.height, MOTION_BUDGET_MS);
+  const share = state.autoZoom ? 1 : motionScale(gpuClock.cost * cap, dest.width * dest.height, MOTION_BUDGET_MS);
   if (settle && refine.key === key) return true;
   cancelRefine();
   if (!(settle && state.gpuKey === key && state.gpuShare < 1)) {

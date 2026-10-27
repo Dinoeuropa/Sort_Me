@@ -25,8 +25,10 @@ import {
   escapeSourceBlit,
   fitZoomOut,
   escapeMagnification,
+  DEEP_ITERATION_LIMIT,
   escapeIterationCap,
   gpuDepthMode,
+  ITERATION_LIMIT,
   iterationCap,
   MOTION_SCALE_MIN,
   motionScale,
@@ -149,6 +151,9 @@ test("closer escape windows spend more iterations and ferns plot more points", (
 
 test("Newton's method gets a few more steps per octave, not the escape-time hundred", () => {
   assert.equal(escapeIterationCap("mandelbrot", 48, 2 ** 20), iterationCap(48, 2 ** 20));
+  assert.ok(escapeIterationCap("mandelbrot", 48, 2 ** 200) > ITERATION_LIMIT);
+  assert.ok(escapeIterationCap("mandelbrot", 48, 2 ** 200) <= DEEP_ITERATION_LIMIT);
+  assert.equal(escapeIterationCap("julia", 48, 2 ** 200), ITERATION_LIMIT);
   assert.equal(escapeIterationCap("julia", 48, 3), iterationCap(48, 3));
   assert.equal(escapeIterationCap("newton", 16, 1), 16);
   const million = escapeIterationCap("newton", 16, 1e6);
@@ -268,6 +273,16 @@ test("the shader draws plain coordinates while they hold and offsets from a refe
   assert.equal(gpuDepthMode({ centerX: -0.74, centerXLo: 1e-18, centerY: 0.13, centerYLo: 0, scale: 1e-26 }, 1080), "perturb");
   assert.equal(gpuDepthMode({ centerX: 0, centerXLo: 0, centerY: 0, centerYLo: 0, scale: 3e-27 }, 1080), "direct");
   assert.equal(gpuDepthMode({ centerX: -0.75, centerY: 0.1, scale: 1e-300 }, 800), null);
+  const seahorse = autoZoomTarget("mandelbrot", {});
+  const onSpiral = {
+    centerX: seahorse.x,
+    centerXLo: seahorse.xLo,
+    centerY: seahorse.y,
+    centerYLo: seahorse.yLo,
+  };
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "perturb");
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-40 }, 800), "deep");
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-320 }, 800), null);
   assert.equal(gpuDepthMode(null, 800), null);
 });
 
@@ -506,8 +521,8 @@ test("each reactive fractal has a fixed point to dive into", () => {
   const cursorShip = autoZoomTarget("burning", { cx: -1.76, cy: -0.03, centerX: 0, centerY: 0, scale: 3 });
   assert.ok(Number.isFinite(cursorShip.x) && Number.isFinite(cursorShip.y));
   assert.equal(autoZoomFloor("burning", { cx: -1.76, cy: -0.03 }), 2.5e-5);
-  assert.equal(autoZoomFloor("burning"), autoZoomFloor("mandelbrot"));
-  assert.ok(autoZoomFloor("mandelbrot") > 0);
+  assert.equal(autoZoomFloor("burning"), 1e-28);
+  assert.ok(autoZoomFloor("mandelbrot") < 1e-200);
 });
 
 test("a boundary anchor lands on the edge of the set", () => {

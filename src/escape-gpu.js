@@ -1,3 +1,4 @@
+import { DEEP_ITERATION_LIMIT, isSeahorseCenter, packBlocks, scaleParts, seahorseOrbit } from "./deep-float.js";
 import { escapeLut } from "./palettes.js";
 import { ITERATION_LIMIT } from "./fractal-view.js";
 import {
@@ -127,6 +128,11 @@ uniform vec2 uOffset;
 uniform int uSkip;
 uniform vec2 uSeries;
 uniform vec2 uSeries2;
+uniform float uMant;
+uniform int uExp;
+uniform sampler2D uBlocks;
+uniform int uBlockCount;
+uniform int uBlockWidth;
 out vec4 outColor;
 
 const int LOOP = ${loopLimit};
@@ -265,6 +271,87 @@ int escapePerturbed(vec2 u, int mode, int cap) {
   return iter;
 }
 
+vec4 blockTexel(int index) {
+  return texelFetch(uBlocks, ivec2(index % uBlockWidth, index / uBlockWidth), 0);
+}
+
+float exp2i(int exponent) {
+  if (exponent < -126 || exponent > 127) return 0.0;
+  return exp2(float(exponent));
+}
+
+// Pixel offset in units of the view scale. The reference is the refined seahorse orbit, and a
+// block adds its whole run when the offset is still inside the block's radius.
+int escapeDeep(vec2 loc, int cap) {
+  vec2 dc = loc * uMant;
+  vec2 d = vec2(0.0);
+  int e = uExp;
+  int m = 0;
+  int iter = 0;
+  int blockIndex = 0;
+  int last = uLast;
+  for (int i = 0; i < LOOP; i++) {
+    if (iter >= cap) break;
+    for (int skip = 0; skip < 8; skip++) {
+      if (blockIndex >= uBlockCount) break;
+      if (int(blockTexel(blockIndex * 2 + 1).x) >= m) break;
+      blockIndex += 1;
+    }
+    bool jumped = false;
+    if (blockIndex < uBlockCount) {
+      vec4 coef = blockTexel(blockIndex * 2);
+      vec4 meta = blockTexel(blockIndex * 2 + 1);
+      int at = int(meta.x);
+      int len = int(meta.y);
+      float guard = max(max(abs(d.x), abs(d.y)), max(max(abs(dc.x), abs(dc.y)), 1e-6));
+      if (at == m && iter + len <= cap && float(e) + log2(guard) < meta.z) {
+        d = cmul(coef.xy, d) + cmul(coef.zw, dc);
+        m += len;
+        iter += len;
+        blockIndex += 1;
+        jumped = true;
+      } else if (at == m) {
+        blockIndex += 1;
+      }
+    }
+    if (!jumped) {
+      vec2 z = orbitAt(m).xy;
+      float s = exp2i(e);
+      d = 2.0 * cmul(z, d) + cmul(d, d) * s + dc;
+      m += 1;
+      iter += 1;
+    }
+    float mag = length(d);
+    if (mag > 1024.0) {
+      int shift = int(floor(log2(mag))) - 8;
+      float down = exp2(float(-shift));
+      d *= down;
+      dc *= down;
+      e += shift;
+    }
+    if (m > last) m = last;
+    vec2 zr = orbitAt(m).xy;
+    bool close = e >= -60;
+    float ws = close ? exp2i(e) : 0.0;
+    vec2 w = zr + d * ws;
+    if ((close ? dot(w, w) : dot(zr, zr)) > 4.0) break;
+    bool ranOut = m >= last;
+    bool nearer = close && dot(w, w) < dot(d * ws, d * ws);
+    if (ranOut || nearer) {
+      float span = exp2i(e);
+      vec2 world = zr + d * span;
+      float size = length(world);
+      int nextE = int(floor(log2(max(size, 1e-20))));
+      d = world * exp2i(-nextE);
+      dc *= exp2i(e - nextE);
+      e = nextE;
+      m = 0;
+      blockIndex = 0;
+    }
+  }
+  return iter;
+}
+
 // Newton's method for z³ + p z − 1. A deep pixel is first an offset d from the reference,
 // N(Z + d) − N(Z) = a / (D + e) − (A / D) e / (D + e) with A = 2Z³ + 1, D = 3Z² + p,
 // a = 2d(3Z² + 3Zd + d²), e = 3d(2Z + d), none of which cancels for small d. Once the reference
@@ -391,14 +478,16 @@ void main() {
   float py = uBand.x + uBand.y - gl_FragCoord.y;
   float nx = px / uResolution.x - 0.5;
   float ny = uFlip > 0.5 ? py / uResolution.y - 0.5 : 0.5 - py / uResolution.y;
-  vec2 u = vec2(nx * uScale * (uResolution.x / uResolution.y), ny * uScale);
+  vec2 screen = vec2(nx * (uResolution.x / uResolution.y), ny);
+  vec2 u = screen * uScale;
   vec2 p = uCenter + u;
   int cap = uCap;
   int mode = uMode;
   int iter = 0;
   int basin = -1;
   if (mode < 4) {
-    iter = uPerturb == 1 ? escapePerturbed(u, mode, cap) : escapeDirect(p, mode, cap);
+    if (uPerturb == 2) iter = escapeDeep(uOffset + screen, cap);
+    else iter = uPerturb == 1 ? escapePerturbed(u, mode, cap) : escapeDirect(p, mode, cap);
   } else {
     newtonPixel(p, u, mode, cap, iter, basin);
   }
@@ -412,6 +501,7 @@ void main() {
 const UNIFORMS = [
   "uResolution", "uBand", "uOrigin", "uCenter", "uScale", "uFlip", "uCap", "uMode", "uParam", "uLut", "uLutWidth", "uSpan",
   "uPerturb", "uOrbit", "uOrbitWidth", "uLast", "uRebaseAt", "uRebaseLast", "uOffset", "uSkip", "uSeries", "uSeries2",
+  "uMant", "uExp", "uBlocks", "uBlockCount", "uBlockWidth",
 ];
 
 let gpu = null;
@@ -483,6 +573,9 @@ function boot() {
     const orbit = texture(gl);
     gl.bindTexture(gl.TEXTURE_2D, orbit);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4));
+    const blocks = texture(gl);
+    gl.bindTexture(gl.TEXTURE_2D, blocks);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4));
     gpu = {
       gl,
       canvas,
@@ -490,6 +583,7 @@ function boot() {
       lut,
       lutKey: "",
       orbit,
+      blocks,
       reference: null,
       timerExt: gl.getExtension("EXT_disjoint_timer_query_webgl2"),
     };
@@ -556,12 +650,18 @@ export function pollGpuCost() {
 }
 
 /** Iterations a reference is computed for: rounded up, so a slowly rising cap reuses one orbit. */
-function referenceCap(mode, cap) {
+function referenceCap(mode, cap, deep) {
   if (mode >= 4) return cap;
-  return Math.min(GPU_ITER_LIMIT, Math.ceil(cap / 1024) * 1024);
+  const limit = deep ? DEEP_ITERATION_LIMIT : GPU_ITER_LIMIT;
+  return Math.min(limit, Math.ceil(cap / 1024) * 1024);
+}
+
+function usesDeepReference(mode, preset) {
+  return mode === 0 && isSeahorseCenter(preset) && preset.scale < 1e-30;
 }
 
 function computeReference(mode, preset, cap) {
+  if (usesDeepReference(mode, preset)) return seahorseOrbit(cap);
   const x = preset.centerX;
   const xLo = preset.centerXLo || 0;
   const y = preset.centerY;
@@ -580,8 +680,9 @@ function computeReference(mode, preset, cap) {
  */
 function referenceFor(session, mode, preset, cap) {
   const { gl } = session;
-  const reach = referenceCap(mode, cap);
-  const key = [mode, preset.cx, preset.cy, preset.px, preset.py, reach].join(":");
+  const deep = usesDeepReference(mode, preset);
+  const reach = referenceCap(mode, cap, deep);
+  const key = [mode, deep ? "deep" : "dd", preset.cx, preset.cy, preset.px, preset.py, reach].join(":");
   const held = session.reference;
   if (held && held.key === key) {
     const offset = viewOffset(preset, held.center);
@@ -591,6 +692,11 @@ function referenceFor(session, mode, preset, cap) {
   const packed = packOrbit(reference);
   gl.bindTexture(gl.TEXTURE_2D, session.orbit);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, packed.width, packed.height, 0, gl.RGBA, gl.FLOAT, packed.data);
+  const blockPack = packBlocks(reference.blocks);
+  gl.bindTexture(gl.TEXTURE_2D, session.blocks);
+  gl.texImage2D(
+    gl.TEXTURE_2D, 0, gl.RGBA32F, blockPack.width, blockPack.height, 0, gl.RGBA, gl.FLOAT, blockPack.data,
+  );
   session.reference = {
     key,
     center: {
@@ -601,6 +707,7 @@ function referenceFor(session, mode, preset, cap) {
     },
     reference,
     packed,
+    blocks: blockPack,
   };
   return { ...session.reference, offset: { dx: 0, dy: 0 } };
 }
@@ -628,8 +735,10 @@ export function paintGpuEscape({
 }) {
   const mode = gpuEscapeMode(fractalId, preset);
   const iterations = cap | 0;
-  if (mode < 0 || iterations < 1 || iterations > GPU_ITER_LIMIT || width < 1 || height < 1) return null;
-  if (depth !== "direct" && depth !== "perturb") return null;
+  const deep = depth === "deep";
+  const ceiling = deep ? DEEP_ITERATION_LIMIT : GPU_ITER_LIMIT;
+  if (mode < 0 || iterations < 1 || iterations > ceiling || width < 1 || height < 1) return null;
+  if (depth !== "direct" && depth !== "perturb" && !deep) return null;
   const session = boot();
   if (!session) return null;
   const loopLimit = loopLimitForCap(iterations);
@@ -676,25 +785,39 @@ export function paintGpuEscape({
   gl.uniform2f(where.uParam, paramX, paramY);
   gl.uniform1i(where.uLutWidth, session.lutWidth);
   gl.uniform1i(where.uSpan, iterations + 1);
-  gl.uniform1i(where.uPerturb, depth === "perturb" ? 1 : 0);
-  if (depth === "perturb") {
+  gl.uniform1i(where.uPerturb, deep ? 2 : depth === "perturb" ? 1 : 0);
+  const parts = scaleParts(preset.scale);
+  gl.uniform1f(where.uMant, deep ? parts.mant : 1);
+  gl.uniform1i(where.uExp, deep ? parts.exp : 0);
+  if (depth === "perturb" || deep) {
     const held = referenceFor(session, mode, preset, iterations);
     const { packed, reference, offset } = held;
     gl.uniform1i(where.uOrbitWidth, packed.width);
     gl.uniform1i(where.uLast, packed.last);
     gl.uniform1i(where.uRebaseAt, packed.rebaseAt);
     gl.uniform1i(where.uRebaseLast, packed.rebaseLast);
-    gl.uniform2f(where.uOffset, offset.dx, offset.dy);
-    const aspect = width / height;
-    const radius = Math.hypot(offset.dx, offset.dy) + Math.hypot(preset.scale * aspect, preset.scale) / 2;
-    const skip = reference.series ? seriesSkip(reference, radius) : 0;
-    gl.uniform1i(where.uSkip, skip);
-    gl.uniform2f(where.uSeries, skip > 0 ? reference.series[skip * 2] : 0, skip > 0 ? reference.series[skip * 2 + 1] : 0);
-    gl.uniform2f(
-      where.uSeries2,
-      skip > 0 && reference.quad ? reference.quad[skip * 2] : 0,
-      skip > 0 && reference.quad ? reference.quad[skip * 2 + 1] : 0,
-    );
+    if (deep) {
+      gl.uniform2f(where.uOffset, offset.dx / preset.scale, offset.dy / preset.scale);
+      gl.uniform1i(where.uSkip, 0);
+      gl.uniform2f(where.uSeries, 0, 0);
+      gl.uniform2f(where.uSeries2, 0, 0);
+      gl.uniform1i(where.uBlockCount, held.blocks ? held.blocks.count : 0);
+      gl.uniform1i(where.uBlockWidth, held.blocks ? held.blocks.width : 1);
+    } else {
+      gl.uniform2f(where.uOffset, offset.dx, offset.dy);
+      const aspect = width / height;
+      const radius = Math.hypot(offset.dx, offset.dy) + Math.hypot(preset.scale * aspect, preset.scale) / 2;
+      const skip = reference.series ? seriesSkip(reference, radius) : 0;
+      gl.uniform1i(where.uSkip, skip);
+      gl.uniform2f(where.uSeries, skip > 0 ? reference.series[skip * 2] : 0, skip > 0 ? reference.series[skip * 2 + 1] : 0);
+      gl.uniform2f(
+        where.uSeries2,
+        skip > 0 && reference.quad ? reference.quad[skip * 2] : 0,
+        skip > 0 && reference.quad ? reference.quad[skip * 2 + 1] : 0,
+      );
+      gl.uniform1i(where.uBlockCount, 0);
+      gl.uniform1i(where.uBlockWidth, 1);
+    }
   } else {
     gl.uniform1i(where.uOrbitWidth, 1);
     gl.uniform1i(where.uLast, 0);
@@ -704,6 +827,8 @@ export function paintGpuEscape({
     gl.uniform1i(where.uSkip, 0);
     gl.uniform2f(where.uSeries, 0, 0);
     gl.uniform2f(where.uSeries2, 0, 0);
+    gl.uniform1i(where.uBlockCount, 0);
+    gl.uniform1i(where.uBlockWidth, 1);
   }
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, lut);
@@ -711,6 +836,9 @@ export function paintGpuEscape({
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, session.orbit);
   gl.uniform1i(where.uOrbit, 1);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, session.blocks);
+  gl.uniform1i(where.uBlocks, 2);
   const ext = session.timerExt;
   // A band or strip covers fewer pixels than the stored frame size, so timing it would understate cost.
   const timeThis = Boolean(ext) && !session.timerSample && (!rows || (from === 0 && to === height)) && (!cols || (x0 === 0 && x1 === width));

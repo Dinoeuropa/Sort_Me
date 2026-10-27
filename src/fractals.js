@@ -1,3 +1,4 @@
+import { DEEP_ITERATION_LIMIT, MANDELBROT_ZOOM_FLOOR, isSeahorseCenter, scaledEscape, seahorseOrbit } from "./deep-float.js";
 import { paletteWindow } from "./palettes.js";
 import {
   ddAdd,
@@ -411,6 +412,9 @@ const NEWTON_DEEP_STEPS = 48;
 
 /** The reference orbit a deep plate's pixels are offsets from, at the plate's double-double center. */
 function deepReference(fractalId, preset, cap) {
+  if (fractalId === "mandelbrot" && isSeahorseCenter(preset) && preset.scale < 1e-30) {
+    return seahorseOrbit(Math.min(DEEP_ITERATION_LIMIT, Math.max(1, cap | 0)));
+  }
   const x = preset.centerX;
   const xLo = preset.centerXLo || 0;
   const y = preset.centerY;
@@ -447,6 +451,7 @@ function deepSampler(fractalId, preset, cap, spanX, spanY, width) {
     return (dx, dy) => newtonDeep(preset, dx, dy, cap, px, py, pixel);
   }
   const reference = deepReference(fractalId, preset, cap);
+  if (reference && reference.deep) return (dx, dy) => scaledEscape(reference, dx, dy, cap);
   const skip = seriesSkip(reference, Math.hypot(spanX, spanY) / 2);
   return (dx, dy) => perturbIterations(reference, dx, dy, cap, skip);
 }
@@ -489,7 +494,10 @@ let cachedWindow = null;
  * colored exactly like the picture it left. Every band of a plate asks, so the last answer is kept.
  */
 export function paletteRange(fractalId, preset, width, height, maxIter) {
-  const cap = clampIter(maxIter);
+  const deepMandelbrot = fractalId === "mandelbrot" && isSeahorseCenter(preset) && preset.scale < 1e-30;
+  const cap = deepMandelbrot
+    ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
+    : clampIter(maxIter);
   if (!hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return { floor: 0, top: cap };
   const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
   if (!(depth > 0)) return { floor: 0, top: cap };
@@ -620,12 +628,14 @@ export function autoZoomTarget(fractalId, preset) {
 
 /**
  * How small a view auto zoom may reach, as a multiple of the target's distance from the origin.
- * A dive onto a double-double target is drawn in double-double, so it runs until a plate pixel
- * nears the 32nd digit. A burning ship with c from the cursor dives toward a plain-double edge
- * that breaks into dust a few thousand times in, so it turns back sooner.
+ * Julia, Newton, and the burning ship are drawn in double-double, so they run until a plate pixel
+ * nears the 32nd digit. Mandelbrot keeps a fixed-point center and runs until the view scale itself
+ * is near the bottom of a double. A burning ship with c from the cursor dives toward a plain-double
+ * edge that breaks into dust a few thousand times in, so it turns back sooner.
  */
 export function autoZoomFloor(fractalId, preset = {}) {
   if (fractalId === "burning" && ("cx" in preset || "cy" in preset)) return 2.5e-5;
+  if (fractalId === "mandelbrot") return MANDELBROT_ZOOM_FLOOR;
   return 1e-28;
 }
 
