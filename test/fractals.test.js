@@ -9,6 +9,7 @@ import {
   escapeValue,
   fractalById,
   iterateIfs,
+  mandelbrotBulb,
   newtonCursor,
   planePoint,
   presetById,
@@ -73,6 +74,30 @@ test("the center pixel sits on the preset center", () => {
   assert.ok(flipped.y < 0);
   assert.ok(upright.y > 0);
   assert.ok(Math.abs(flipped.y + upright.y) < 1e-9);
+});
+
+test("the cardioid and period-2 bulb are known before the loop runs", () => {
+  assert.equal(mandelbrotBulb(0, 0), true);
+  assert.equal(mandelbrotBulb(-1, 0), true);
+  assert.equal(mandelbrotBulb(0.1, 0.1), true);
+  assert.equal(mandelbrotBulb(0.3, 0.5), false);
+  assert.equal(mandelbrotBulb(-1.5, 0.01), false);
+  assert.equal(mandelbrotBulb(0.26, 0), false);
+  const plain = (cx, cy, maxIter) => {
+    let x = 0;
+    let y = 0;
+    let iter = 0;
+    while (x * x + y * y <= 4 && iter < maxIter) {
+      const next = x * x - y * y + cx;
+      y = 2 * x * y + cy;
+      x = next;
+      iter += 1;
+    }
+    return iter;
+  };
+  for (const [cx, cy] of [[0.3, 0.5], [-0.1, 1], [0.4, -0.3], [-1.5, 0.01], [0.1, 0.7]]) {
+    assert.equal(escapeValue("mandelbrot", {}, cx, cy, 300).iteration, plain(cx, cy, 300), `${cx},${cy}`);
+  }
 });
 
 test("mandelbrot keeps the origin and rejects a far point", () => {

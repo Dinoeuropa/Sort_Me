@@ -734,15 +734,34 @@ function mandelbrot(cx, cy, maxIter) {
   return { iteration: mandelbrotIterations(cx, cy, maxIter), basin: -1 };
 }
 
+export function mandelbrotBulb(cx, cy) {
+  const y2 = cy * cy;
+  const x1 = cx - 0.25;
+  const q = x1 * x1 + y2;
+  if (q * (q + x1) <= 0.25 * y2) return true;
+  const xb = cx + 1;
+  return xb * xb + y2 <= 0.0625;
+}
+
 function mandelbrotIterations(cx, cy, maxIter) {
+  if (mandelbrotBulb(cx, cy)) return maxIter;
   let x = 0;
   let y = 0;
   let iter = 0;
+  let savedX = 0;
+  let savedY = 0;
+  let check = 3;
   while (x * x + y * y <= 4 && iter < maxIter) {
     const next = x * x - y * y + cx;
     y = 2 * x * y + cy;
     x = next;
     iter += 1;
+    if (x === savedX && y === savedY) return maxIter;
+    if (iter === check) {
+      savedX = x;
+      savedY = y;
+      check *= 2;
+    }
   }
   return iter;
 }

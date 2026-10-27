@@ -181,16 +181,35 @@ int basinOf(vec2 z, float limit) {
   return 2;
 }
 
+bool mandelbrotBulb(vec2 c) {
+  float y2 = c.y * c.y;
+  float x1 = c.x - 0.25;
+  float q = x1 * x1 + y2;
+  if (q * (q + x1) <= 0.25 * y2) return true;
+  float xb = c.x + 1.0;
+  return xb * xb + y2 <= 0.0625;
+}
+
 int escapeDirect(vec2 p, int mode, int cap) {
   vec2 z = mode == 1 || mode == 3 ? p : vec2(0.0);
   vec2 c = mode == 0 || mode == 2 ? p : uParam;
   bool fold = mode >= 2;
   int iter = 0;
+  vec2 saved = vec2(0.0);
+  int check = 3;
+  if (mode == 0 && mandelbrotBulb(p)) return cap;
   for (int i = 0; i < LOOP; i++) {
     if (iter >= cap || dot(z, z) > 4.0) break;
     if (fold) z = abs(z);
     z = cmul(z, z) + c;
     iter += 1;
+    if (mode == 0) {
+      if (z == saved) return cap;
+      if (iter == check) {
+        saved = z;
+        check *= 2;
+      }
+    }
   }
   return iter;
 }
