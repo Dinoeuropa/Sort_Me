@@ -107,6 +107,145 @@ const SERIES_TOLERANCE = 1e-8;
 /** Kept linear and quadratic terms must stay this small a fraction of |Z|. */
 const SERIES_KEPT = 0.25;
 
+/** Longest bivariate jump. Past this the coefficients outgrow a float. */
+const BLOCK_LIMIT = 32;
+const BLOCK_COEFFICIENT_LIMIT = 1e18;
+/**
+ * The cubic remainder underestimates the rest of the Taylor tail, so a block is used only inside
+ * a tenth of the radius where that remainder is still under BLOCK_ERROR · |Z|.
+ */
+const BLOCK_SAFETY = 0.1;
+const BLOCK_ERROR = 1e-14;
+const BLOCK_KEPT = 0.02;
+
+function cmulPair(ax, ay, bx, by) {
+  return [ax * bx - ay * by, ax * by + ay * bx];
+}
+
+function caddPair(a, b) {
+  return [a[0] + b[0], a[1] + b[1]];
+}
+
+function cmag(a) {
+  return Math.hypot(a[0], a[1]);
+}
+
+/**
+ * Chained quadratic steps in the current offset X and the constant offset Y.
+ * A block is the longest jump whose omitted cubic, at every prefix, stays inside `radius`.
+ * The fold has no blocks. `inC` adds Y on every step, which is a perturbation of c.
+ */
+function buildBivariateBlocks(orbit, count, inC) {
+  const blocks = [];
+  const limit = count | 0;
+  const sigma = inC ? 1 : 0;
+  let n = 0;
+  while (n < limit - 2) {
+    let A = [1, 0];
+    let B = [0, 0];
+    let C = [0, 0];
+    let D = [0, 0];
+    let E = [0, 0];
+    let F = [0, 0];
+    let G = [0, 0];
+    let H = [0, 0];
+    let I = [0, 0];
+    let length = 0;
+    let radius = Infinity;
+    while (length < BLOCK_LIMIT && n + length < limit - 2) {
+      const zx = orbit[(n + length) * 2];
+      const zy = orbit[(n + length) * 2 + 1];
+      const land = Math.hypot(orbit[(n + length + 1) * 2], orbit[(n + length + 1) * 2 + 1]);
+      if (!(land > 1e-6)) break;
+      const two = [2 * zx, 2 * zy];
+      const A2 = cmulPair(A[0], A[1], A[0], A[1]);
+      const B2 = cmulPair(B[0], B[1], B[0], B[1]);
+      const AB = cmulPair(A[0], A[1], B[0], B[1]);
+      const AC = cmulPair(A[0], A[1], C[0], C[1]);
+      const AD = cmulPair(A[0], A[1], D[0], D[1]);
+      const AE = cmulPair(A[0], A[1], E[0], E[1]);
+      const BC = cmulPair(B[0], B[1], C[0], C[1]);
+      const BD = cmulPair(B[0], B[1], D[0], D[1]);
+      const BE = cmulPair(B[0], B[1], E[0], E[1]);
+      const nA = cmulPair(two[0], two[1], A[0], A[1]);
+      const nB = caddPair(cmulPair(two[0], two[1], B[0], B[1]), [sigma, 0]);
+      const nC = caddPair(cmulPair(two[0], two[1], C[0], C[1]), A2);
+      const nD = caddPair(cmulPair(two[0], two[1], D[0], D[1]), [2 * AB[0], 2 * AB[1]]);
+      const nE = caddPair(cmulPair(two[0], two[1], E[0], E[1]), B2);
+      const nF = caddPair(cmulPair(two[0], two[1], F[0], F[1]), [2 * AC[0], 2 * AC[1]]);
+      const nG = caddPair(cmulPair(two[0], two[1], G[0], G[1]), [2 * (AD[0] + BC[0]), 2 * (AD[1] + BC[1])]);
+      const nH = caddPair(cmulPair(two[0], two[1], H[0], H[1]), [2 * (AE[0] + BD[0]), 2 * (AE[1] + BD[1])]);
+      const nI = caddPair(cmulPair(two[0], two[1], I[0], I[1]), [2 * BE[0], 2 * BE[1]]);
+      const peak = Math.max(cmag(nA), cmag(nB), cmag(nC), cmag(nD), cmag(nE));
+      if (!Number.isFinite(peak) || peak > BLOCK_COEFFICIENT_LIMIT) break;
+      const g1 = cmag(nA) + cmag(nB);
+      const g2 = cmag(nC) + cmag(nD) + cmag(nE);
+      const g3 = cmag(nF) + cmag(nG) + cmag(nH) + cmag(nI);
+      let allow = Infinity;
+      if (g3 > 0) allow = Math.min(allow, Math.cbrt((BLOCK_ERROR * land) / g3));
+      if (g1 > 0) allow = Math.min(allow, (BLOCK_KEPT * land) / g1);
+      if (g2 > 0) allow = Math.min(allow, Math.sqrt((BLOCK_KEPT * land) / g2));
+      allow *= BLOCK_SAFETY;
+      if (!(allow > 0) || !Number.isFinite(allow)) break;
+      A = nA;
+      B = nB;
+      C = nC;
+      D = nD;
+      E = nE;
+      F = nF;
+      G = nG;
+      H = nH;
+      I = nI;
+      length += 1;
+      radius = Math.min(radius, allow);
+    }
+    if (length >= 8 && radius < Infinity) {
+      blocks.push({
+        at: n,
+        length,
+        radius,
+        radiusExp: Math.floor(Math.log2(radius)),
+        ax: A[0],
+        ay: A[1],
+        bx: B[0],
+        by: B[1],
+        cxx: C[0],
+        cxy: C[1],
+        dxx: D[0],
+        dxy: D[1],
+        exx: E[0],
+        exy: E[1],
+      });
+      n += length;
+    } else {
+      n += 1;
+    }
+  }
+  return blocks;
+}
+
+/** δ ← A X + B Y + C X² + D X Y + E Y², with X the current offset and Y the constant one. */
+function applySeriesBlock(block, dx, dy, dcx, dcy) {
+  const x2 = dx * dx - dy * dy;
+  const y2 = 2 * dx * dy;
+  const c2 = dcx * dcx - dcy * dcy;
+  const c2y = 2 * dcx * dcy;
+  const xy = dx * dcx - dy * dcy;
+  const xyi = dx * dcy + dy * dcx;
+  return [
+    block.ax * dx - block.ay * dy
+      + block.bx * dcx - block.by * dcy
+      + block.cxx * x2 - block.cxy * y2
+      + block.dxx * xy - block.dxy * xyi
+      + block.exx * c2 - block.exy * c2y,
+    block.ax * dy + block.ay * dx
+      + block.bx * dcy + block.by * dcx
+      + block.cxx * y2 + block.cxy * x2
+      + block.dxx * xyi + block.dxy * xy
+      + block.exx * c2y + block.exy * c2,
+  ];
+}
+
 function skipError(radius, b, a, c) {
   return Math.hypot(c[0], c[1]) * radius * radius * radius;
 }
@@ -128,7 +267,10 @@ function cubicRatio(size, cx, cy) {
  * B_{n+1} = 2 Z_n B_n + 1 for an offset in c and B_{n+1} = 2 Z_n B_n for an offset in z, and
  * A_{n+1} = 2 Z_n A_n + B_n². `series` holds B_n, `quad` holds A_n, and `reach` the largest
  * omitted cubic |C_k| / |Z_k| up to n, which says how big an offset may be for the skip to n to
- * hold. The fold has no such series.
+ * hold. `blocks` continues that idea in two variables: from any iteration, δ and the constant
+ * offset are jumped by a quadratic Taylor step δ ← A δ + B ε + C δ² + D δ ε + E ε², chained
+ * along the orbit for as long as the omitted cubic stays inside the block's radius. The fold
+ * has no such series.
  * The last few orbits are kept, as one plate asks for them once per band.
  */
 function orbitOf(zx, zxLo, zy, zyLo, cx, cxLo, cy, cyLo, maxIter, fold, inC) {
@@ -202,7 +344,8 @@ function orbitOf(zx, zxLo, zy, zyLo, cx, cxLo, cy, cyLo, maxIter, fold, inC) {
     count = n + 1;
     if (xhi * xhi + yhi * yhi > 4) break;
   }
-  const result = { orbit, series, quad, reach, count, cap, fold, inC, rebase: null };
+  const blocks = series ? buildBivariateBlocks(orbit, count, inC) : null;
+  const result = { orbit, series, quad, reach, count, cap, fold, inC, blocks, rebase: null };
   result.rebase = zx === 0 && zxLo === 0 && zy === 0 && zyLo === 0
     ? result
     : orbitOf(0, 0, 0, 0, cx, cxLo, cy, cyLo, cap, fold, inC);
@@ -273,8 +416,11 @@ function diffAbs(x, d) {
  * orbit comes closer to the origin than its offset, or the reference runs out, the pixel becomes
  * an offset from the start of the critical orbit. That rebasing keeps the offset small, so no
  * glitches appear. `skip` iterations, from seriesSkip, are taken at once as a quadratic step.
+ * After that, and when no skip is asked for, a bivariate block jumps every run whose current
+ * offset still fits inside the block's radius. `options.trace` returns `{ iter, steps }`, where
+ * `steps` counts shader-style iterations and a block is one step.
  */
-export function perturbIterations(reference, ux, uy, maxIter, skip = 0) {
+export function perturbIterations(reference, ux, uy, maxIter, skip = 0, options = {}) {
   const inC = reference.inC;
   const fold = reference.fold;
   const dcx = inC ? ux : 0;
@@ -285,10 +431,14 @@ export function perturbIterations(reference, ux, uy, maxIter, skip = 0) {
   let dy = inC ? 0 : uy;
   let m = 0;
   let iter = 0;
+  let steps = 0;
+  let blockList = reference.blocks || [];
+  let blockIndex = 0;
+  const finish = (value) => (options.trace ? { iter: value, steps } : value);
   if (!inC) {
     const zx0 = orbit[0] + dx;
     const zy0 = orbit[1] + dy;
-    if (zx0 * zx0 + zy0 * zy0 > 4) return 0;
+    if (zx0 * zx0 + zy0 * zy0 > 4) return finish(0);
   }
   if (skip > 0 && skip < maxIter && skip < last && reference.series && reference.quad) {
     const ux2 = ux * ux - uy * uy;
@@ -303,38 +453,65 @@ export function perturbIterations(reference, ux, uy, maxIter, skip = 0) {
     iter = skip;
   }
   while (iter < maxIter) {
-    const zrx = orbit[m * 2];
-    const zry = orbit[m * 2 + 1];
-    let nx;
-    let ny;
-    if (fold) {
-      const ax = Math.abs(zrx);
-      const ay = Math.abs(zry);
-      const da = diffAbs(zrx, dx);
-      const db = diffAbs(zry, dy);
-      nx = 2 * (ax * da - ay * db) + (da * da - db * db) + dcx;
-      ny = 2 * (ax * db + ay * da + da * db) + dcy;
-    } else {
-      nx = 2 * (zrx * dx - zry * dy) + (dx * dx - dy * dy) + dcx;
-      ny = 2 * (zrx * dy + zry * dx) + 2 * dx * dy + dcy;
+    while (blockIndex < blockList.length && blockList[blockIndex].at < m) blockIndex += 1;
+    const block = blockIndex < blockList.length ? blockList[blockIndex] : null;
+    let jumped = false;
+    if (
+      !fold
+      && block
+      && block.at === m
+      && iter + block.length <= maxIter
+      && m + block.length <= last
+      && Math.hypot(dx, dy) < block.radius
+      && Math.hypot(dcx, dcy) < block.radius
+    ) {
+      const next = applySeriesBlock(block, dx, dy, dcx, dcy);
+      dx = next[0];
+      dy = next[1];
+      m += block.length;
+      iter += block.length;
+      blockIndex += 1;
+      jumped = true;
+    } else if (block && block.at === m) {
+      blockIndex += 1;
     }
-    dx = nx;
-    dy = ny;
-    m += 1;
-    iter += 1;
+    if (!jumped) {
+      const zrx = orbit[m * 2];
+      const zry = orbit[m * 2 + 1];
+      let nx;
+      let ny;
+      if (fold) {
+        const ax = Math.abs(zrx);
+        const ay = Math.abs(zry);
+        const da = diffAbs(zrx, dx);
+        const db = diffAbs(zry, dy);
+        nx = 2 * (ax * da - ay * db) + (da * da - db * db) + dcx;
+        ny = 2 * (ax * db + ay * da + da * db) + dcy;
+      } else {
+        nx = 2 * (zrx * dx - zry * dy) + (dx * dx - dy * dy) + dcx;
+        ny = 2 * (zrx * dy + zry * dx) + 2 * dx * dy + dcy;
+      }
+      dx = nx;
+      dy = ny;
+      m += 1;
+      iter += 1;
+    }
+    steps += 1;
     const zx = orbit[m * 2] + dx;
     const zy = orbit[m * 2 + 1] + dy;
     const zz = zx * zx + zy * zy;
-    if (zz > 4) return iter;
+    if (zz > 4) return finish(iter);
     if (m >= last || zz < dx * dx + dy * dy) {
       dx = zx;
       dy = zy;
       m = 0;
       orbit = reference.rebase.orbit;
       last = reference.rebase.count - 1;
+      blockList = reference.rebase.blocks || [];
+      blockIndex = 0;
     }
   }
-  return iter;
+  return finish(iter);
 }
 
 /**

@@ -367,14 +367,15 @@ export const COVER_SLACK = 0.003;
 
 /**
  * Long edge of an auto-zoom plate.
- * Stays large through ordinary depths. Deeper caps shrink the plate so the next
- * frame still arrives before the zoom outruns it.
+ * Stays at 4K through ordinary depths. Deeper caps shrink the plate so the next frame still
+ * arrives before the zoom outruns it, but series blocks skip whole runs of iterations, so the
+ * plate holds at 2560 rather than falling back to a coarse picture.
  */
 export function plateRasterEdge(cap = 500) {
   const iterations = Number.isFinite(cap) && cap > 0 ? cap : 500;
-  if (iterations <= 240) return PLATE_EDGE_MAX;
-  const edge = Math.round(PLATE_EDGE_MAX * Math.sqrt(240 / iterations));
-  return Math.max(1920, Math.min(PLATE_EDGE_MAX, edge));
+  if (iterations <= 960) return PLATE_EDGE_MAX;
+  const edge = Math.round(PLATE_EDGE_MAX * Math.sqrt(960 / iterations));
+  return Math.max(2560, Math.min(PLATE_EDGE_MAX, edge));
 }
 
 /**

@@ -155,6 +155,33 @@ test("the linear skip only reaches far when the plate is small next to the refer
   assert.equal(perturbIterations(escaping, 1e-31, 0, 4000, seriesSkip(escaping, 1e-30)), perturbIterations(escaping, 1e-31, 0, 4000));
 });
 
+test("bivariate blocks match direct iteration and skip the tail of a deep plate", () => {
+  const target = autoZoomTarget("mandelbrot", {});
+  const scale = 1e-16;
+  const cap = 4096;
+  const reference = referenceOrbit(target.x, target.xLo, target.y, target.yLo, cap);
+  assert.ok(reference.blocks && reference.blocks.length > 4, `blocks ${reference.blocks && reference.blocks.length}`);
+  assert.ok(Math.hypot(reference.blocks[0].cxx, reference.blocks[0].cxy) > 0);
+  let same = 0;
+  let steps = 0;
+  let samples = 0;
+  for (let j = 0; j < 4; j += 1) {
+    for (let i = 0; i < 4; i += 1) {
+      const ux = ((i + 0.5) / 4 - 0.5) * scale;
+      const uy = ((j + 0.5) / 4 - 0.5) * scale;
+      const traced = perturbIterations(reference, ux, uy, cap, 0, { trace: true });
+      const [cx, cxLo] = ddAdd(target.x, target.xLo, ux, 0);
+      const [cy, cyLo] = ddAdd(target.y, target.yLo, uy, 0);
+      const exact = ddMandelbrotIterations(cx, cxLo, cy, cyLo, cap);
+      if (traced.iter === exact) same += 1;
+      steps += traced.steps;
+      samples += 1;
+    }
+  }
+  assert.ok(same >= 15, `${same} of ${samples} agree`);
+  assert.ok(steps < samples * cap * 0.75, `steps ${steps} for ${samples} pixels`);
+});
+
 test("the quadratic skip matches an unskipped perturbation on a small plate", () => {
   const target = autoZoomTarget("mandelbrot", {});
   const scale = 1e-12;
