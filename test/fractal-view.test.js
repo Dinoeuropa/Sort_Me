@@ -439,7 +439,7 @@ test("auto zoom follows one fixed path into its target", () => {
 test("auto zoom adds the same amount to the zoom factor every frame", () => {
   const path = autoZoomPath({ centerX: 0, centerY: 0, scale: 2, flipY: false }, { x: 0, y: 0 });
   const gain = AUTO_ZOOM_STEP - 1;
-  assert.ok(gain >= 1);
+  assert.ok(gain >= 8);
   const early = advanceAutoZoom(path, 0, 1, 1);
   assert.ok(Math.abs(2 ** early.octave - (1 + gain)) < 1e-12);
   assert.ok(2 ** early.octave >= 2);
@@ -453,7 +453,7 @@ test("auto zoom adds the same amount to the zoom factor every frame", () => {
   const laterAdd = 2 ** laterSecond.octave - 2 ** 8;
   assert.ok(Math.abs(startAdd - 60 * gain) < 1e-9);
   assert.ok(Math.abs(laterAdd - 60 * gain) < 1e-6);
-  assert.ok(startAdd >= 60);
+  assert.ok(startAdd >= 480);
   const near = path.maxOctave - 0.001;
   assert.equal(advanceAutoZoom(path, near, 1, 1).done, false);
   const frames = Math.ceil((2 ** path.maxOctave - 2 ** near) / gain) + 1;
@@ -538,7 +538,7 @@ test("one second of auto zoom adds the same amount wherever the dive is", () => 
   const fromDeep = advanceAutoZoom(path, 12, 60, 1);
   assert.ok(Math.abs(2 ** fromRest.octave - (1 + gain)) < 1e-9);
   assert.ok(Math.abs(2 ** fromDeep.octave - (2 ** 12 + gain)) < 1e-6);
-  assert.ok(2 ** fromRest.octave >= 61);
+  assert.ok(2 ** fromRest.octave >= 481);
 });
 
 test("each reactive fractal has a fixed point to dive into", () => {
