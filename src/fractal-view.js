@@ -12,8 +12,12 @@ export const DRAW_RASTER_EDGE = 960;
 /** Long edge of a finished, zoomed, or reactive picture. 3840 is 4K. */
 export const SHARP_RASTER_EDGE = 3840;
 
-/** Magnification per auto-zoom frame. Sixty frames about double the view. */
-export const AUTO_ZOOM_STEP = 1.012;
+/**
+ * Zoom factor after one frame from rest.
+ * Each later frame adds this minus one, so the factor grows in a straight line.
+ * One full step per frame starts the dive at once and still does not speed up later.
+ */
+export const AUTO_ZOOM_STEP = 2;
 
 const RATIOS = {
   koch: 3,
@@ -103,9 +107,6 @@ export function autoZoomIterations(baseDepth, magnification) {
   return iterationCap(baseDepth, magnification);
 }
 
-/** Octaves of zoom per frame at full pace. Sixty frames about double the view. */
-export const AUTO_OCTAVES_PER_FRAME = Math.log2(AUTO_ZOOM_STEP);
-
 /** How much wider than the camera an auto-zoom plate is rendered, so the view can move inside it. */
 export const PLATE_SCALE = 1.65;
 
@@ -177,9 +178,19 @@ export function autoZoomView(path, octave) {
   };
 }
 
-/** Next position on the path at a steady pace. `done` marks passing the deepest point. */
+/**
+ * Next position on the path. Each frame adds the same amount to the zoom factor,
+ * so magnification does not compound. `done` marks passing the deepest point.
+ * Once the factor is too large for that addition to move a double, the octave stays put.
+ */
 export function advanceAutoZoom(path, octave, frames, pace = 1) {
-  const next = octave + AUTO_OCTAVES_PER_FRAME * Math.max(0, frames) * Math.max(0, pace);
+  const base = Math.max(0, Number.isFinite(octave) ? octave : 0);
+  const added = (AUTO_ZOOM_STEP - 1) * Math.max(0, Number(frames) || 0) * Math.max(0, Number(pace) || 0);
+  if (!(added > 0)) return { octave: base, done: base >= path.maxOctave };
+  const factor = 2 ** base;
+  if (!Number.isFinite(factor)) return { octave: base, done: base >= path.maxOctave };
+  const nextFactor = factor + added;
+  const next = nextFactor > factor ? Math.log2(nextFactor) : base;
   return { octave: next, done: next >= path.maxOctave };
 }
 
