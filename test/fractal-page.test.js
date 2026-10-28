@@ -153,7 +153,8 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /advanceAutoZoom/);
   assert.doesNotMatch(fractalApp, /AUTO_OCTAVES_PER_FRAME/);
   assert.match(fractalApp, /autoZoomView/);
-  assert.match(fractalApp, /autoZoomRamp/);
+  assert.match(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, frames, 1\)/);
+  assert.doesNotMatch(fractalApp, /autoZoomRamp/);
   assert.match(fractalApp, /pickPlate/);
   assert.match(fractalApp, /plateBudget/);
   assert.doesNotMatch(fractalApp, /autoPace/);

@@ -14,10 +14,10 @@ export const SHARP_RASTER_EDGE = 3840;
 
 /**
  * Zoom factor after one frame from rest.
- * Each later frame adds this minus one, so the factor grows in a straight line
- * and a deep view does not speed up.
+ * Each later frame adds this minus one, so the factor grows in a straight line.
+ * One full step per frame starts the dive at once and still does not speed up later.
  */
-export const AUTO_ZOOM_STEP = 1.012;
+export const AUTO_ZOOM_STEP = 2;
 
 const RATIOS = {
   koch: 3,
