@@ -1813,7 +1813,7 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of auto zoom. The zoom factor grows by eight from the first frame and never
+ * One frame of auto zoom. The magnification grows by 2% from the first frame and never
  * waits for a plate: a late plate only means the one beneath it is stretched.
  */
 function stepAutoZoom(token) {
