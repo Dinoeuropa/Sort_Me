@@ -22,7 +22,6 @@ import {
   PLATE_TARGET_MS,
   advanceAutoZoom,
   autoZoomPath,
-  autoZoomRamp,
   autoZoomView,
   boundsMagnification,
   coverViews,
@@ -175,7 +174,6 @@ const state = {
   autoFade: null,
   autoPlates: [],
   autoDeep: null,
-  autoRampAt: null,
   plateEdge: 2560,
   plateTook: 0,
   plate: null,
@@ -1795,7 +1793,6 @@ function startAutoZoom() {
   state.autoPath = autoZoomPath(state.view, autoZoomTarget(job.fractalId, job.preset), autoZoomFloor(job.fractalId, job.preset));
   state.autoOctave = 0;
   state.autoFade = null;
-  state.autoRampAt = null;
   state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), 1)));
   state.plateTook = 0;
   state.exploring = false;
@@ -1816,8 +1813,8 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of auto zoom. The zoom factor grows by the same amount each frame and never
- * waits for a plate: a late plate only means the one beneath it is stretched a little further.
+ * One frame of auto zoom. The zoom factor grows by the same large amount from the first
+ * frame and never waits for a plate: a late plate only means the one beneath it is stretched.
  */
 function stepAutoZoom(token) {
   const now = performance.now();
@@ -1826,9 +1823,7 @@ function stepAutoZoom(token) {
   const frames = elapsed / 16.7;
   const path = state.autoPath;
   if (path && !state.autoHold && state.autoPlates.length) {
-    if (state.autoRampAt === null) state.autoRampAt = now;
-    const pace = autoZoomRamp(now - state.autoRampAt);
-    const next = advanceAutoZoom(path, state.autoOctave, frames, pace);
+    const next = advanceAutoZoom(path, state.autoOctave, frames, 1);
     state.autoOctave = next.octave;
     if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
     if (state.autoFade) {
