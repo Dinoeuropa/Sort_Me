@@ -46,6 +46,7 @@ import {
   plateBudget,
   plateMargin,
   plateRasterEdge,
+  zoomRaster,
   pointBudget,
   gpuPrecisionHolds,
   rasterSize,
@@ -204,10 +205,10 @@ test("zooming in is not paused while the next plate is still drawing", () => {
   const held = clampViewToPlate(plate, { centerX: 0.1, centerY: -0.05, scale: 0.4, flipY: false }, 1.5);
   assert.ok(Math.abs(held.scale - 0.4) < 1e-9);
   assert.ok(Math.abs(held.centerX - 0.1) < 1e-9);
-  assert.equal(plateRasterEdge(32), 2560);
-  assert.equal(plateRasterEdge(180), 2560);
-  assert.ok(plateRasterEdge(4000) < 2560);
-  assert.ok(plateRasterEdge(4000) >= 480);
+  assert.equal(plateRasterEdge(32), 3840);
+  assert.equal(plateRasterEdge(180), 3840);
+  assert.ok(plateRasterEdge(4000) < 3840);
+  assert.ok(plateRasterEdge(4000) >= 1920);
   const close = { centerX: 0, centerY: 0, scale: 0.2, flipY: false };
   const wide = { centerX: 0.05, centerY: -0.02, scale: 0.8, flipY: false };
   const outward = coverViews([wide, close], 1.5);
@@ -239,6 +240,22 @@ test("a finished escape picture is sampled at 4K", () => {
   assert.equal(SHARP_RASTER_EDGE, 3840);
   const moving = rasterSize(900, 520, 1, true, 1920);
   assert.equal(Math.max(moving.width, moving.height), 1920);
+});
+
+test("a zooming picture is stored at 4K instead of the screen size", () => {
+  const stage = zoomRaster(1400, 800, 1);
+  assert.equal(Math.max(stage.width, stage.height), SHARP_RASTER_EDGE);
+  assert.equal(stage.width, 3840);
+  assert.ok(Math.abs(stage.width / stage.height - 1400 / 800) < 0.01);
+  const hidpi = zoomRaster(1920, 1080, 2);
+  assert.equal(hidpi.width, 3840);
+  assert.equal(hidpi.height, 2160);
+  const alreadySharp = zoomRaster(2000, 800, 2);
+  assert.equal(alreadySharp.width, 4000);
+  assert.equal(alreadySharp.height, 1600);
+  const limited = zoomRaster(1400, 800, 1, 2048);
+  assert.ok(Math.max(limited.width, limited.height) <= 2048);
+  assert.ok(Math.max(limited.width, limited.height) > 2000);
 });
 
 test("a settled raster is twice the device pixels, capped at 3x and a 7680 edge", () => {
@@ -460,9 +477,9 @@ test("plates shrink on a slow machine and grow back when they arrive early", () 
   const quick = plateBudget(1200, PLATE_TARGET_MS / 4);
   assert.ok(quick > 1200);
   assert.ok(quick <= 1500);
-  assert.equal(plateBudget(2560, PLATE_TARGET_MS / 10), 2560);
+  assert.equal(plateBudget(2560, PLATE_TARGET_MS / 10), 3200);
   assert.equal(plateBudget(2000, PLATE_TARGET_MS / 10, 1600), 1600);
-  assert.equal(plateBudget(NaN, NaN), 2560);
+  assert.equal(plateBudget(NaN, NaN), 3840);
 });
 
 test("the finest plate that covers the frame is drawn, and none means every plate", () => {
