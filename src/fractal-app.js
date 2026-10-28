@@ -17,7 +17,6 @@ import {
 } from "./fractals.js";
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
-  AUTO_OCTAVES_PER_FRAME,
   COVER_SLACK,
   PLATE_BLEND_MS,
   PLATE_TARGET_MS,
@@ -1817,7 +1816,7 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of auto zoom. The camera advances at a steady pace along the fixed path and never
+ * One frame of auto zoom. The zoom factor grows by the same amount each frame and never
  * waits for a plate: a late plate only means the one beneath it is stretched a little further.
  */
 function stepAutoZoom(token) {
@@ -1861,8 +1860,11 @@ function beginAutoFade() {
 
 /** Octaves the view is expected to travel before the plate now being requested is ready. */
 function plateLookahead() {
+  const path = state.autoPath;
+  if (!path) return 0;
   const seconds = Math.max(1, (state.plateTook || PLATE_TARGET_MS) * 1.8 / 1000);
-  return Math.min(4, seconds * AUTO_OCTAVES_PER_FRAME * 60);
+  const next = advanceAutoZoom(path, state.autoOctave, seconds * 60, 1);
+  return Math.min(4, Math.max(0, next.octave - (Number(state.autoOctave) || 0)));
 }
 
 function ensureAutoPlate(token, box) {
