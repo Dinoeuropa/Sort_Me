@@ -132,8 +132,8 @@ export const PLATE_BLEND_MS = 320;
 /** How long a plate should take to draw, so the next one is ready before the view has stretched far. */
 export const PLATE_TARGET_MS = 650;
 
-/** Long edge of the largest auto-zoom plate. */
-export const PLATE_EDGE_MAX = 2560;
+/** Long edge of the largest auto-zoom plate. Same 4K edge as a finished picture. */
+export const PLATE_EDGE_MAX = SHARP_RASTER_EDGE;
 
 /**
  * A fixed path from the starting view into a target point.
@@ -361,9 +361,9 @@ export const COVER_SLACK = 0.003;
  */
 export function plateRasterEdge(cap = 500) {
   const iterations = Number.isFinite(cap) && cap > 0 ? cap : 500;
-  if (iterations <= 240) return 2560;
-  const edge = Math.round(2560 * Math.sqrt(240 / iterations));
-  return Math.max(760, Math.min(2560, edge));
+  if (iterations <= 240) return PLATE_EDGE_MAX;
+  const edge = Math.round(PLATE_EDGE_MAX * Math.sqrt(240 / iterations));
+  return Math.max(1920, Math.min(PLATE_EDGE_MAX, edge));
 }
 
 /**
@@ -427,6 +427,31 @@ export function motionPace(share, elapsedMs, budgetMs = FRAME_PACE_MS) {
   if (!(elapsedMs > 0) || elapsedMs > 250 || !(budgetMs > 0)) return held;
   const aimed = Math.min(1, Math.max(MOTION_SCALE_MIN, held * Math.sqrt(budgetMs / elapsedMs)));
   return held + (aimed - held) * 0.5;
+}
+
+/**
+ * Pixel size of a picture that is zooming. The long edge is at least 4K, and it is never
+ * smaller than the device pixels, so the view is not enlarged into blocks. `edgeMax` fits a
+ * GPU that cannot allocate that buffer.
+ */
+export function zoomRaster(width, height, dpr = 1, edgeMax) {
+  const ratio = Math.min(Math.max(Number(dpr) || 1, 1), 2);
+  let pixelW = Math.max(1, Math.floor(Math.max(0, width) * ratio));
+  let pixelH = Math.max(1, Math.floor(Math.max(0, height) * ratio));
+  const screenEdge = Math.max(pixelW, pixelH);
+  if (screenEdge < SHARP_RASTER_EDGE) {
+    const grow = SHARP_RASTER_EDGE / screenEdge;
+    pixelW = Math.max(1, Math.round(pixelW * grow));
+    pixelH = Math.max(1, Math.round(pixelH * grow));
+  }
+  const cap = Number.isFinite(edgeMax) && edgeMax > 0 ? edgeMax : 0;
+  const edge = Math.max(pixelW, pixelH);
+  if (cap && edge > cap) {
+    const fit = cap / edge;
+    pixelW = Math.max(1, Math.floor(pixelW * fit));
+    pixelH = Math.max(1, Math.floor(pixelH * fit));
+  }
+  return { width: pixelW, height: pixelH };
 }
 
 export const SETTLED_DPR_MAX = 3;

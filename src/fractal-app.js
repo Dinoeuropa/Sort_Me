@@ -52,9 +52,8 @@ import {
   plateRasterEdge,
   pointBudget,
   gpuDepthMode,
-  motionPace,
-  motionScale,
   rasterSize,
+  zoomRaster,
   settledRaster,
   recursionLevel,
   wheelZoomFactor,
@@ -1324,8 +1323,7 @@ function renderJob(view = pictureView() || state.view) {
 
 let newestBand = 0;
 
-/** Milliseconds a moving frame may spend on the GPU, and a settled band of the sharp picture. */
-const MOTION_BUDGET_MS = 14;
+/** Milliseconds a settled band of the sharp picture may spend. */
 const BAND_BUDGET_MS = 24;
 const BAND_SHARE = 16;
 
@@ -1398,8 +1396,8 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
 /**
  * Color the pixels on screen from the formula. A settled frame uses settledRaster, which can be larger than the screen and is limited by the GPU's drawing buffer.
  * Deep views are offsets from a reference orbit. Past a pair of doubles the Mandelbrot seahorse
- * uses the refined center. A moving frame, including deep zoom, shrinks to stay inside the frame
- * budget; a settled one then sharpens band by band.
+ * uses the refined center. A moving frame is drawn at 4K, full size, so a zoom does not enlarge
+ * a screen-sized picture into pixels.
  * Returns false where the GPU cannot draw the view, and the workers take over.
  */
 function paintGpuFrame(view, box, settle = false) {
@@ -1438,12 +1436,7 @@ function paintGpuFrame(view, box, settle = false) {
     floor: fit.floor,
     top: fit.top,
   };
-  const budgeted = motionScale(gpuClock.cost * cap, dest.width * dest.height, MOTION_BUDGET_MS);
-  let share = budgeted;
-  if (state.autoZoom && !settle) {
-    state.zoomPace = motionPace(state.zoomPace, state.frameMs);
-    share = Math.min(budgeted, state.zoomPace);
-  }
+  const share = 1;
   if (settle && refine.key === key) return true;
   cancelRefine();
   if (!(settle && state.gpuKey === key && state.gpuShare < 1)) {
@@ -1610,11 +1603,12 @@ function scheduleEscape(quick = false) {
     const dest = glideDestination(targetView);
     const cover = coverViews([dest, targetView], aspect);
     target = { ...cover, flipY: Boolean(targetView.flipY) };
-    longEdge = DRAW_RASTER_EDGE;
     const homeScale = usingReactiveFrame() ? 3.2 : state.home.scale;
     cap = escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), homeScale / Math.max(1e-12, target.scale));
   }
-  const raster = rasterSize(box.width, box.height, box.dpr, true, longEdge);
+  const raster = viewIsMoving() && !quick
+    ? zoomRaster(box.width, box.height, box.dpr)
+    : rasterSize(box.width, box.height, box.dpr, true, longEdge);
   const job = renderJob(target);
   const task = renderEscape({
     fractalId: job.fractalId,
@@ -1806,8 +1800,6 @@ function startAutoZoom() {
   state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), 1)));
   state.plateTook = 0;
   state.exploring = false;
-  state.zoomPace = 1;
-  state.frameMs = 0;
   state.zoomStamp = performance.now();
   const token = ++state.autoToken;
   state.exploreToken += 1;
@@ -1830,9 +1822,7 @@ let plateSerial = 1;
  */
 function stepAutoZoom(token) {
   const now = performance.now();
-  const raw = now - (state.zoomStamp || now);
-  state.frameMs = state.zoomStamp ? raw : 0;
-  const elapsed = Math.min(120, Math.max(16, raw));
+  const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
   state.zoomStamp = now;
   const frames = elapsed / 16.7;
   const path = state.autoPath;
@@ -1962,11 +1952,7 @@ function drawEscapePlate(source, plate, view, width, height) {
 }
 
 function motionRaster(box) {
-  const ratio = Math.min(Math.max(Number(box.dpr) || 1, 1), 2);
-  return {
-    width: Math.max(1, Math.floor(box.width * ratio)),
-    height: Math.max(1, Math.floor(box.height * ratio)),
-  };
+  return zoomRaster(box.width, box.height, box.dpr, gpuDrawLimit());
 }
 
 /**

@@ -110,8 +110,9 @@ test("gpuDrawLimit is the smallest drawing-buffer guarantee, or null without Web
   );
   const app = readFileSync(new URL("../src/fractal-app.js", import.meta.url), "utf8");
   assert.match(app, /settledRaster\([^;]*gpuDrawLimit\(\)/);
-  assert.match(app, /motionScale\(gpuClock\.cost \* cap/);
-  assert.match(app, /motionPace\(state\.zoomPace, state\.frameMs\)/);
+  assert.match(app, /zoomRaster\(/);
+  assert.match(app, /const share = 1/);
+  assert.doesNotMatch(app, /motionPace\(state\.zoomPace/);
   assert.doesNotMatch(app, /autoZoom \? 1 : motionScale/);
   assert.match(app, /paletteProbe\.step\(\)/);
   assert.doesNotMatch(app, /at the monitor's own resolution/);
