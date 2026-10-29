@@ -13,11 +13,10 @@ export const DRAW_RASTER_EDGE = 960;
 export const SHARP_RASTER_EDGE = 3840;
 
 /**
- * Zoom factor after one frame from rest.
- * Each later frame adds this minus one, so the factor grows in a straight line.
- * Eight per frame keeps the opening fast and the later seconds moving, without compounding.
+ * Magnification multiplier for one auto-zoom frame.
+ * Each frame compounds by 2%, so a deep view keeps the same pace as the opening.
  */
-export const AUTO_ZOOM_STEP = 9;
+export const AUTO_ZOOM_STEP = 1.02;
 
 const RATIOS = {
   koch: 3,
@@ -179,18 +178,14 @@ export function autoZoomView(path, octave) {
 }
 
 /**
- * Next position on the path. Each frame adds the same amount to the zoom factor,
- * so magnification does not compound. `done` marks passing the deepest point.
- * Once the factor is too large for that addition to move a double, the octave stays put.
+ * Next position on the path. Each frame multiplies the magnification by two percent,
+ * so the pace stays the same however deep the dive already is. `done` marks passing the deepest point.
  */
 export function advanceAutoZoom(path, octave, frames, pace = 1) {
   const base = Math.max(0, Number.isFinite(octave) ? octave : 0);
-  const added = (AUTO_ZOOM_STEP - 1) * Math.max(0, Number(frames) || 0) * Math.max(0, Number(pace) || 0);
-  if (!(added > 0)) return { octave: base, done: base >= path.maxOctave };
-  const factor = 2 ** base;
-  if (!Number.isFinite(factor)) return { octave: base, done: base >= path.maxOctave };
-  const nextFactor = factor + added;
-  const next = nextFactor > factor ? Math.log2(nextFactor) : base;
+  const steps = Math.max(0, Number(frames) || 0) * Math.max(0, Number(pace) || 0);
+  if (!(steps > 0) || !(AUTO_ZOOM_STEP > 1)) return { octave: base, done: base >= path.maxOctave };
+  const next = base + Math.log2(AUTO_ZOOM_STEP) * steps;
   return { octave: next, done: next >= path.maxOctave };
 }
 
