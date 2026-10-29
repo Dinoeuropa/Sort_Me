@@ -3,8 +3,19 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { paintEscape } from "../src/palettes.js";
 import { ITERATION_LIMIT } from "../src/fractal-view.js";
-import { juliaReference, newtonReference, referenceOrbit } from "../src/precision.js";
-import { GPU_ITER_LIMIT, buildPaletteLut, gpuDrawLimit, gpuEscapeMode, loopLimitForCap, packOrbit } from "../src/escape-gpu.js";
+import { juliaReference, newtonReference, perturbIterations, referenceOrbit, shipReference } from "../src/precision.js";
+import { autoZoomTarget } from "../src/fractals.js";
+import {
+  GPU_BLOCK_COEFF,
+  GPU_ITER_LIMIT,
+  buildPaletteLut,
+  gpuDrawLimit,
+  gpuEscapeMode,
+  gpuQuadraticBlocks,
+  loopLimitForCap,
+  packOrbit,
+  packQuadraticBlocks,
+} from "../src/escape-gpu.js";
 
 function painted(cap, iteration, basin, floor, top) {
   return paintEscape("classic", [iteration], [basin], 1, 1, cap, 1, null, floor, top);
@@ -117,4 +128,59 @@ test("gpuDrawLimit is the smallest drawing-buffer guarantee, or null without Web
   assert.match(app, /paletteProbe\.step\(\)/);
   assert.doesNotMatch(app, /at the monitor's own resolution/);
   assert.match(app, /settledRaster, which can be larger than the screen and is limited by the GPU's drawing buffer/);
+  assert.match(app, /zoomFrameBlit\(/);
+  assert.match(app, /gpuZoomPlan\(/);
+  assert.match(app, /queueGpuEscape\(/);
+});
+
+test("quadratic blocks that fit in float32 pack four texels and skip the middle of a deep pixel", () => {
+  const edge = autoZoomTarget("mandelbrot", {});
+  const cap = 4096;
+  const ref = referenceOrbit(edge.x, edge.xLo, edge.y, edge.yLo, cap);
+  const gpu = gpuQuadraticBlocks(ref);
+  assert.equal(gpu.rebaseAt, 0);
+  assert.ok(gpu.blocks.length > 16, `kept ${gpu.blocks.length}`);
+  assert.ok(gpu.blocks.every((block) => Math.abs(block.cxx) <= GPU_BLOCK_COEFF && Math.abs(block.exx) <= GPU_BLOCK_COEFF));
+  const packed = packQuadraticBlocks(gpu.blocks);
+  assert.equal(packed.count, gpu.blocks.length);
+  assert.equal(packed.data[0], Math.fround(gpu.blocks[0].ax));
+  assert.equal(packed.data[1], Math.fround(gpu.blocks[0].ay));
+  assert.equal(packed.data[2], Math.fround(gpu.blocks[0].bx));
+  assert.equal(packed.data[3], Math.fround(gpu.blocks[0].by));
+  assert.equal(packed.data[4], Math.fround(gpu.blocks[0].cxx));
+  assert.equal(packed.data[12], gpu.blocks[0].at);
+  assert.equal(packed.data[13], gpu.blocks[0].length);
+  assert.equal(packed.data[14], Math.fround(gpu.blocks[0].radius));
+  const bare = { ...ref, blocks: null };
+  bare.rebase = bare;
+  const slow = perturbIterations(bare, 1e-12, 3e-13, cap, 0, { trace: true });
+  const trimmed = { ...ref, blocks: gpu.blocks };
+  trimmed.rebase = trimmed;
+  const fast = perturbIterations(trimmed, 1e-12, 3e-13, cap, 0, { trace: true });
+  const exact = perturbIterations(ref, 1e-12, 3e-13, cap, 0, { trace: true });
+  assert.equal(fast.iter, exact.iter);
+  assert.equal(fast.iter, slow.iter);
+  assert.ok(fast.steps < slow.steps * 0.5, `steps ${fast.steps} of ${slow.steps}`);
+
+  const huge = {
+    at: 0, length: 8, radius: 1,
+    ax: 1, ay: 0, bx: 0, by: 0, cxx: GPU_BLOCK_COEFF * 10, cxy: 0, dxx: 0, dxy: 0, exx: 0, exy: 0,
+  };
+  const dropped = gpuQuadraticBlocks({ fold: false, blocks: [huge], rebase: null });
+  assert.equal(dropped.blocks.length, 0);
+  assert.equal(dropped.rebaseAt, 0);
+  assert.equal(gpuQuadraticBlocks(shipReference(-1.8, 0, 0.01, 0, 200)).blocks.length, 0);
+
+  const julia = juliaReference(-0.12, 0, 0.18, 0, -0.8, 0.156, 2048);
+  const juliaGpu = gpuQuadraticBlocks(julia);
+  assert.ok(juliaGpu.rebaseAt > 0 && juliaGpu.blocks.length > juliaGpu.rebaseAt);
+
+  const source = readFileSync(new URL("../src/escape-gpu.js", import.meta.url), "utf8");
+  assert.match(source, /packQuadraticBlocks/);
+  assert.match(source, /cmul\(c1\.xy, x2\)/);
+  assert.match(source, /export function queueGpuEscape/);
+  assert.match(source, /bindFramebuffer/);
+  assert.match(source, /preserveDrawingBuffer:\s*false/);
+  const perturbArm = source.slice(source.indexOf("} else {"), source.indexOf("gl.activeTexture(gl.TEXTURE0)"));
+  assert.match(perturbArm, /packQuadraticBlocks|quadBlocks|gpuQuadraticBlocks/);
 });

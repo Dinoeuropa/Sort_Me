@@ -41,6 +41,8 @@ import {
   panEscape,
   panPixels,
   panRepaint,
+  gpuZoomPlan,
+  zoomFrameBlit,
   plateCovers,
   pickPlate,
   plateBudget,
@@ -577,4 +579,39 @@ test("a boundary anchor lands on the edge of the set", () => {
   assert.ok(Math.hypot(point.x - 0.3, point.y) < 0.15);
   assert.equal(classes.size, 2);
   assert.deepEqual(boundaryAnchor("mandelbrot", {}, { x: 5, y: 5 }, 0.01), { x: 5, y: 5 });
+});
+
+test("a zoom draws the previous full frame at the new scale", () => {
+  const oldView = { centerX: -0.75, centerY: 0, scale: 1, flipY: false };
+  const closer = { ...oldView, scale: 0.5 };
+  const blit = zoomFrameBlit(oldView, closer, 400, 200);
+  assert.ok(blit);
+  assert.ok(Math.abs(blit.sx - 100) < 1 && Math.abs(blit.sy - 50) < 1, `source origin ${blit.sx}, ${blit.sy}`);
+  assert.ok(Math.abs(blit.sw - 200) < 1 && Math.abs(blit.sh - 100) < 1, `source size ${blit.sw} x ${blit.sh}`);
+  assert.ok(Math.abs(blit.dw - 400) < 1 && Math.abs(blit.dh - 200) < 1, `the scaled frame still fills ${blit.dw} x ${blit.dh}`);
+  assert.equal(zoomFrameBlit(oldView, { ...closer, flipY: true }, 400, 200), null);
+});
+
+test("a moving zoom shows the scaled frame until the next full frame is ready", () => {
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: false, pending: false, ready: false, sameView: false, covered: false }), {
+    show: "fresh", start: true, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: false, ready: false, sameView: false, covered: true }), {
+    show: "warp", start: true, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: true, ready: false, sameView: false, covered: true }), {
+    show: "warp", start: false, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: true, ready: true, sameView: true, covered: true }), {
+    show: "sharp", start: false, adopt: true,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: true, ready: true, sameView: false, covered: true }), {
+    show: "warp", start: true, adopt: true,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: false, ready: false, sameView: true, covered: true }), {
+    show: "sharp", start: false, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: false, ready: false, sameView: false, covered: false }), {
+    show: "fresh", start: true, adopt: false,
+  });
 });
