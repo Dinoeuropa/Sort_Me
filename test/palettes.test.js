@@ -88,6 +88,8 @@ test("classic walks dark, brass, coral, then cream, without pulsing", () => {
   const field = colorSample("classic", Math.round(max * 0.25), max);
   const edge = colorSample("classic", Math.round(max * 0.85), max);
   assert.ok(apart(field, edge) > 70, `field and boundary are ${apart(field, edge)} apart`);
+  const end = colorSample("classic", max - 1, max);
+  assert.ok(lum(end) < 210, `the last shade is ${lum(end)}, bright enough to wash the center out`);
   assert.notDeepEqual(colorSample("classic", Math.round(max * 0.05), max), edge);
 });
 

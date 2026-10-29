@@ -1355,7 +1355,8 @@ function timeGpu(width, height, cap, paint) {
 function gpuPaletteWindow(job, width, height, cap, moving) {
   const preset = job.preset;
   const scene = [job.fractalId, preset.cx, preset.cy, preset.px, preset.py, width, height].join(":");
-  if (!hasDeepCenter(preset)) {
+  const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
+  if (!(depth > 0)) {
     paletteProbe = null;
     paletteFit.scene = scene;
     paletteFit.shown = { floor: 0, top: cap };
@@ -1813,7 +1814,7 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of auto zoom. The magnification grows by 2% from the first frame and never
+ * One frame of auto zoom. The magnification grows by 1.2% from the first frame and never
  * waits for a plate: a late plate only means the one beneath it is stretched.
  */
 function stepAutoZoom(token) {
