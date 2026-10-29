@@ -1,4 +1,4 @@
-import { DEEP_ITERATION_LIMIT, MANDELBROT_ZOOM_FLOOR, isSeahorseCenter, scaledEscape, seahorseOrbit } from "./deep-float.js";
+import { DEEP_ITERATION_LIMIT, isSeahorseCenter, scaledEscape, seahorseOrbit } from "./deep-float.js";
 import { paletteWindow } from "./palettes.js";
 import {
   ddAdd,
@@ -495,9 +495,10 @@ export function openPaletteProbe(fractalId, preset, width, height, maxIter, grid
   const cap = deepMandelbrot
     ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
     : clampIter(maxIter);
-  if (!hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return null;
+  if (!(width > 0) || !(height > 0)) return null;
   const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
   if (!(depth > 0)) return null;
+  const deep = hasDeepCenter(preset);
   const spanY = preset.scale;
   const spanX = preset.scale * (width / height);
   const cells = grid > 1 ? Math.min(12, Math.floor(grid)) : (deepMandelbrot ? 4 : 12);
@@ -508,12 +509,16 @@ export function openPaletteProbe(fractalId, preset, width, height, maxIter, grid
   return {
     step() {
       if (index >= total) return paletteWindow(samples, cap, depth);
-      if (!sample) sample = deepSampler(fractalId, preset, cap, spanX, spanY, width);
+      if (deep && !sample) sample = deepSampler(fractalId, preset, cap, spanX, spanY, width);
       const i = index % cells;
       const j = (index / cells) | 0;
       index += 1;
-      const value = sample(((i + 0.5) / cells - 0.5) * spanX, ((j + 0.5) / cells - 0.5) * spanY);
-      samples.push(fractalId === "newton" ? value.iteration : value);
+      const dx = ((i + 0.5) / cells - 0.5) * spanX;
+      const dy = ((j + 0.5) / cells - 0.5) * spanY;
+      const value = deep
+        ? sample(dx, dy)
+        : escapeValue(fractalId, preset, preset.centerX + dx, preset.centerY + dy, cap);
+      samples.push(fractalId === "newton" || !deep ? value.iteration : value);
       if (index < total) return null;
       return paletteWindow(samples, cap, depth);
     },
@@ -533,7 +538,7 @@ export function paletteRange(fractalId, preset, width, height, maxIter) {
   const cap = deepMandelbrot
     ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
     : clampIter(maxIter);
-  if (!hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return { floor: 0, top: cap };
+  if (!(width > 0) || !(height > 0)) return { floor: 0, top: cap };
   const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
   if (!(depth > 0)) return { floor: 0, top: cap };
   const key = [
@@ -551,17 +556,19 @@ export function paletteRange(fractalId, preset, width, height, maxIter) {
 const ANCHOR_CAP = 2400;
 
 /**
- * The center of a double spiral in the seahorse valley: a Misiurewicz point whose critical orbit
- * lands on the repelling fixed point after 63 steps. The set is self-similar around it, and the
- * escape time grows by about a hundred per doubling, so the edge stays in view at every depth
- * and the iteration cap keeps up. Each coordinate is a double-double, hi + lo, found by Newton's
- * method in that arithmetic: about −0.74369654654391224602677650092828 + 0.13172167175968114661019334859519i.
+ * A filament on the upper edge of the period-3 island, the largest small copy of the
+ * Mandelbrot set. The island's center, the real root of c³ + 2c² + c + 1 = 0, sits
+ * directly below. The smooth top of that copy reads as solid interior past about
+ * seventy million times. This point is a few millionths above that top, where the
+ * boundary keeps crossing the frame through a trillion times, so the dive stays on
+ * the copy's recursive detail.
+ * About −1.754877666388114 + 0.011953806894244868i.
  */
-const SEAHORSE_SPIRAL = {
-  x: -0.7436965465439123,
-  xLo: 1.6423472316984958e-17,
-  y: 0.13172167175968114,
-  yLo: 1.0660999617601176e-17,
+const MINIBROT_EDGE = {
+  x: -1.754877666388114,
+  xLo: 0,
+  y: 0.011953806894244868,
+  yLo: 0,
 };
 
 /**
@@ -637,13 +644,13 @@ export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CA
 /**
  * The one point auto zoom dives toward for a fractal, each held to double-double precision so the
  * edge stays in the frame at every depth.
- * Mandelbrot dives into a spiral center in the seahorse valley, a Julia set into its repelling
+ * Mandelbrot dives into the period-3 island on the spike, a Julia set into its repelling
  * fixed point, Newton's method into the pole where the three basins meet, and the burning ship
  * into a spiral beside its small ship. A burning ship with c fixed by the cursor has no such
  * point ready, so it searches for an edge near the middle of the picture in plain doubles.
  */
 export function autoZoomTarget(fractalId, preset) {
-  if (fractalId === "mandelbrot") return { ...SEAHORSE_SPIRAL };
+  if (fractalId === "mandelbrot") return { ...MINIBROT_EDGE };
   if (fractalId === "julia") return ddJuliaBeta(preset.cx || 0, preset.cy || 0);
   if (fractalId === "newton") return ddNewtonPole(preset.px || 0, preset.py || 0);
   if ("cx" in preset || "cy" in preset) {
@@ -655,14 +662,63 @@ export function autoZoomTarget(fractalId, preset) {
 /**
  * How small a view auto zoom may reach, as a multiple of the target's distance from the origin.
  * Julia, Newton, and the burning ship are drawn in double-double, so they run until a plate pixel
- * nears the 32nd digit. Mandelbrot keeps a fixed-point center and runs until the view scale itself
- * is near the bottom of a double. A burning ship with c from the cursor dives toward a plain-double
- * edge that breaks into dust a few thousand times in, so it turns back sooner.
+ * nears the 32nd digit. The Mandelbrot dive keeps going past a million times. When the
+ * frame would fill with the interior, the camera turns toward a nearby filament that still
+ * has detail, so the picture does not go blank or jump back to the start.
+ * A burning ship with c from the cursor dives toward a plain-double edge that breaks into dust a
+ * few thousand times in, so it turns back sooner.
  */
 export function autoZoomFloor(fractalId, preset = {}) {
   if (fractalId === "burning" && ("cx" in preset || "cy" in preset)) return 2.5e-5;
-  if (fractalId === "mandelbrot") return MANDELBROT_ZOOM_FLOOR;
+  if (fractalId === "mandelbrot") return 1e-12;
   return 1e-28;
+}
+
+/**
+ * A nearby center whose window still shows the set and its exterior.
+ * The smooth edge of an island eventually fills the frame with interior, which draws as a flat
+ * dark field. A ring around that view is scored, and the first ring with a mixed window wins.
+ * Returns null while the current window still has detail.
+ */
+export function reliefCenter(fractalId, view, cap) {
+  if (!view || !(view.scale > 0) || fractalId !== "mandelbrot") return null;
+  const width = 8;
+  const height = 5;
+  const here = escapeBand(fractalId, view, width, height, cap, 0, height);
+  if (insideShare(here.iterations, cap) < 0.8) return null;
+  const originX = view.centerX + (view.centerXLo || 0);
+  const originY = view.centerY + (view.centerYLo || 0);
+  for (const radius of [8, 32, 128]) {
+    let best = null;
+    const reach = view.scale * radius;
+    for (let k = 0; k < 12; k += 1) {
+      const angle = (k / 12) * Math.PI * 2;
+      const cx = originX + Math.cos(angle) * reach;
+      const cy = originY + Math.sin(angle) * reach;
+      const sample = escapeBand(fractalId, { centerX: cx, centerY: cy, scale: view.scale, flipY: view.flipY }, width, height, cap, 0, height);
+      const share = insideShare(sample.iterations, cap);
+      let low = cap;
+      let high = 0;
+      for (const value of sample.iterations) {
+        if (value >= cap) continue;
+        if (value < low) low = value;
+        if (value > high) high = value;
+      }
+      const span = high > low ? high - low : 0;
+      const useful = share > 0.05 && share < 0.8;
+      const score = useful ? span : 0;
+      if (score > 0 && (!best || score > best.score)) best = { x: cx, y: cy, score };
+    }
+    if (best && Math.hypot(best.x - originX, best.y - originY) > view.scale * 0.5) return { x: best.x, y: best.y };
+  }
+  return null;
+}
+
+function insideShare(iterations, cap) {
+  if (!iterations || iterations.length === 0) return 1;
+  let inside = 0;
+  for (const value of iterations) if (value >= cap) inside += 1;
+  return inside / iterations.length;
 }
 
 /** How the picture is produced: iterations, generations, a path, or the chaos game. */

@@ -11,7 +11,7 @@ export const PALETTES = [
   {
     id: "classic",
     name: "Classic",
-    blurb: "Brass on a dark ground, through coral, to a cream boundary.",
+    blurb: "Brass on a dark ground, through coral, to a warm boundary.",
     paint: classicPaint,
   },
   {
@@ -65,13 +65,16 @@ const WINDOW_SPREAD = 0.25;
 /**
  * The iteration range to spread a palette over, from a grid of sampled iterations and the cap.
  * Samples at the cap are inside and keep their own color, so only the escaped ones count. The
- * range runs from a little under their fifth percentile to a little over their ninety-fifth, and
- * on to the cap when that is no farther than twice the samples' width, so the pixels closest to
- * the set keep their own shades. It eases in as they crowd together: a plate whose escapes cover a quarter of the cap or more keeps
- * the whole cap, so an ordinary picture is colored exactly as before, and one whose escapes cover
- * an eighth or less is fitted in full. The top comes down geometrically, so the brightening it
- * brings is even. `weight` scales the fit down, so a dive can begin with the palette it had
- * before diving and fit it as it goes.
+ * range runs from a little under their fifth percentile to a little over their ninety-fifth.
+ * The top reaches the cap only when the empty gap above those samples is under about a third of
+ * their width, so a boundary that sits just under the cap keeps its last shades, and a bright
+ * band in the middle of the cap does not. It eases in as they crowd together: a plate whose
+ * escapes cover a quarter of the cap or more keeps the whole cap, so an ordinary picture is
+ * colored exactly as before, and one whose escapes cover an eighth or less is fitted in full.
+ * A band whose fifth percentile is already in the bright quarter of the cap is fitted in full
+ * too, so a deep spiral is not left as one brass field. The top comes down geometrically, so
+ * the brightening it brings is even. `weight` scales the fit down, so a dive can begin with
+ * the palette it had before diving and fit it as it goes.
  */
 export function paletteWindow(samples, cap, weight = 1) {
   const max = Math.max(1, cap | 0);
@@ -88,11 +91,15 @@ export function paletteWindow(samples, cap, weight = 1) {
   const high = escaped[Math.min(escaped.length - 1, Math.floor(escaped.length * 0.95))];
   const spread = (high - low) / max;
   if (spread >= WINDOW_SPREAD) return whole;
-  const ease = Math.min(1, (WINDOW_SPREAD - spread) / (WINDOW_SPREAD / 2)) * Math.min(1, weight);
+  const bright = low > max * 0.25;
+  const crowd = (WINDOW_SPREAD - spread) / (WINDOW_SPREAD / 2);
+  const ease = Math.min(1, bright ? 1 : crowd) * Math.min(1, weight);
   const pad = Math.max(1, (high - low) * 0.1, max * 0.002);
   const fittedFloor = Math.max(0, low - pad);
   const gap = max - (high + pad);
-  const hold = Math.min(1, Math.max(0, 2 - gap / (2 * Math.max(1, high - low, pad))));
+  const span = Math.max(1, high - low, pad);
+  const holdReach = span * 0.35;
+  const hold = gap <= holdReach ? 1 : Math.max(0, 1 - (gap - holdReach) / holdReach);
   const fittedTop = high + pad + gap * hold;
   const floor = Math.round(fittedFloor * ease);
   const top = Math.round(max * (fittedTop / max) ** ease);
@@ -477,13 +484,13 @@ function rgb(channels) {
 function classicPaint(iter, max) {
   const t = Math.min(1, iter / Math.max(1, max));
   const dark = [24, 20, 16];
-  const brass = [226, 182, 87];
-  const coral = [239, 111, 76];
-  const cream = [246, 239, 228];
+  const brass = [156, 120, 42];
+  const coral = [168, 70, 48];
+  const cream = [112, 88, 72];
   // The original classic inks, in their original order. The sine that striped
   // them is gone, so neighboring iterations stay close and a zoom cannot flash.
   // Coral is darker than brass, so luminance dips once on that leg, then rises
-  // through cream. One turn is the hue change, not a pulse.
+  // into a warm boundary that stays readable over the center of a deep picture.
   if (t < 0.35) return mix(dark, brass, t / 0.35);
   if (t < 0.75) return mix(brass, coral, (t - 0.35) / 0.4);
   return mix(coral, cream, (t - 0.75) / 0.25);

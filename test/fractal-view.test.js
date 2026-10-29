@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoZoomFloor, autoZoomTarget, boundaryAnchor, escapeValue, planePoint } from "../src/fractals.js";
+import { autoZoomFloor, autoZoomTarget, boundaryAnchor, escapeBand, escapeValue, planePoint, reliefCenter } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
   AUTO_OCTAVES_PER_SECOND,
@@ -43,6 +43,8 @@ import {
   panEscape,
   panPixels,
   panRepaint,
+  gpuZoomPlan,
+  zoomFrameBlit,
   plateCovers,
   pickPlate,
   plateBudget,
@@ -294,12 +296,11 @@ test("the shader draws plain coordinates while they hold and offsets from a refe
   assert.equal(gpuDepthMode({ centerX: -0.74, centerXLo: 1e-18, centerY: 0.13, centerYLo: 0, scale: 1e-26 }, 1080), "perturb");
   assert.equal(gpuDepthMode({ centerX: 0, centerXLo: 0, centerY: 0, centerYLo: 0, scale: 3e-27 }, 1080), "direct");
   assert.equal(gpuDepthMode({ centerX: -0.75, centerY: 0.1, scale: 1e-300 }, 800), null);
-  const seahorse = autoZoomTarget("mandelbrot", {});
   const onSpiral = {
-    centerX: seahorse.x,
-    centerXLo: seahorse.xLo,
-    centerY: seahorse.y,
-    centerYLo: seahorse.yLo,
+    centerX: -0.7436965465439123,
+    centerXLo: 1.6423472316984958e-17,
+    centerY: 0.13172167175968114,
+    centerYLo: 1.0660999617601176e-17,
   };
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-6 }, 800), "perturb");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "deep");
@@ -557,20 +558,20 @@ test("one second of auto zoom is one doubling wherever the dive is", () => {
 
 test("each reactive fractal has a fixed point to dive into", () => {
   const mandelbrot = autoZoomTarget("mandelbrot", {});
-  assert.ok(Math.hypot(mandelbrot.x + 0.7436, mandelbrot.y - 0.1318) < 1e-3);
+  assert.ok(Math.hypot(mandelbrot.x + 1.754877666388114, mandelbrot.y - 0.011953806894244868) < 1e-15);
   const preset = { cx: -0.8, cy: 0.156 };
   const beta = autoZoomTarget("julia", preset);
   const x2 = beta.x * beta.x - beta.y * beta.y + preset.cx;
   const y2 = 2 * beta.x * beta.y + preset.cy;
   assert.ok(Math.hypot(x2 - beta.x, y2 - beta.y) < 1e-12);
-  for (const [id, base] of [["mandelbrot", {}], ["newton", {}]]) {
+  for (const [id, base, cap, step] of [["mandelbrot", {}, 8000, 1e-5], ["newton", {}, 2400, 1e-9]]) {
     const point = autoZoomTarget(id, base);
     assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
     const classes = new Set();
     for (let j = -3; j <= 3; j += 1) {
       for (let i = -3; i <= 3; i += 1) {
-        const value = escapeValue(id, base, point.x + i * 1e-9, point.y + j * 1e-9, 2400);
-        classes.add(id === "newton" ? value.basin : value.iteration >= 2400 ? 1 : 0);
+        const value = escapeValue(id, base, point.x + i * step, point.y + j * step, cap);
+        classes.add(id === "newton" ? value.basin : value.iteration >= cap ? 1 : 0);
       }
     }
     assert.ok(classes.size >= 2, id + " target sits on an edge");
@@ -586,7 +587,7 @@ test("each reactive fractal has a fixed point to dive into", () => {
   assert.ok(Number.isFinite(cursorShip.x) && Number.isFinite(cursorShip.y));
   assert.equal(autoZoomFloor("burning", { cx: -1.76, cy: -0.03 }), 2.5e-5);
   assert.equal(autoZoomFloor("burning"), 1e-28);
-  assert.ok(autoZoomFloor("mandelbrot") < 1e-200);
+  assert.equal(autoZoomFloor("mandelbrot"), 1e-12);
 });
 
 test("a boundary anchor lands on the edge of the set", () => {
@@ -599,4 +600,93 @@ test("a boundary anchor lands on the edge of the set", () => {
   assert.ok(Math.hypot(point.x - 0.3, point.y) < 0.15);
   assert.equal(classes.size, 2);
   assert.deepEqual(boundaryAnchor("mandelbrot", {}, { x: 5, y: 5 }, 0.01), { x: 5, y: 5 });
+});
+
+test("the smooth top of the period-3 island fills in, and a filament beside it does not", () => {
+  const start = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
+  const smoothTop = {
+    x: -1.7548776662466927,
+    xLo: -3.5521875096478247e-17,
+    y: 0.011953206752823513,
+    yLo: -8.640220701907486e-19,
+  };
+  const filled = autoZoomPath(start, smoothTop, autoZoomFloor("mandelbrot"));
+  const view = autoZoomView(filled, 26);
+  const cap = escapeIterationCap("mandelbrot", 48, start.scale / view.scale);
+  const next = reliefCenter("mandelbrot", view, cap);
+  assert.ok(next, "the solid interior asks for another center");
+  assert.ok(Math.hypot(next.x - view.centerX, next.y - view.centerY) > view.scale);
+  const healthy = autoZoomView(filled, 12);
+  assert.equal(reliefCenter("mandelbrot", healthy, escapeIterationCap("mandelbrot", 48, start.scale / healthy.scale)), null);
+
+  const live = autoZoomPath(start, autoZoomTarget("mandelbrot", {}), autoZoomFloor("mandelbrot"));
+  for (const octave of [20, 26, 36]) {
+    const camera = autoZoomView(live, octave);
+    const limit = escapeIterationCap("mandelbrot", 48, start.scale / camera.scale);
+    const width = 24;
+    const height = 16;
+    const band = escapeBand("mandelbrot", camera, width, height, limit, 0, height);
+    let inside = 0;
+    let crossings = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const value = band.iterations[y * width + x];
+        if (value >= limit) inside += 1;
+        if (x > 0 && (band.iterations[y * width + x - 1] >= limit) !== (value >= limit)) crossings += 1;
+      }
+    }
+    const share = inside / band.iterations.length;
+    assert.ok(share > 0.08 && share < 0.85, `octave ${octave} interior share ${share}`);
+    assert.ok(crossings > 40, `octave ${octave} has ${crossings} boundary crossings`);
+  }
+});
+
+test("each zoom step stays inside the frame before it and inside the picture it left", () => {
+  const start = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false, width: 3840, height: 2160 };
+  const path = autoZoomPath(start, autoZoomTarget("mandelbrot", {}), autoZoomFloor("mandelbrot"));
+  const aspect = 3840 / 2160;
+  for (let octave = 0; octave < path.maxOctave; octave += 1) {
+    const from = autoZoomView(path, octave);
+    const step = advanceAutoZoom(path, octave, 1 / 60);
+    const to = autoZoomView(path, Math.min(step.octave, path.maxOctave));
+    const blit = zoomFrameBlit({ ...from, width: 3840, height: 2160 }, to, 3840, 2160);
+    assert.ok(blit, `octave ${octave}`);
+    assert.ok(blit.dw >= 3838 && blit.dh >= 2158, `octave ${octave} leaves ${blit.dw} x ${blit.dh}`);
+    assert.equal(plateCovers(start, to, aspect), true, `octave ${octave} leaves the opening picture`);
+  }
+});
+
+test("a zoom draws the previous full frame at the new scale", () => {
+  const oldView = { centerX: -0.75, centerY: 0, scale: 1, flipY: false };
+  const closer = { ...oldView, scale: 0.5 };
+  const blit = zoomFrameBlit(oldView, closer, 400, 200);
+  assert.ok(blit);
+  assert.ok(Math.abs(blit.sx - 100) < 1 && Math.abs(blit.sy - 50) < 1, `source origin ${blit.sx}, ${blit.sy}`);
+  assert.ok(Math.abs(blit.sw - 200) < 1 && Math.abs(blit.sh - 100) < 1, `source size ${blit.sw} x ${blit.sh}`);
+  assert.ok(Math.abs(blit.dw - 400) < 1 && Math.abs(blit.dh - 200) < 1, `the scaled frame still fills ${blit.dw} x ${blit.dh}`);
+  assert.equal(zoomFrameBlit(oldView, { ...closer, flipY: true }, 400, 200), null);
+});
+
+test("a moving zoom shows the scaled frame until the next full frame is ready", () => {
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: false, pending: false, ready: false, sameView: false, covered: false }), {
+    show: "fresh", start: true, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: false, ready: false, sameView: false, covered: true }), {
+    show: "warp", start: true, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: true, ready: false, sameView: false, covered: true }), {
+    show: "warp", start: false, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: true, ready: true, sameView: true, covered: true }), {
+    show: "sharp", start: false, adopt: true,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: true, ready: true, sameView: false, covered: true }), {
+    show: "warp", start: true, adopt: true,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: false, ready: false, sameView: true, covered: true }), {
+    show: "sharp", start: false, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: false, ready: false, sameView: false, covered: false }), {
+    show: "fresh", start: true, adopt: false,
+  });
 });
