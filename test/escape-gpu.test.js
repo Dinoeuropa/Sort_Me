@@ -4,7 +4,6 @@ import test from "node:test";
 import { paintEscape } from "../src/palettes.js";
 import { ITERATION_LIMIT } from "../src/fractal-view.js";
 import { juliaReference, newtonReference, perturbIterations, referenceOrbit, shipReference } from "../src/precision.js";
-import { autoZoomTarget } from "../src/fractals.js";
 import {
   GPU_BLOCK_COEFF,
   GPU_ITER_LIMIT,
@@ -131,10 +130,23 @@ test("gpuDrawLimit is the smallest drawing-buffer guarantee, or null without Web
   assert.match(app, /zoomFrameBlit\(/);
   assert.match(app, /gpuZoomPlan\(/);
   assert.match(app, /queueGpuEscape\(/);
+  assert.match(app, /advanceAutoZoom\(path, state\.autoOctave, 1, 1\)/);
+  assert.match(app, /next\.done \? path\.maxOctave : next\.octave/);
+  assert.match(app, /overlayGpuZoom\(/);
+  assert.doesNotMatch(app, /retargetAutoZoom\(/);
+  assert.equal((app.match(/beginAutoFade\(\)/g) || []).length, 1);
+  assert.doesNotMatch(app, /Math\.min\(120, Math\.max\(16, now - \(state\.zoomStamp/);
 });
 
 test("quadratic blocks that fit in float32 pack four texels and skip the middle of a deep pixel", () => {
-  const edge = autoZoomTarget("mandelbrot", {});
+  // The smooth top of the island, a long reference orbit. The zoom aims a filament
+  // just above it, where this same edge would fill the frame.
+  const edge = {
+    x: -1.7548776662466927,
+    xLo: -3.5521875096478247e-17,
+    y: 0.011953206752823513,
+    yLo: -8.640220701907486e-19,
+  };
   const cap = 4096;
   const ref = referenceOrbit(edge.x, edge.xLo, edge.y, edge.yLo, cap);
   const gpu = gpuQuadraticBlocks(ref);

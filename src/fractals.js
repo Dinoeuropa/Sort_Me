@@ -556,18 +556,19 @@ export function paletteRange(fractalId, preset, width, height, maxIter) {
 const ANCHOR_CAP = 2400;
 
 /**
- * The upper edge of the period-3 island on the real spike, the largest small copy of the
- * Mandelbrot set. Its center, the real root of c³ + 2c² + c + 1 = 0, sits directly below
- * this point and is inside the copy. The point itself is the boundary straight above that
- * center, refined by bisection in double-double, so a dive keeps the little set in frame
- * and the edge under the crosshair.
- * About −1.7548776662466927 + 0.011953206752823513i.
+ * A filament on the upper edge of the period-3 island, the largest small copy of the
+ * Mandelbrot set. The island's center, the real root of c³ + 2c² + c + 1 = 0, sits
+ * directly below. The smooth top of that copy reads as solid interior past about
+ * seventy million times. This point is a few millionths above that top, where the
+ * boundary keeps crossing the frame through a trillion times, so the dive stays on
+ * the copy's recursive detail.
+ * About −1.754877666388114 + 0.011953806894244868i.
  */
 const MINIBROT_EDGE = {
-  x: -1.7548776662466927,
-  xLo: -3.5521875096478247e-17,
-  y: 0.011953206752823513,
-  yLo: -8.640220701907486e-19,
+  x: -1.754877666388114,
+  xLo: 0,
+  y: 0.011953806894244868,
+  yLo: 0,
 };
 
 /**
@@ -661,15 +662,63 @@ export function autoZoomTarget(fractalId, preset) {
 /**
  * How small a view auto zoom may reach, as a multiple of the target's distance from the origin.
  * Julia, Newton, and the burning ship are drawn in double-double, so they run until a plate pixel
- * nears the 32nd digit. The Mandelbrot dive stops around a million times in: closer than that the
- * period-3 island's edge is thinner than the iteration cap can show, and the frame goes dark.
+ * nears the 32nd digit. The Mandelbrot dive keeps going past a million times. When the
+ * frame would fill with the interior, the camera turns toward a nearby filament that still
+ * has detail, so the picture does not go blank or jump back to the start.
  * A burning ship with c from the cursor dives toward a plain-double edge that breaks into dust a
  * few thousand times in, so it turns back sooner.
  */
 export function autoZoomFloor(fractalId, preset = {}) {
   if (fractalId === "burning" && ("cx" in preset || "cy" in preset)) return 2.5e-5;
-  if (fractalId === "mandelbrot") return 1e-6;
+  if (fractalId === "mandelbrot") return 1e-12;
   return 1e-28;
+}
+
+/**
+ * A nearby center whose window still shows the set and its exterior.
+ * The smooth edge of an island eventually fills the frame with interior, which draws as a flat
+ * dark field. A ring around that view is scored, and the first ring with a mixed window wins.
+ * Returns null while the current window still has detail.
+ */
+export function reliefCenter(fractalId, view, cap) {
+  if (!view || !(view.scale > 0) || fractalId !== "mandelbrot") return null;
+  const width = 8;
+  const height = 5;
+  const here = escapeBand(fractalId, view, width, height, cap, 0, height);
+  if (insideShare(here.iterations, cap) < 0.8) return null;
+  const originX = view.centerX + (view.centerXLo || 0);
+  const originY = view.centerY + (view.centerYLo || 0);
+  for (const radius of [8, 32, 128]) {
+    let best = null;
+    const reach = view.scale * radius;
+    for (let k = 0; k < 12; k += 1) {
+      const angle = (k / 12) * Math.PI * 2;
+      const cx = originX + Math.cos(angle) * reach;
+      const cy = originY + Math.sin(angle) * reach;
+      const sample = escapeBand(fractalId, { centerX: cx, centerY: cy, scale: view.scale, flipY: view.flipY }, width, height, cap, 0, height);
+      const share = insideShare(sample.iterations, cap);
+      let low = cap;
+      let high = 0;
+      for (const value of sample.iterations) {
+        if (value >= cap) continue;
+        if (value < low) low = value;
+        if (value > high) high = value;
+      }
+      const span = high > low ? high - low : 0;
+      const useful = share > 0.05 && share < 0.8;
+      const score = useful ? span : 0;
+      if (score > 0 && (!best || score > best.score)) best = { x: cx, y: cy, score };
+    }
+    if (best && Math.hypot(best.x - originX, best.y - originY) > view.scale * 0.5) return { x: best.x, y: best.y };
+  }
+  return null;
+}
+
+function insideShare(iterations, cap) {
+  if (!iterations || iterations.length === 0) return 1;
+  let inside = 0;
+  for (const value of iterations) if (value >= cap) inside += 1;
+  return inside / iterations.length;
 }
 
 /** How the picture is produced: iterations, generations, a path, or the chaos game. */
