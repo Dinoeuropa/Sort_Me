@@ -1,4 +1,4 @@
-import { DEEP_ITERATION_LIMIT, MANDELBROT_ZOOM_FLOOR, isSeahorseCenter, scaledEscape, seahorseOrbit } from "./deep-float.js";
+import { DEEP_ITERATION_LIMIT, isSeahorseCenter, scaledEscape, seahorseOrbit } from "./deep-float.js";
 import { paletteWindow } from "./palettes.js";
 import {
   ddAdd,
@@ -495,9 +495,10 @@ export function openPaletteProbe(fractalId, preset, width, height, maxIter) {
   const cap = deepMandelbrot
     ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
     : clampIter(maxIter);
-  if (!hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return null;
+  if (!(width > 0) || !(height > 0)) return null;
   const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
   if (!(depth > 0)) return null;
+  const deep = hasDeepCenter(preset);
   const spanY = preset.scale;
   const spanX = preset.scale * (width / height);
   const cells = deepMandelbrot ? 4 : 12;
@@ -508,12 +509,16 @@ export function openPaletteProbe(fractalId, preset, width, height, maxIter) {
   return {
     step() {
       if (index >= total) return paletteWindow(samples, cap, depth);
-      if (!sample) sample = deepSampler(fractalId, preset, cap, spanX, spanY, width);
+      if (deep && !sample) sample = deepSampler(fractalId, preset, cap, spanX, spanY, width);
       const i = index % cells;
       const j = (index / cells) | 0;
       index += 1;
-      const value = sample(((i + 0.5) / cells - 0.5) * spanX, ((j + 0.5) / cells - 0.5) * spanY);
-      samples.push(fractalId === "newton" ? value.iteration : value);
+      const dx = ((i + 0.5) / cells - 0.5) * spanX;
+      const dy = ((j + 0.5) / cells - 0.5) * spanY;
+      const value = deep
+        ? sample(dx, dy)
+        : escapeValue(fractalId, preset, preset.centerX + dx, preset.centerY + dy, cap);
+      samples.push(fractalId === "newton" || !deep ? value.iteration : value);
       if (index < total) return null;
       return paletteWindow(samples, cap, depth);
     },
@@ -533,7 +538,7 @@ export function paletteRange(fractalId, preset, width, height, maxIter) {
   const cap = deepMandelbrot
     ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
     : clampIter(maxIter);
-  if (!hasDeepCenter(preset) || !(width > 0) || !(height > 0)) return { floor: 0, top: cap };
+  if (!(width > 0) || !(height > 0)) return { floor: 0, top: cap };
   const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
   if (!(depth > 0)) return { floor: 0, top: cap };
   const key = [
@@ -551,17 +556,18 @@ export function paletteRange(fractalId, preset, width, height, maxIter) {
 const ANCHOR_CAP = 2400;
 
 /**
- * The center of a double spiral in the seahorse valley: a Misiurewicz point whose critical orbit
- * lands on the repelling fixed point after 63 steps. The set is self-similar around it, and the
- * escape time grows by about a hundred per doubling, so the edge stays in view at every depth
- * and the iteration cap keeps up. Each coordinate is a double-double, hi + lo, found by Newton's
- * method in that arithmetic: about −0.74369654654391224602677650092828 + 0.13172167175968114661019334859519i.
+ * The upper edge of the period-3 island on the real spike, the largest small copy of the
+ * Mandelbrot set. Its center, the real root of c³ + 2c² + c + 1 = 0, sits directly below
+ * this point and is inside the copy. The point itself is the boundary straight above that
+ * center, refined by bisection in double-double, so a dive keeps the little set in frame
+ * and the edge under the crosshair.
+ * About −1.7548776662466927 + 0.011953206752823513i.
  */
-const SEAHORSE_SPIRAL = {
-  x: -0.7436965465439123,
-  xLo: 1.6423472316984958e-17,
-  y: 0.13172167175968114,
-  yLo: 1.0660999617601176e-17,
+const MINIBROT_EDGE = {
+  x: -1.7548776662466927,
+  xLo: -3.5521875096478247e-17,
+  y: 0.011953206752823513,
+  yLo: -8.640220701907486e-19,
 };
 
 /**
@@ -637,13 +643,13 @@ export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CA
 /**
  * The one point auto zoom dives toward for a fractal, each held to double-double precision so the
  * edge stays in the frame at every depth.
- * Mandelbrot dives into a spiral center in the seahorse valley, a Julia set into its repelling
+ * Mandelbrot dives into the period-3 island on the spike, a Julia set into its repelling
  * fixed point, Newton's method into the pole where the three basins meet, and the burning ship
  * into a spiral beside its small ship. A burning ship with c fixed by the cursor has no such
  * point ready, so it searches for an edge near the middle of the picture in plain doubles.
  */
 export function autoZoomTarget(fractalId, preset) {
-  if (fractalId === "mandelbrot") return { ...SEAHORSE_SPIRAL };
+  if (fractalId === "mandelbrot") return { ...MINIBROT_EDGE };
   if (fractalId === "julia") return ddJuliaBeta(preset.cx || 0, preset.cy || 0);
   if (fractalId === "newton") return ddNewtonPole(preset.px || 0, preset.py || 0);
   if ("cx" in preset || "cy" in preset) {
@@ -655,13 +661,14 @@ export function autoZoomTarget(fractalId, preset) {
 /**
  * How small a view auto zoom may reach, as a multiple of the target's distance from the origin.
  * Julia, Newton, and the burning ship are drawn in double-double, so they run until a plate pixel
- * nears the 32nd digit. Mandelbrot keeps a fixed-point center and runs until the view scale itself
- * is near the bottom of a double. A burning ship with c from the cursor dives toward a plain-double
- * edge that breaks into dust a few thousand times in, so it turns back sooner.
+ * nears the 32nd digit. The Mandelbrot dive stops around a million times in: closer than that the
+ * period-3 island's edge is thinner than the iteration cap can show, and the frame goes dark.
+ * A burning ship with c from the cursor dives toward a plain-double edge that breaks into dust a
+ * few thousand times in, so it turns back sooner.
  */
 export function autoZoomFloor(fractalId, preset = {}) {
   if (fractalId === "burning" && ("cx" in preset || "cy" in preset)) return 2.5e-5;
-  if (fractalId === "mandelbrot") return MANDELBROT_ZOOM_FLOOR;
+  if (fractalId === "mandelbrot") return 1e-6;
   return 1e-28;
 }
 

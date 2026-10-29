@@ -14,9 +14,10 @@ export const SHARP_RASTER_EDGE = 3840;
 
 /**
  * Magnification multiplier for one auto-zoom frame.
- * Each frame compounds by 2%, so a deep view keeps the same pace as the opening.
+ * 1.2% a frame compounds to about one doubling a second, the pace from before the
+ * later changes to the step.
  */
-export const AUTO_ZOOM_STEP = 1.02;
+export const AUTO_ZOOM_STEP = 1.012;
 
 const RATIOS = {
   koch: 3,
@@ -178,7 +179,7 @@ export function autoZoomView(path, octave) {
 }
 
 /**
- * Next position on the path. Each frame multiplies the magnification by two percent,
+ * Next position on the path. Each frame multiplies the magnification by 1.2 percent,
  * so the pace stays the same however deep the dive already is. `done` marks passing the deepest point.
  */
 export function advanceAutoZoom(path, octave, frames, pace = 1) {

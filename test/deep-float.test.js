@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoZoomTarget, escapeValue, openPaletteProbe, paletteRange } from "../src/fractals.js";
+import { escapeValue, openPaletteProbe, paletteRange } from "../src/fractals.js";
 import { ddAdd, ddSub } from "../src/precision.js";
 import {
   fixedFromNumber,
@@ -67,25 +67,27 @@ test("linear blocks keep the same escape time and fit in one shader pass", () =>
 });
 
 test("the live camera's double-double is the refined seahorse center", () => {
-  const target = autoZoomTarget("mandelbrot", {});
   const view = {
-    centerX: target.x,
-    centerXLo: target.xLo,
-    centerY: target.y,
-    centerYLo: target.yLo,
+    centerX: -0.7436965465439123,
+    centerXLo: 1.6423472316984958e-17,
+    centerY: 0.13172167175968114,
+    centerYLo: 1.0660999617601176e-17,
     scale: 1e-40,
   };
   assert.equal(isSeahorseCenter(view), true);
-  assert.equal(isSeahorseCenter({ centerX: target.x, centerY: target.y, scale: 1e-40 }), false);
+  assert.equal(isSeahorseCenter({
+    centerX: -0.7436965465439123,
+    centerY: 0.13172167175968114,
+    scale: 1e-40,
+  }), false);
 });
 
 test("a deep seahorse plate still spreads its palette past the old iteration cap", () => {
-  const target = autoZoomTarget("mandelbrot", {});
   const view = {
-    centerX: target.x,
-    centerXLo: target.xLo,
-    centerY: target.y,
-    centerYLo: target.yLo,
+    centerX: -0.7436965465439123,
+    centerXLo: 1.6423472316984958e-17,
+    centerY: 0.13172167175968114,
+    centerYLo: 1.0660999617601176e-17,
     scale: 1e-40,
     flipY: false,
   };

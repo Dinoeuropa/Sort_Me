@@ -293,12 +293,11 @@ test("the shader draws plain coordinates while they hold and offsets from a refe
   assert.equal(gpuDepthMode({ centerX: -0.74, centerXLo: 1e-18, centerY: 0.13, centerYLo: 0, scale: 1e-26 }, 1080), "perturb");
   assert.equal(gpuDepthMode({ centerX: 0, centerXLo: 0, centerY: 0, centerYLo: 0, scale: 3e-27 }, 1080), "direct");
   assert.equal(gpuDepthMode({ centerX: -0.75, centerY: 0.1, scale: 1e-300 }, 800), null);
-  const seahorse = autoZoomTarget("mandelbrot", {});
   const onSpiral = {
-    centerX: seahorse.x,
-    centerXLo: seahorse.xLo,
-    centerY: seahorse.y,
-    centerYLo: seahorse.yLo,
+    centerX: -0.7436965465439123,
+    centerXLo: 1.6423472316984958e-17,
+    centerY: 0.13172167175968114,
+    centerYLo: 1.0660999617601176e-17,
   };
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-6 }, 800), "perturb");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "deep");
@@ -436,18 +435,19 @@ test("auto zoom follows one fixed path into its target", () => {
   assert.ok(biggest < 0.05);
 });
 
-test("auto zoom multiplies the magnification by two percent every frame", () => {
+test("auto zoom multiplies the magnification by 1.2 percent every frame", () => {
   const path = autoZoomPath({ centerX: 0, centerY: 0, scale: 2, flipY: false }, { x: 0, y: 0 });
-  assert.ok(Math.abs(AUTO_ZOOM_STEP - 1.02) < 1e-12);
+  assert.ok(Math.abs(AUTO_ZOOM_STEP - 1.012) < 1e-12);
+  assert.ok(Math.abs(AUTO_ZOOM_STEP ** 60 - 2) < 0.05);
   const early = advanceAutoZoom(path, 0, 1, 1);
-  assert.ok(Math.abs(2 ** early.octave - 1.02) < 1e-12);
+  assert.ok(Math.abs(2 ** early.octave - 1.012) < 1e-12);
   const middle = advanceAutoZoom(path, 10, 1, 1);
-  assert.ok(Math.abs(2 ** (middle.octave - 10) - 1.02) < 1e-12);
+  assert.ok(Math.abs(2 ** (middle.octave - 10) - 1.012) < 1e-12);
   assert.equal(middle.done, false);
   const startSecond = advanceAutoZoom(path, 0, 60, 1);
   const laterSecond = advanceAutoZoom(path, 80, 60, 1);
-  assert.ok(Math.abs(2 ** startSecond.octave - 1.02 ** 60) < 1e-9);
-  assert.ok(Math.abs(2 ** (laterSecond.octave - 80) - 1.02 ** 60) < 1e-6);
+  assert.ok(Math.abs(2 ** startSecond.octave - 1.012 ** 60) < 1e-9);
+  assert.ok(Math.abs(2 ** (laterSecond.octave - 80) - 1.012 ** 60) < 1e-6);
   assert.ok(laterSecond.octave > 80);
   const step = Math.log2(AUTO_ZOOM_STEP);
   const near = path.maxOctave - step * 1.5;
@@ -530,25 +530,25 @@ test("one second of auto zoom multiplies the magnification by the same ratio whe
   const ratio = AUTO_ZOOM_STEP ** 60;
   assert.ok(Math.abs(2 ** fromRest.octave - ratio) < 1e-9);
   assert.ok(Math.abs(2 ** (fromDeep.octave - 12) - ratio) < 1e-6);
-  assert.ok(Math.abs(ratio - 1.02 ** 60) < 1e-9);
+  assert.ok(Math.abs(ratio - 1.012 ** 60) < 1e-9);
 });
 
 test("each reactive fractal has a fixed point to dive into", () => {
   const mandelbrot = autoZoomTarget("mandelbrot", {});
-  assert.ok(Math.hypot(mandelbrot.x + 0.7436, mandelbrot.y - 0.1318) < 1e-3);
+  assert.ok(Math.hypot(mandelbrot.x + 1.7548776662466927, mandelbrot.y - 0.011953206752823513) < 1e-6);
   const preset = { cx: -0.8, cy: 0.156 };
   const beta = autoZoomTarget("julia", preset);
   const x2 = beta.x * beta.x - beta.y * beta.y + preset.cx;
   const y2 = 2 * beta.x * beta.y + preset.cy;
   assert.ok(Math.hypot(x2 - beta.x, y2 - beta.y) < 1e-12);
-  for (const [id, base] of [["mandelbrot", {}], ["newton", {}]]) {
+  for (const [id, base, cap, step] of [["mandelbrot", {}, 8000, 1e-5], ["newton", {}, 2400, 1e-9]]) {
     const point = autoZoomTarget(id, base);
     assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
     const classes = new Set();
     for (let j = -3; j <= 3; j += 1) {
       for (let i = -3; i <= 3; i += 1) {
-        const value = escapeValue(id, base, point.x + i * 1e-9, point.y + j * 1e-9, 2400);
-        classes.add(id === "newton" ? value.basin : value.iteration >= 2400 ? 1 : 0);
+        const value = escapeValue(id, base, point.x + i * step, point.y + j * step, cap);
+        classes.add(id === "newton" ? value.basin : value.iteration >= cap ? 1 : 0);
       }
     }
     assert.ok(classes.size >= 2, id + " target sits on an edge");
@@ -564,7 +564,7 @@ test("each reactive fractal has a fixed point to dive into", () => {
   assert.ok(Number.isFinite(cursorShip.x) && Number.isFinite(cursorShip.y));
   assert.equal(autoZoomFloor("burning", { cx: -1.76, cy: -0.03 }), 2.5e-5);
   assert.equal(autoZoomFloor("burning"), 1e-28);
-  assert.ok(autoZoomFloor("mandelbrot") < 1e-200);
+  assert.equal(autoZoomFloor("mandelbrot"), 1e-6);
 });
 
 test("a boundary anchor lands on the edge of the set", () => {
