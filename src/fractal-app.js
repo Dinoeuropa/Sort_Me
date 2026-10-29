@@ -1416,6 +1416,9 @@ const gpuWarp = { canvas: null, view: null, pending: false, pendingView: null, w
 function dropGpuWarp() {
   gpuWarp.canvas = null;
   gpuWarp.view = null;
+  gpuWarp.previous = null;
+  gpuWarp.previousView = null;
+  gpuWarp.born = 0;
   gpuWarp.pending = false;
   gpuWarp.pendingView = null;
   gpuWarp.width = 0;
@@ -1433,8 +1436,15 @@ function sameGpuView(a, b) {
     && Boolean(a.flipY) === Boolean(b.flipY);
 }
 
-function rememberGpuFrame(sheet, view, width, height) {
+function rememberGpuFrame(sheet, view, width, height, blend = false) {
   if (!sheet || !view || width < 1 || height < 1) return;
+  if (blend && gpuWarp.canvas && gpuWarp.view) {
+    const kept = gpuWarp.previous;
+    gpuWarp.previous = gpuWarp.canvas;
+    gpuWarp.previousView = gpuWarp.view;
+    gpuWarp.canvas = kept;
+  }
+  if (blend) gpuWarp.born = performance.now();
   if (!gpuWarp.canvas) gpuWarp.canvas = document.createElement("canvas");
   if (gpuWarp.canvas.width !== width || gpuWarp.canvas.height !== height) {
     gpuWarp.canvas.width = width;
@@ -1965,27 +1975,26 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of auto zoom. The magnification grows by 1.2% from the first frame and never
- * waits for a plate: a late plate only means the one beneath it is stretched.
+ * One frame of auto zoom. The magnification grows by exactly 1.2% on every painted frame.
+ * A slow frame does not skip ahead, and passing a million times does not rewind the camera.
+ * The aim is a filament of the small copy, so the frame keeps that structure instead of
+ * filling in or jumping to a new center.
  */
 function stepAutoZoom(token) {
   const now = performance.now();
-  const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
-  state.zoomStamp = now;
-  const frames = elapsed / 16.7;
   const path = state.autoPath;
   if (path && !state.autoHold && state.autoPlates.length) {
-    const next = advanceAutoZoom(path, state.autoOctave, frames, 1);
-    state.autoOctave = next.octave;
-    if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
+    const next = advanceAutoZoom(path, state.autoOctave, 1, 1);
+    state.autoOctave = next.done ? path.maxOctave : next.octave;
     if (state.autoFade) {
-      state.autoFade.t = Math.min(1, state.autoFade.t + elapsed / AUTO_FADE_MS);
+      state.autoFade.t = Math.min(1, state.autoFade.t + 16.7 / AUTO_FADE_MS);
       if (state.autoFade.t >= 1) {
         state.autoFade = null;
         state.autoDeep = null;
       }
     }
-    state.view = autoZoomView(path, state.autoOctave);
+    state.zoomStamp = now;
+    state.view = autoZoomView(state.autoPath, state.autoOctave);
   }
   const box = viewBox();
   ensureAutoPlate(token, box);
@@ -1993,10 +2002,6 @@ function stepAutoZoom(token) {
   renderAutoChrome();
 }
 
-/**
- * Past the deepest point the picture dissolves into the first one while both keep moving,
- * and the dive starts again from where the dissolve began.
- */
 function beginAutoFade() {
   const path = state.autoPath;
   state.autoDeep = state.autoPlates;
@@ -2018,7 +2023,7 @@ function ensureAutoPlate(token, box) {
   if (state.plateFlight || !state.autoPath) return;
   const screenHeight = motionRaster(box).height;
   const aheadView = autoZoomView(state.autoPath, state.autoOctave + 0.4);
-  if (gpuAvailable() && gpuDepthMode(state.view, screenHeight) && gpuDepthMode(aheadView, screenHeight)) return;
+  if (!state.gpuPlateFailed && gpuAvailable() && gpuDepthMode(state.view, screenHeight) && gpuDepthMode(aheadView, screenHeight)) return;
   const aspect = box.width / Math.max(1, box.height);
   const path = state.autoPath;
   const from = state.autoOctave;
@@ -2130,7 +2135,6 @@ function drawPlateLayer(plates, view, width, height, aspect, alpha, now) {
 }
 
 function drawAutoFrame(box, now) {
-  if (paintGpuFrame(state.view, box)) return;
   const aspectNow = box.width / Math.max(1, box.height);
   if (state.gpuHold && pickPlate(state.autoPlates, state.view, aspectNow) < 0 && !state.autoFade) return;
   state.gpuHold = false;
@@ -2157,6 +2161,79 @@ function drawAutoFrame(box, now) {
   } else {
     drawPlateLayer(state.autoPlates, state.view, width, height, aspect, 1, now);
   }
+  ctx.globalAlpha = 1;
+  overlayGpuZoom(state.view, box);
+}
+
+const GPU_BLEND_MS = 280;
+
+function drawWarpedFrame(source, sourceView, view, width, height, alpha) {
+  if (!source || !sourceView || !(alpha > 0)) return;
+  const blit = zoomFrameBlit(sourceView, view, width, height);
+  if (!blit) return;
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(source, blit.sx, blit.sy, blit.sw, blit.sh, blit.dx, blit.dy, blit.dw, blit.dh);
+}
+
+/** Scale the last full-resolution frame over the plates, and queue the next one without waiting. */
+function overlayGpuZoom(view, box) {
+  if (!view || !gpuAvailable()) return;
+  const dest = motionRaster(box);
+  const width = dest.width;
+  const height = dest.height;
+  const depth = gpuDepthMode(view, height);
+  if (gpuWarp.pending && (gpuWarp.width !== width || gpuWarp.height !== height)) {
+    cancelGpuFrame();
+    gpuWarp.pending = false;
+  }
+  if (depth && gpuWarp.pending && gpuFrameReady()) {
+    const finished = finishGpuFrame();
+    if (finished) rememberGpuFrame(finished, gpuWarp.pendingView, width, height, true);
+    gpuWarp.pending = false;
+  }
+  if (depth && !gpuWarp.pending && !(depth !== "deep" && exploredLevel() > GPU_ITER_LIMIT)) {
+    const cap = exploredLevel();
+    const job = renderJob(view);
+    const fit = gpuPaletteWindow(job, width, height, cap, true);
+    const sample = pollGpuCost();
+    if (Number.isFinite(sample) && sample > 0) {
+      gpuClock.cost = Number.isFinite(gpuClock.cost) ? gpuClock.cost * 0.5 + sample * 0.5 : sample;
+    }
+    let queued = null;
+    try {
+      queued = queueGpuEscape({
+        fractalId: job.fractalId,
+        preset: job.preset,
+        cap,
+        paletteId: state.paletteId,
+        depth,
+        floor: fit.floor,
+        top: fit.top,
+        width,
+        height,
+      });
+    } catch {
+      queued = null;
+    }
+    if (queued) {
+      gpuWarp.pending = true;
+      gpuWarp.pendingView = { ...view };
+      gpuWarp.width = width;
+      gpuWarp.height = height;
+      state.gpuPlateFailed = false;
+    } else {
+      state.gpuPlateFailed = true;
+    }
+  }
+  if (!gpuWarp.canvas || !gpuWarp.view) return;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  const age = gpuWarp.born ? performance.now() - gpuWarp.born : GPU_BLEND_MS;
+  const blend = age >= 0 && age < GPU_BLEND_MS ? age / GPU_BLEND_MS : 1;
+  if (blend < 1 && gpuWarp.previous && gpuWarp.previousView) {
+    drawWarpedFrame(gpuWarp.previous, gpuWarp.previousView, view, width, height, 1);
+  }
+  drawWarpedFrame(gpuWarp.canvas, gpuWarp.view, view, width, height, blend);
   ctx.globalAlpha = 1;
 }
 

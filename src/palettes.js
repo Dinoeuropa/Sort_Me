@@ -484,9 +484,9 @@ function rgb(channels) {
 function classicPaint(iter, max) {
   const t = Math.min(1, iter / Math.max(1, max));
   const dark = [24, 20, 16];
-  const brass = [226, 182, 87];
-  const coral = [239, 111, 76];
-  const cream = [214, 186, 148];
+  const brass = [156, 120, 42];
+  const coral = [168, 70, 48];
+  const cream = [112, 88, 72];
   // The original classic inks, in their original order. The sine that striped
   // them is gone, so neighboring iterations stay close and a zoom cannot flash.
   // Coral is darker than brass, so luminance dips once on that leg, then rises
