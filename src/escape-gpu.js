@@ -613,6 +613,13 @@ const UNIFORMS = [
 
 let gpu = null;
 let failed = false;
+let gpuSurface = null;
+
+/** Draw onto this canvas. The zoom worker passes its OffscreenCanvas before the first frame. */
+export function useGpuSurface(canvas) {
+  if (gpu || failed || !canvas) return;
+  gpuSurface = canvas;
+}
 
 function shader(gl, type, source) {
   const item = gl.createShader(type);
@@ -637,9 +644,13 @@ function texture(gl) {
 
 function boot() {
   if (gpu || failed) return gpu;
-  if (typeof document === "undefined") return null;
+  if (!gpuSurface && typeof document === "undefined") return null;
   try {
-    const canvas = document.createElement("canvas");
+    const canvas = gpuSurface || document.createElement("canvas");
+    if (!canvas) {
+      failed = true;
+      return null;
+    }
     const gl = canvas.getContext("webgl2", {
       alpha: false,
       antialias: false,

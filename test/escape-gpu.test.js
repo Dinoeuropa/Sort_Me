@@ -99,6 +99,7 @@ test("a GPU frame is timed without reading a pixel back", () => {
   assert.equal(source.includes("readPixels"), false);
   assert.match(source, /EXT_disjoint_timer_query_webgl2/);
   assert.match(source, /preserveDrawingBuffer:\s*false/);
+  assert.match(source, /export function useGpuSurface/);
   assert.match(source, /export function pollGpuCost/);
   assert.match(source, /int escapeDeep/);
   assert.match(source, /uPerturb == 2/);
@@ -130,11 +131,12 @@ test("gpuDrawLimit is the smallest drawing-buffer guarantee, or null without Web
   assert.match(app, /zoomFrameBlit\(/);
   assert.match(app, /gpuZoomPlan\(/);
   assert.match(app, /queueGpuEscape\(/);
-  assert.match(app, /advanceAutoZoom\(path, state\.autoOctave, 1, 1\)/);
-  assert.match(app, /next\.done \? path\.maxOctave : next\.octave/);
-  assert.match(app, /overlayGpuZoom\(/);
+  assert.match(app, /advanceAutoZoom\(path, state\.autoOctave, elapsed \/ 1000\)/);
+  assert.match(app, /if \(next\.done && !state\.autoFade && state\.autoStart\) beginAutoFade\(\)/);
+  assert.match(app, /queueGpuZoom\(/);
+  assert.doesNotMatch(app, /overlayGpuZoom\(/);
+  assert.doesNotMatch(app, /next\.done \? path\.maxOctave : next\.octave/);
   assert.doesNotMatch(app, /retargetAutoZoom\(/);
-  assert.equal((app.match(/beginAutoFade\(\)/g) || []).length, 1);
   assert.doesNotMatch(app, /Math\.min\(120, Math\.max\(16, now - \(state\.zoomStamp/);
 });
 

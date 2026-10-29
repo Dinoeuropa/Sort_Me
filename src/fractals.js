@@ -490,7 +490,7 @@ let cachedWindow = null;
  * built on the first step. A moving deep zoom calls step once a frame so the fit does not stall
  * the picture; a plate walks the probe to the end.
  */
-export function openPaletteProbe(fractalId, preset, width, height, maxIter) {
+export function openPaletteProbe(fractalId, preset, width, height, maxIter, grid) {
   const deepMandelbrot = fractalId === "mandelbrot" && isSeahorseCenter(preset) && preset.scale < 1e-30;
   const cap = deepMandelbrot
     ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
@@ -501,7 +501,7 @@ export function openPaletteProbe(fractalId, preset, width, height, maxIter) {
   const deep = hasDeepCenter(preset);
   const spanY = preset.scale;
   const spanX = preset.scale * (width / height);
-  const cells = deepMandelbrot ? 4 : 12;
+  const cells = grid > 1 ? Math.min(12, Math.floor(grid)) : (deepMandelbrot ? 4 : 12);
   const total = cells * cells;
   const samples = [];
   let index = 0;
