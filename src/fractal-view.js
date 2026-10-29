@@ -258,6 +258,33 @@ export function escapeSourceBlit(plate, view, width, height) {
 }
 
 /**
+ * Where the previous full-resolution frame is drawn for a new camera.
+ * A zoom about the center crops the middle of that frame and fills the new one.
+ */
+export function zoomFrameBlit(oldView, newView, width, height) {
+  if (!oldView || !newView || Boolean(oldView.flipY) !== Boolean(newView.flipY)) return null;
+  if (!(oldView.scale > 0) || !(newView.scale > 0)) return null;
+  return escapeSourceBlit({ ...oldView, width, height }, newView, width, height);
+}
+
+/**
+ * What to show while a full-resolution frame is on the GPU.
+ * The previous frame is scaled into the new camera until the draw for this camera is finished.
+ * `fresh` means nothing on screen covers this view, so the draw is shown when it is issued.
+ */
+export function gpuZoomPlan({ hasSnapshot, pending, ready, sameView, covered }) {
+  if (pending && ready) {
+    if (sameView) return { show: "sharp", start: false, adopt: true };
+    if (covered) return { show: "warp", start: true, adopt: true };
+    return { show: "fresh", start: true, adopt: true };
+  }
+  if (pending) return { show: hasSnapshot && covered ? "warp" : "hold", start: false, adopt: false };
+  if (!hasSnapshot || (!covered && !sameView)) return { show: "fresh", start: true, adopt: false };
+  if (!sameView) return { show: "warp", start: true, adopt: false };
+  return { show: "sharp", start: false, adopt: false };
+}
+
+/**
  * Zoom out only as far as the plate still covers.
  * A closer plate must not shrink away and leave the paper color around it.
  */

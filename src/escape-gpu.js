@@ -14,6 +14,67 @@ import {
 /** The shader loop stops here, the same cap the workers keep. */
 export const GPU_ITER_LIMIT = ITERATION_LIMIT;
 
+/**
+ * A quadratic coefficient larger than this is left for single steps.
+ * Past it, float32 rounding of C δ² swamps the offset the block is allowed to move.
+ */
+export const GPU_BLOCK_COEFF = 1e6;
+
+const BLOCK_COEFFS = ["ax", "ay", "bx", "by", "cxx", "cxy", "dxx", "dxy", "exx", "exy"];
+
+function blockFitsFloat32(block) {
+  if (!block || !(block.radius > 0) || !Number.isFinite(block.radius)) return false;
+  if (!(block.length >= 1) || !(block.at >= 0)) return false;
+  for (const name of BLOCK_COEFFS) {
+    const value = block[name];
+    if (!Number.isFinite(value) || Math.abs(value) > GPU_BLOCK_COEFF) return false;
+  }
+  return true;
+}
+
+/**
+ * Bivariate blocks the perturb shader may jump.
+ * The fold has none. A coefficient past GPU_BLOCK_COEFF is dropped and that run is single-stepped.
+ * When the rebase orbit is a different reference, its blocks follow the primary ones and `rebaseAt`
+ * is the first of them.
+ */
+export function gpuQuadraticBlocks(reference) {
+  const empty = { blocks: [], rebaseAt: 0 };
+  if (!reference || reference.fold || !reference.blocks) return empty;
+  const blocks = reference.blocks.filter(blockFitsFloat32);
+  if (!reference.rebase || reference.rebase === reference) return { blocks, rebaseAt: 0 };
+  const rebaseAt = blocks.length;
+  const more = (reference.rebase.blocks || []).filter(blockFitsFloat32);
+  return { blocks: blocks.concat(more), rebaseAt };
+}
+
+/** Four texels a block: A and B, C and D, E, then start, length, and radius. */
+export function packQuadraticBlocks(blocks) {
+  const list = blocks || [];
+  const width = 1024;
+  const texels = Math.max(4, list.length * 4);
+  const height = Math.ceil(texels / width);
+  const data = new Float32Array(width * height * 4);
+  for (let i = 0; i < list.length; i += 1) {
+    const block = list[i];
+    const base = i * 16;
+    data[base] = Math.fround(block.ax);
+    data[base + 1] = Math.fround(block.ay);
+    data[base + 2] = Math.fround(block.bx);
+    data[base + 3] = Math.fround(block.by);
+    data[base + 4] = Math.fround(block.cxx);
+    data[base + 5] = Math.fround(block.cxy);
+    data[base + 6] = Math.fround(block.dxx);
+    data[base + 7] = Math.fround(block.dxy);
+    data[base + 8] = Math.fround(block.exx);
+    data[base + 9] = Math.fround(block.exy);
+    data[base + 12] = block.at;
+    data[base + 13] = block.length;
+    data[base + 14] = Math.fround(block.radius);
+  }
+  return { data, width, height, count: list.length };
+}
+
 const LOOP_LIMITS = [256, 1024, 4096, 16384];
 
 /** Smallest compiled loop bound that can run this cap. */
@@ -132,6 +193,8 @@ uniform float uMant;
 uniform int uExp;
 uniform sampler2D uBlocks;
 uniform int uBlockCount;
+uniform int uRebaseBlock;
+uniform int uBlockTotal;
 uniform int uBlockWidth;
 out vec4 outColor;
 
@@ -222,6 +285,10 @@ int escapeDirect(vec2 p, int mode, int cap) {
   return iter;
 }
 
+vec4 blockTexel(int index) {
+  return texelFetch(uBlocks, ivec2(index % uBlockWidth, index / uBlockWidth), 0);
+}
+
 // The pixel as an offset from the reference orbit, moved onto the start of the critical orbit
 // whenever it comes closer to the origin than its offset, as perturbIterations does.
 int escapePerturbed(vec2 u, int mode, int cap) {
@@ -234,6 +301,8 @@ int escapePerturbed(vec2 u, int mode, int cap) {
   int last = uLast;
   int m = 0;
   int iter = 0;
+  int blockIndex = 0;
+  int blockLimit = uBlockCount;
   if (!inC) {
     vec2 z0 = orbitAt(0).xy + dz;
     if (dot(z0, z0) > 4.0) return 0;
@@ -245,6 +314,46 @@ int escapePerturbed(vec2 u, int mode, int cap) {
   }
   for (int i = 0; i < LOOP; i++) {
     if (iter >= cap) break;
+    for (int skip = 0; skip < 8; skip++) {
+      if (blockIndex >= blockLimit) break;
+      if (int(blockTexel(blockIndex * 4 + 3).x) >= m) break;
+      blockIndex += 1;
+    }
+    bool jumped = false;
+    if (!fold && blockIndex < blockLimit) {
+      vec4 c0 = blockTexel(blockIndex * 4);
+      vec4 c1 = blockTexel(blockIndex * 4 + 1);
+      vec4 c2 = blockTexel(blockIndex * 4 + 2);
+      vec4 meta = blockTexel(blockIndex * 4 + 3);
+      int atBlock = int(meta.x);
+      int len = int(meta.y);
+      if (atBlock == m && iter + len <= cap && m + len <= last && length(dz) < meta.z && length(dc) < meta.z) {
+        vec2 x2 = cmul(dz, dz);
+        vec2 y2 = cmul(dc, dc);
+        vec2 xy = cmul(dz, dc);
+        dz = cmul(c0.xy, dz) + cmul(c0.zw, dc) + cmul(c1.xy, x2) + cmul(c1.zw, xy) + cmul(c2.xy, y2);
+        m += len;
+        iter += len;
+        blockIndex += 1;
+        jumped = true;
+      } else if (atBlock == m) {
+        blockIndex += 1;
+      }
+    }
+    if (jumped) {
+      vec2 z = orbitAt(at + m).xy + dz;
+      float zz = dot(z, z);
+      if (zz > 4.0) break;
+      if (m >= last || zz < dot(dz, dz)) {
+        dz = z;
+        m = 0;
+        at = uRebaseAt;
+        last = uRebaseLast;
+        blockIndex = uRebaseBlock;
+        blockLimit = uBlockTotal;
+      }
+      continue;
+    }
     vec2 zr = orbitAt(at + m).xy;
     vec2 n;
     if (fold) {
@@ -266,13 +375,11 @@ int escapePerturbed(vec2 u, int mode, int cap) {
       m = 0;
       at = uRebaseAt;
       last = uRebaseLast;
+      blockIndex = uRebaseBlock;
+      blockLimit = uBlockTotal;
     }
   }
   return iter;
-}
-
-vec4 blockTexel(int index) {
-  return texelFetch(uBlocks, ivec2(index % uBlockWidth, index / uBlockWidth), 0);
 }
 
 float exp2i(int exponent) {
@@ -501,7 +608,7 @@ void main() {
 const UNIFORMS = [
   "uResolution", "uBand", "uOrigin", "uCenter", "uScale", "uFlip", "uCap", "uMode", "uParam", "uLut", "uLutWidth", "uSpan",
   "uPerturb", "uOrbit", "uOrbitWidth", "uLast", "uRebaseAt", "uRebaseLast", "uOffset", "uSkip", "uSeries", "uSeries2",
-  "uMant", "uExp", "uBlocks", "uBlockCount", "uBlockWidth",
+  "uMant", "uExp", "uBlocks", "uBlockCount", "uRebaseBlock", "uBlockTotal", "uBlockWidth",
 ];
 
 let gpu = null;
@@ -692,7 +799,8 @@ function referenceFor(session, mode, preset, cap) {
   const packed = packOrbit(reference);
   gl.bindTexture(gl.TEXTURE_2D, session.orbit);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, packed.width, packed.height, 0, gl.RGBA, gl.FLOAT, packed.data);
-  const blockPack = packBlocks(reference.blocks);
+  const quad = deep ? null : gpuQuadraticBlocks(reference);
+  const blockPack = deep ? packBlocks(reference.blocks) : packQuadraticBlocks(quad.blocks);
   gl.bindTexture(gl.TEXTURE_2D, session.blocks);
   gl.texImage2D(
     gl.TEXTURE_2D, 0, gl.RGBA32F, blockPack.width, blockPack.height, 0, gl.RGBA, gl.FLOAT, blockPack.data,
@@ -732,6 +840,7 @@ export function paintGpuEscape({
   top = null,
   rows = null,
   cols = null,
+  defer = false,
 }) {
   const mode = gpuEscapeMode(fractalId, preset);
   const iterations = cap | 0;
@@ -802,6 +911,8 @@ export function paintGpuEscape({
       gl.uniform2f(where.uSeries, 0, 0);
       gl.uniform2f(where.uSeries2, 0, 0);
       gl.uniform1i(where.uBlockCount, held.blocks ? held.blocks.count : 0);
+      gl.uniform1i(where.uRebaseBlock, 0);
+      gl.uniform1i(where.uBlockTotal, held.blocks ? held.blocks.count : 0);
       gl.uniform1i(where.uBlockWidth, held.blocks ? held.blocks.width : 1);
     } else {
       gl.uniform2f(where.uOffset, offset.dx, offset.dy);
@@ -815,8 +926,13 @@ export function paintGpuEscape({
         skip > 0 && reference.quad ? reference.quad[skip * 2] : 0,
         skip > 0 && reference.quad ? reference.quad[skip * 2 + 1] : 0,
       );
-      gl.uniform1i(where.uBlockCount, 0);
-      gl.uniform1i(where.uBlockWidth, 1);
+      const quad = gpuQuadraticBlocks(reference);
+      const shared = !reference.rebase || reference.rebase === reference;
+      const primary = shared ? quad.blocks.length : quad.rebaseAt;
+      gl.uniform1i(where.uBlockCount, primary);
+      gl.uniform1i(where.uRebaseBlock, shared ? 0 : quad.rebaseAt);
+      gl.uniform1i(where.uBlockTotal, quad.blocks.length);
+      gl.uniform1i(where.uBlockWidth, held.blocks ? held.blocks.width : 1);
     }
   } else {
     gl.uniform1i(where.uOrbitWidth, 1);
@@ -828,6 +944,8 @@ export function paintGpuEscape({
     gl.uniform2f(where.uSeries, 0, 0);
     gl.uniform2f(where.uSeries2, 0, 0);
     gl.uniform1i(where.uBlockCount, 0);
+    gl.uniform1i(where.uRebaseBlock, 0);
+    gl.uniform1i(where.uBlockTotal, 0);
     gl.uniform1i(where.uBlockWidth, 1);
   }
   gl.activeTexture(gl.TEXTURE0);
@@ -847,7 +965,112 @@ export function paintGpuEscape({
     gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
     session.timerSample = { query, width, height, cap: iterations };
   }
+  const queued = Boolean(defer) && !rows && !cols;
+  if (queued) {
+    if (!bindFrameTarget(session, wide, tall)) {
+      if (timeThis) {
+        gl.endQuery(ext.TIME_ELAPSED_EXT);
+        session.timerSample = null;
+      }
+      return null;
+    }
+  } else {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   if (timeThis) gl.endQuery(ext.TIME_ELAPSED_EXT);
+  if (queued) {
+    if (session.fence) gl.deleteSync(session.fence);
+    session.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    session.frameW = wide;
+    session.frameH = tall;
+    gl.flush();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (!session.fence) return null;
+    session.deferred = true;
+    return null;
+  }
   return canvas;
+}
+
+/** Render a full frame into a texture and return once it is queued. The canvas is not readable yet. */
+export function queueGpuEscape(args) {
+  const session = boot();
+  if (!session) return null;
+  session.deferred = false;
+  paintGpuEscape({ ...args, defer: true });
+  return session.deferred ? true : null;
+}
+
+/** True when the queued frame's commands have finished. A missing queue counts as ready. */
+export function gpuFrameReady() {
+  const session = gpu;
+  if (!session?.deferred || !session.fence) return !session?.deferred;
+  const { gl } = session;
+  const status = gl.clientWaitSync(session.fence, 0, 0);
+  return status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED;
+}
+
+/** Copy a finished queued frame onto the canvas. Null while it is still running. */
+export function finishGpuFrame() {
+  const session = gpu;
+  if (!session?.deferred || !gpuFrameReady()) return null;
+  const { gl } = session;
+  const w = session.frameW;
+  const h = session.frameH;
+  if (session.canvas.width !== w || session.canvas.height !== h) {
+    session.canvas.width = w;
+    session.canvas.height = h;
+  }
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, session.frameFb);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  if (session.fence) {
+    gl.deleteSync(session.fence);
+    session.fence = null;
+  }
+  session.deferred = false;
+  return session.canvas;
+}
+
+/** Drop a queued frame so a later draw does not present it. */
+export function cancelGpuFrame() {
+  const session = gpu;
+  if (!session) return;
+  if (session.fence) {
+    session.gl.deleteSync(session.fence);
+    session.fence = null;
+  }
+  session.deferred = false;
+  session.gl.bindFramebuffer(session.gl.FRAMEBUFFER, null);
+}
+
+function bindFrameTarget(session, width, height) {
+  const { gl } = session;
+  // The color target must not sit on a texture unit the shader samples, or the draw is rejected.
+  gl.activeTexture(gl.TEXTURE3);
+  if (!session.frameTex) {
+    session.frameTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, session.frameTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    session.frameFb = gl.createFramebuffer();
+  }
+  gl.bindTexture(gl.TEXTURE_2D, session.frameTex);
+  if (session.frameTexW !== width || session.frameTexH !== height) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, session.frameFb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, session.frameTex, 0);
+    session.frameTexW = width;
+    session.frameTexH = height;
+  } else {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, session.frameFb);
+  }
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, session.blocks);
+  gl.viewport(0, 0, width, height);
+  return gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
 }

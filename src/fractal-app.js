@@ -57,9 +57,21 @@ import {
   wheelZoomFactor,
   zoomBounds,
   zoomEscape,
+  gpuZoomPlan,
+  zoomFrameBlit,
 } from "./fractal-view.js";
 import { renderEscape } from "./escape-pool.js";
-import { GPU_ITER_LIMIT, gpuAvailable, gpuDrawLimit, paintGpuEscape, pollGpuCost } from "./escape-gpu.js";
+import {
+  GPU_ITER_LIMIT,
+  cancelGpuFrame,
+  finishGpuFrame,
+  gpuAvailable,
+  gpuDrawLimit,
+  gpuFrameReady,
+  paintGpuEscape,
+  pollGpuCost,
+  queueGpuEscape,
+} from "./escape-gpu.js";
 import { hasDeepCenter, viewOffset } from "./precision.js";
 import {
   PALETTES,
@@ -409,6 +421,7 @@ function resetProgress() {
   state.gpuHold = false;
   state.gpuKey = "";
   state.gpuPan = null;
+  dropGpuWarp();
   cancelRefine();
   state.cursorDirty = false;
   state.cursorRedraw = false;
@@ -1398,6 +1411,63 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
  * a screen-sized picture into pixels.
  * Returns false where the GPU cannot draw the view, and the workers take over.
  */
+const gpuWarp = { canvas: null, view: null, pending: false, pendingView: null, width: 0, height: 0 };
+
+function dropGpuWarp() {
+  gpuWarp.canvas = null;
+  gpuWarp.view = null;
+  gpuWarp.pending = false;
+  gpuWarp.pendingView = null;
+  gpuWarp.width = 0;
+  gpuWarp.height = 0;
+  cancelGpuFrame();
+}
+
+function sameGpuView(a, b) {
+  if (!a || !b) return false;
+  return a.scale === b.scale
+    && a.centerX === b.centerX
+    && a.centerY === b.centerY
+    && (a.centerXLo || 0) === (b.centerXLo || 0)
+    && (a.centerYLo || 0) === (b.centerYLo || 0)
+    && Boolean(a.flipY) === Boolean(b.flipY);
+}
+
+function rememberGpuFrame(sheet, view, width, height) {
+  if (!sheet || !view || width < 1 || height < 1) return;
+  if (!gpuWarp.canvas) gpuWarp.canvas = document.createElement("canvas");
+  if (gpuWarp.canvas.width !== width || gpuWarp.canvas.height !== height) {
+    gpuWarp.canvas.width = width;
+    gpuWarp.canvas.height = height;
+  }
+  const copy = gpuWarp.canvas.getContext("2d");
+  copy.setTransform(1, 0, 0, 1, 0, 0);
+  copy.drawImage(sheet, 0, 0, width, height);
+  gpuWarp.view = { ...view };
+  gpuWarp.width = width;
+  gpuWarp.height = height;
+}
+
+function showStoredFrame(view, dest, warp) {
+  if (!gpuWarp.canvas || gpuWarp.width !== dest.width || gpuWarp.height !== dest.height) return false;
+  const blit = warp ? zoomFrameBlit(gpuWarp.view, view, dest.width, dest.height) : null;
+  if (warp && !blit) return false;
+  if (canvas.width !== dest.width || canvas.height !== dest.height) {
+    canvas.width = dest.width;
+    canvas.height = dest.height;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  if (blit) {
+    ctx.drawImage(gpuWarp.canvas, blit.sx, blit.sy, blit.sw, blit.sh, blit.dx, blit.dy, blit.dw, blit.dh);
+  } else {
+    ctx.drawImage(gpuWarp.canvas, 0, 0);
+  }
+  return true;
+}
+
 function paintGpuFrame(view, box, settle = false) {
   if (!view || state.running || !box) {
     state.gpuPan = null;
@@ -1441,33 +1511,113 @@ function paintGpuFrame(view, box, settle = false) {
     const width = Math.max(1, Math.round(dest.width * share));
     const height = Math.max(1, Math.round(dest.height * share));
     const panned = !settle && share === 1 && paintGpuPan(view, dest, shared);
-    if (!panned) {
-      let sheet = null;
-      try {
-        sheet = timeGpu(width, height, cap, () => paintGpuEscape({ ...shared, width, height }));
-      } catch {
-        state.gpuPan = null;
-        return false;
+    let matched = panned;
+    if (panned) {
+      rememberGpuFrame(canvas, view, dest.width, dest.height);
+    } else {
+      if (gpuWarp.pending && (gpuWarp.width !== width || gpuWarp.height !== height)) {
+        cancelGpuFrame();
+        gpuWarp.pending = false;
       }
-      if (!sheet) {
-        state.gpuPan = null;
-        return false;
+      const stored = gpuWarp.view && gpuWarp.width === width && gpuWarp.height === height;
+      const ready = Boolean(stored && gpuWarp.pending && gpuFrameReady());
+      const shown = ready ? gpuWarp.pendingView : gpuWarp.view;
+      const blit = stored && shown ? zoomFrameBlit(shown, view, width, height) : null;
+      const covered = Boolean(blit) && blit.dw >= width - 1 && blit.dh >= height - 1 && blit.dx <= 1 && blit.dy <= 1;
+      const plan = !settle && stored
+        ? gpuZoomPlan({
+          hasSnapshot: true,
+          pending: gpuWarp.pending,
+          ready,
+          sameView: sameGpuView(shown, view),
+          covered,
+        })
+        : { show: "fresh", start: true, adopt: false };
+      if (settle && gpuWarp.pending) {
+        if (ready && sameGpuView(gpuWarp.pendingView, view)) {
+          plan.adopt = true;
+          plan.show = "sharp";
+          plan.start = false;
+        } else {
+          cancelGpuFrame();
+          gpuWarp.pending = false;
+        }
       }
-      if (canvas.width !== dest.width || canvas.height !== dest.height) {
-        canvas.width = dest.width;
-        canvas.height = dest.height;
+      if (plan.adopt) {
+        const finished = finishGpuFrame();
+        if (finished) rememberGpuFrame(finished, gpuWarp.pendingView, width, height);
+        gpuWarp.pending = false;
       }
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalAlpha = 1;
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(sheet, 0, 0, width, height, 0, 0, dest.width, dest.height);
+      if (plan.show === "warp") matched = showStoredFrame(view, dest, true);
+      else if (plan.show === "sharp") matched = showStoredFrame(view, dest, false);
+      if (plan.show === "fresh" || (plan.show === "hold" && !matched) || ((plan.show === "warp" || plan.show === "sharp") && !matched)) {
+        let sheet = null;
+        try {
+          sheet = timeGpu(width, height, cap, () => paintGpuEscape({ ...shared, width, height }));
+        } catch {
+          state.gpuPan = null;
+          dropGpuWarp();
+          return false;
+        }
+        if (!sheet) {
+          state.gpuPan = null;
+          dropGpuWarp();
+          return false;
+        }
+        if (canvas.width !== dest.width || canvas.height !== dest.height) {
+          canvas.width = dest.width;
+          canvas.height = dest.height;
+        }
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = 1;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(sheet, 0, 0, width, height, 0, 0, dest.width, dest.height);
+        rememberGpuFrame(canvas, view, dest.width, dest.height);
+        gpuWarp.pending = false;
+        matched = true;
+        plan.start = false;
+      }
+      if (plan.start) {
+        const sample = pollGpuCost();
+        if (Number.isFinite(sample) && sample > 0) {
+          gpuClock.cost = Number.isFinite(gpuClock.cost) ? gpuClock.cost * 0.5 + sample * 0.5 : sample;
+        }
+        let queued = null;
+        try {
+          queued = queueGpuEscape({ ...shared, width, height });
+        } catch {
+          queued = null;
+        }
+        if (queued) {
+          gpuWarp.pending = true;
+          gpuWarp.pendingView = { ...view };
+        } else {
+          gpuWarp.pending = false;
+          let sheet = null;
+          try {
+            sheet = timeGpu(width, height, cap, () => paintGpuEscape({ ...shared, width, height }));
+          } catch {
+            sheet = null;
+          }
+          if (sheet) {
+            if (canvas.width !== dest.width || canvas.height !== dest.height) {
+              canvas.width = dest.width;
+              canvas.height = dest.height;
+            }
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.drawImage(sheet, 0, 0, width, height, 0, 0, dest.width, dest.height);
+            rememberGpuFrame(canvas, view, dest.width, dest.height);
+            matched = true;
+          }
+        }
+      }
     }
     state.gpuKey = key;
     state.gpuShare = share;
-    if (share === 1) {
+    if (share === 1 && matched) {
       state.gpuPan = { view: { ...view }, width: dest.width, height: dest.height };
-    } else {
+    } else if (!matched) {
       state.gpuPan = null;
     }
   }
@@ -1692,6 +1842,7 @@ function applyEscapeResult(result) {
   state.gpu = false;
   state.gpuHold = false;
   state.gpuPan = null;
+  dropGpuWarp();
   state.plate = { canvas: plate, ...finished };
   if (current && viewMoved(finished, current, 0.004)) blitPlate();
   else {
