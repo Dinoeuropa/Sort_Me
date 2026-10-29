@@ -13,11 +13,11 @@ export const DRAW_RASTER_EDGE = 960;
 export const SHARP_RASTER_EDGE = 3840;
 
 /**
- * Zoom factor after one frame from rest.
- * Each later frame adds this minus one, so the factor grows in a straight line.
- * Eight per frame keeps the opening fast and the later seconds moving, without compounding.
+ * Octaves a deep zoom travels in one second.
+ * One octave doubles the magnification, and the same second does that at every depth,
+ * so a dive past a trillion times keeps the pace it opened with.
  */
-export const AUTO_ZOOM_STEP = 9;
+export const AUTO_OCTAVES_PER_SECOND = 1;
 
 const RATIOS = {
   koch: 3,
@@ -179,19 +179,17 @@ export function autoZoomView(path, octave) {
 }
 
 /**
- * Next position on the path. Each frame adds the same amount to the zoom factor,
- * so magnification does not compound. `done` marks passing the deepest point.
- * Once the factor is too large for that addition to move a double, the octave stays put.
+ * Next position on the path. The same number of octaves is added per second at every depth,
+ * so the picture keeps doubling instead of slowing to a stop. `done` marks passing the deepest point.
  */
-export function advanceAutoZoom(path, octave, frames, pace = 1) {
+export function advanceAutoZoom(path, octave, seconds) {
   const base = Math.max(0, Number.isFinite(octave) ? octave : 0);
-  const added = (AUTO_ZOOM_STEP - 1) * Math.max(0, Number(frames) || 0) * Math.max(0, Number(pace) || 0);
-  if (!(added > 0)) return { octave: base, done: base >= path.maxOctave };
-  const factor = 2 ** base;
-  if (!Number.isFinite(factor)) return { octave: base, done: base >= path.maxOctave };
-  const nextFactor = factor + added;
-  const next = nextFactor > factor ? Math.log2(nextFactor) : base;
-  return { octave: next, done: next >= path.maxOctave };
+  const limit = path && Number.isFinite(path.maxOctave) ? path.maxOctave : Infinity;
+  const span = Math.max(0, Number(seconds) || 0);
+  if (!(span > 0)) return { octave: base, done: base >= limit };
+  const next = base + AUTO_OCTAVES_PER_SECOND * span;
+  if (!Number.isFinite(next)) return { octave: base, done: base >= limit };
+  return { octave: next, done: next >= limit };
 }
 
 /** Pace from rest to full over the first moments, so the start is a glide rather than a lurch. */
@@ -430,6 +428,13 @@ export function motionScale(msPerMegapixel, pixels, budgetMs) {
 export const FRAME_PACE_MS = 20;
 
 /**
+ * How long the next deep-zoom plate should take to finish.
+ * The plate is drawn off the page, a slice at a time, so this is how fresh the picture stays,
+ * not how long the page may freeze.
+ */
+export const ZOOM_PLATE_MS = 400;
+
+/**
  * Next share of a moving picture from how long the last frame actually took.
  * A frame that misses the refresh shrinks; one that lands grows back toward full size.
  * A gap long enough to be a paused tab is ignored. The GPU timer is not required.
@@ -438,6 +443,20 @@ export function motionPace(share, elapsedMs, budgetMs = FRAME_PACE_MS) {
   const held = Math.min(1, Math.max(MOTION_SCALE_MIN, Number.isFinite(share) && share > 0 ? share : 1));
   if (!(elapsedMs > 0) || elapsedMs > 250 || !(budgetMs > 0)) return held;
   const aimed = Math.min(1, Math.max(MOTION_SCALE_MIN, held * Math.sqrt(budgetMs / elapsedMs)));
+  return held + (aimed - held) * 0.5;
+}
+
+/**
+ * Share of the screen for the next deep-zoom plate.
+ * A plate that takes longer than a refresh is drawn smaller next time, including one that
+ * takes seconds, so the following plate still arrives while the camera is inside it.
+ * A plate that beats the refresh grows back toward the full frame.
+ */
+export function zoomShareNext(share, elapsedMs, budgetMs = FRAME_PACE_MS) {
+  const held = Math.min(1, Math.max(MOTION_SCALE_MIN, Number.isFinite(share) && share > 0 ? share : 1));
+  if (!(elapsedMs > 0) || !(budgetMs > 0)) return held;
+  const aimed = Math.min(1, Math.max(MOTION_SCALE_MIN, held * Math.sqrt(budgetMs / elapsedMs)));
+  if (elapsedMs > budgetMs) return aimed;
   return held + (aimed - held) * 0.5;
 }
 

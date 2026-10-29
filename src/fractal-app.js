@@ -18,6 +18,7 @@ import {
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
   COVER_SLACK,
+  ZOOM_PLATE_MS,
   PLATE_BLEND_MS,
   PLATE_TARGET_MS,
   advanceAutoZoom,
@@ -42,6 +43,8 @@ import {
   panRepaint,
   DRAW_RASTER_EDGE,
   PLATE_EDGE_MAX,
+  MOTION_SCALE_MIN,
+  zoomShareNext,
   pickPlate,
   plateBudget,
   plateCovers,
@@ -59,7 +62,7 @@ import {
   zoomEscape,
 } from "./fractal-view.js";
 import { renderEscape } from "./escape-pool.js";
-import { GPU_ITER_LIMIT, gpuAvailable, gpuDrawLimit, paintGpuEscape, pollGpuCost } from "./escape-gpu.js";
+import { GPU_ITER_LIMIT, gpuDrawLimit, paintGpuEscape, pollGpuCost } from "./escape-gpu.js";
 import { hasDeepCenter, viewOffset } from "./precision.js";
 import {
   PALETTES,
@@ -184,6 +187,13 @@ const state = {
   gpuPan: null,
   reactiveView: null,
   autoHold: false,
+  zoomJob: null,
+  zoomShare: 1,
+  zoomTook: 32,
+  zoomExpect: 32,
+  zoomSerial: 0,
+  zoomMisses: 0,
+  zoomGpuOk: true,
   cursorDirty: false,
 };
 
@@ -1362,11 +1372,13 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
     return { floor: 0, top: null };
   }
   const deepMandelbrot = job.fractalId === "mandelbrot" && preset.scale < 1e-30;
-  const slices = deepMandelbrot ? 1 : 4;
+  const slices = moving || deepMandelbrot ? 1 : 4;
   const key = [scene, Math.round(Math.log2(preset.scale) * slices)].join(":");
   if (paletteFit.key !== key) {
     paletteFit.key = key;
-    if (deepMandelbrot) {
+    if (moving) {
+      paletteProbe = openPaletteProbe(job.fractalId, preset, width, height, cap, 4);
+    } else if (deepMandelbrot) {
       paletteProbe = openPaletteProbe(job.fractalId, preset, width, height, cap);
     } else {
       paletteProbe = null;
@@ -1374,7 +1386,11 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
     }
   }
   if (paletteProbe) {
-    const fitted = paletteProbe.step();
+    const started = performance.now();
+    let fitted = null;
+    do {
+      fitted = paletteProbe.step();
+    } while (moving && !fitted && performance.now() - started < 3);
     if (fitted) {
       paletteFit.window = fitted;
       paletteProbe = null;
@@ -1741,6 +1757,13 @@ function haltAutoZoom() {
   state.autoToken += 1;
   state.plateFlight = 0;
   state.frozenParam = null;
+  state.zoomJob = null;
+  state.zoomShare = 1;
+  state.zoomTook = 32;
+  state.zoomExpect = 32;
+  state.zoomSerial += 1;
+  state.zoomMisses = 0;
+  state.zoomGpuOk = true;
 }
 
 function stopAutoZoom() {
@@ -1813,17 +1836,17 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of auto zoom. The zoom factor grows by eight from the first frame and never
- * waits for a plate: a late plate only means the one beneath it is stretched.
+ * One frame of auto zoom. The magnification doubles once a second from the first frame and
+ * the picture already on screen is what moves. A new frame is only copied in once the GPU
+ * has finished it, so a slow render never holds the dive.
  */
 function stepAutoZoom(token) {
   const now = performance.now();
-  const elapsed = Math.min(120, Math.max(16, now - (state.zoomStamp || now)));
+  const elapsed = Math.min(100, Math.max(0, now - (state.zoomStamp || now)));
   state.zoomStamp = now;
-  const frames = elapsed / 16.7;
   const path = state.autoPath;
   if (path && !state.autoHold && state.autoPlates.length) {
-    const next = advanceAutoZoom(path, state.autoOctave, frames, 1);
+    const next = advanceAutoZoom(path, state.autoOctave, elapsed / 1000);
     state.autoOctave = next.octave;
     if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
     if (state.autoFade) {
@@ -1857,16 +1880,16 @@ function beginAutoFade() {
 function plateLookahead() {
   const path = state.autoPath;
   if (!path) return 0;
-  const seconds = Math.max(1, (state.plateTook || PLATE_TARGET_MS) * 1.8 / 1000);
-  const next = advanceAutoZoom(path, state.autoOctave, seconds * 60, 1);
-  return Math.min(4, Math.max(0, next.octave - (Number(state.autoOctave) || 0)));
+  const seconds = Math.max(0.05, Math.min(1.2, (state.zoomExpect || state.zoomTook || 40) / 1000));
+  const next = advanceAutoZoom(path, state.autoOctave, seconds);
+  return Math.min(1.2, Math.max(0.05, next.octave - (Number(state.autoOctave) || 0)));
 }
 
 function ensureAutoPlate(token, box) {
   if (state.plateFlight || !state.autoPath) return;
   const screenHeight = motionRaster(box).height;
   const aheadView = autoZoomView(state.autoPath, state.autoOctave + 0.4);
-  if (gpuAvailable() && gpuDepthMode(state.view, screenHeight) && gpuDepthMode(aheadView, screenHeight)) return;
+  if (state.zoomGpuOk !== false && gpuDepthMode(state.view, screenHeight) && gpuDepthMode(aheadView, screenHeight)) return;
   const aspect = box.width / Math.max(1, box.height);
   const path = state.autoPath;
   const from = state.autoOctave;
@@ -1978,11 +2001,14 @@ function drawPlateLayer(plates, view, width, height, aspect, alpha, now) {
 }
 
 function drawAutoFrame(box, now) {
-  if (paintGpuFrame(state.view, box)) return;
   const aspectNow = box.width / Math.max(1, box.height);
-  if (state.gpuHold && pickPlate(state.autoPlates, state.view, aspectNow) < 0 && !state.autoFade) return;
+  const covered = pickPlate(state.autoPlates, state.view, aspectNow) >= 0 || Boolean(state.autoFade && state.autoDeep);
+  if (state.gpuHold && !covered) {
+    queueGpuZoom(box);
+    return;
+  }
   state.gpuHold = false;
-  const dest = motionRaster(box);
+  const dest = displayRaster(box);
   const width = dest.width;
   const height = dest.height;
   const aspect = box.width / Math.max(1, box.height);
@@ -2006,6 +2032,171 @@ function drawAutoFrame(box, now) {
     drawPlateLayer(state.autoPlates, state.view, width, height, aspect, 1, now);
   }
   ctx.globalAlpha = 1;
+  queueGpuZoom(box);
+}
+
+/** Device pixels of the frame, capped by what the GPU can allocate. */
+function displayRaster(box) {
+  const ratio = Math.min(Math.max(Number(box.dpr) || 1, 1), 2);
+  let width = Math.max(1, Math.floor(Math.max(0, box.width) * ratio));
+  let height = Math.max(1, Math.floor(Math.max(0, box.height) * ratio));
+  const limit = gpuDrawLimit();
+  const edge = Math.max(width, height);
+  if (limit && edge > limit) {
+    const fit = limit / edge;
+    width = Math.max(1, Math.floor(width * fit));
+    height = Math.max(1, Math.floor(height * fit));
+  }
+  return { width, height };
+}
+
+function zoomJobSize(box) {
+  const full = displayRaster(box);
+  const share = Math.min(1, Math.max(MOTION_SCALE_MIN, state.zoomShare || 1));
+  return {
+    width: Math.max(1, Math.round(full.width * share)),
+    height: Math.max(1, Math.round(full.height * share)),
+  };
+}
+
+function retirePlate(plate) {
+  if (!plate || plate === state.autoStart) return;
+  if (typeof plate.canvas?.close === "function") plate.canvas.close();
+}
+
+let zoomWorker = null;
+
+function zoomGpuWorker() {
+  if (zoomWorker) return zoomWorker;
+  if (state.zoomGpuOk === false || typeof Worker === "undefined" || typeof OffscreenCanvas === "undefined") {
+    state.zoomGpuOk = false;
+    return null;
+  }
+  try {
+    const canvas = new OffscreenCanvas(64, 64);
+    const worker = new Worker(new URL("./zoom-gpu-worker.js", import.meta.url), { type: "module" });
+    worker.onmessage = onZoomGpuFrame;
+    worker.onerror = () => {
+      state.zoomJob = null;
+      state.zoomGpuOk = false;
+      if (zoomWorker) {
+        zoomWorker.terminate();
+        zoomWorker = null;
+      }
+    };
+    worker.postMessage({ type: "init", canvas }, [canvas]);
+    zoomWorker = worker;
+    return worker;
+  } catch {
+    zoomWorker = null;
+    state.zoomGpuOk = false;
+    return null;
+  }
+}
+
+/** A sharp frame finished off the page thread. The picture already moving is what it replaces. */
+function onZoomGpuFrame(event) {
+  const message = event.data;
+  const job = state.zoomJob;
+  if (!job || message?.id !== job.id || !state.autoZoom) {
+    message?.bitmap?.close?.();
+    return;
+  }
+  state.zoomJob = null;
+  if (!message.bitmap || message.failed) {
+    state.zoomMisses = (state.zoomMisses || 0) + 1;
+    if (state.zoomMisses >= 2) state.zoomGpuOk = false;
+    return;
+  }
+  state.zoomMisses = 0;
+  const took = Number(message.ms);
+  const wall = Number(message.wall);
+  const previous = state.zoomShare || 1;
+  state.zoomTook = took > 0 ? took : state.zoomTook;
+  state.zoomShare = zoomShareNext(previous, state.zoomTook, ZOOM_PLATE_MS);
+  const ratio = previous > 0 ? state.zoomShare / previous : 1;
+  const elapsed = wall > 0 ? wall : state.zoomTook;
+  state.zoomExpect = Math.max(8, elapsed * ratio * ratio);
+  placeAutoPlate(message.bitmap, job.view, job.cap);
+}
+
+/** Ask the worker for the next sharp picture, covering the zoom it will take to arrive. */
+function queueGpuZoom(box) {
+  if (state.zoomJob || !state.autoPath || !state.view || !state.home || state.zoomGpuOk === false) return;
+  const worker = zoomGpuWorker();
+  if (!worker) return;
+  const screen = displayRaster(box);
+  const ahead = state.autoOctave + plateLookahead();
+  const aheadView = autoZoomView(state.autoPath, ahead);
+  if (!gpuDepthMode(state.view, screen.height) || !gpuDepthMode(aheadView, screen.height)) return;
+  const aspect = box.width / Math.max(1, box.height);
+  const from = state.autoOctave;
+  const samples = [];
+  for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(state.autoPath, from + ((ahead - from) * i) / 4));
+  const cover = { ...coverViews(samples, aspect, plateMargin(from)), flipY: Boolean(state.autoPath.start.flipY) };
+  const raster = zoomJobSize(box);
+  const cap = escapeIterationCap(
+    state.fractalId,
+    state.baseDepth || depthValue(),
+    state.home.scale / Math.max(1e-300, samples[samples.length - 1].scale),
+  );
+  const depth = gpuDepthMode(cover, raster.height);
+  if (!depth || (depth !== "deep" && cap > GPU_ITER_LIMIT)) return;
+  const job = renderJob(cover);
+  let paint = null;
+  try {
+    const fit = gpuPaletteWindow(job, raster.width, raster.height, cap, true);
+    paint = {
+      fractalId: job.fractalId,
+      preset: job.preset,
+      width: raster.width,
+      height: raster.height,
+      cap,
+      paletteId: state.paletteId,
+      depth,
+      floor: fit.floor,
+      top: fit.top,
+    };
+  } catch {
+    paint = null;
+  }
+  if (!paint) return;
+  const id = ++state.zoomSerial;
+  state.zoomJob = { id, view: cover, width: raster.width, height: raster.height, cap };
+  try {
+    worker.postMessage({ type: "render", id, paint });
+  } catch {
+    state.zoomJob = null;
+  }
+}
+
+function placeAutoPlate(snap, view, cap) {
+  const box = viewBox();
+  const aspect = box.width / Math.max(1, box.height);
+  const finished = plateFrame(view, snap.width, snap.height);
+  const plate = { canvas: snap, view: finished, born: performance.now(), pooled: true };
+  if (!plateCovers(finished, state.view, aspect, COVER_SLACK)) {
+    retirePlate(plate);
+    return;
+  }
+  const kept = [];
+  for (const item of state.autoPlates) {
+    if (item === state.autoStart || item.view.scale > finished.scale) kept.push(item);
+    else retirePlate(item);
+  }
+  kept.push(plate);
+  while (kept.length > AUTO_PLATES_KEPT) {
+    const index = kept[0] === state.autoStart ? 1 : 0;
+    if (kept[index]) retirePlate(kept[index]);
+    kept.splice(index, 1);
+  }
+  state.autoPlates = kept;
+  if (!state.autoStart) state.autoStart = plate;
+  state.autoHold = false;
+  state.samples = snap.width * snap.height;
+  state.shownCap = cap;
+  state.finished = true;
+  state.exploring = false;
 }
 
 /** The parts of the page that change every frame of auto zoom, written only when their text changes. */

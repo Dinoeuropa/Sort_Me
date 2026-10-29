@@ -5,6 +5,7 @@ import test from "node:test";
 const sorting = fs.readFileSync(new URL("../sorting.html", import.meta.url), "utf8");
 const fractals = fs.readFileSync(new URL("../fractals.html", import.meta.url), "utf8");
 const fractalApp = fs.readFileSync(new URL("../src/fractal-app.js", import.meta.url), "utf8");
+const zoomWorker = fs.readFileSync(new URL("../src/zoom-gpu-worker.js", import.meta.url), "utf8");
 const blankShow = fs.readFileSync(new URL("../src/blank-show.js", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
@@ -153,7 +154,12 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /advanceAutoZoom/);
   assert.doesNotMatch(fractalApp, /AUTO_OCTAVES_PER_FRAME/);
   assert.match(fractalApp, /autoZoomView/);
-  assert.match(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, frames, 1\)/);
+  assert.match(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, elapsed \/ 1000\)/);
+  assert.match(fractalApp, /new Worker\(new URL\("\.\/zoom-gpu-worker\.js"/);
+  assert.match(fractalApp, /OffscreenCanvas/);
+  assert.match(zoomWorker, /setTimeout/);
+  assert.match(zoomWorker, /rows:\s*\{\s*from:\s*y/);
+  assert.match(zoomWorker, /transferToImageBitmap/);
   assert.doesNotMatch(fractalApp, /autoZoomRamp/);
   assert.match(fractalApp, /pickPlate/);
   assert.match(fractalApp, /plateBudget/);
