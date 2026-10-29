@@ -50,12 +50,13 @@ test("escape colors stay in range, share an interior, and separate iterations", 
 test("classic walks dark, brass, coral, then cream, without pulsing", () => {
   const lum = (color) => 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
   const apart = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-  const brass = [226, 182, 87];
-  const coral = [239, 111, 76];
+  const brass = [156, 120, 42];
+  const coral = [168, 70, 48];
   const cap = 4800;
   assert.ok(apart(colorSample("classic", 0.35 * cap, cap), brass) <= 1);
   assert.ok(apart(colorSample("classic", 0.75 * cap, cap), coral) <= 1);
-  assert.ok(colorSample("classic", 0.2 * cap, cap)[1] > 100);
+  assert.ok(colorSample("classic", 0.2 * cap, cap)[1] > 70);
+  assert.ok(lum(brass) < 130 && lum(coral) < 130, "the bright stops stay dim enough to read");
 
   for (const max of [48, 160, 4800]) {
     let reversals = 0;
@@ -87,9 +88,10 @@ test("classic walks dark, brass, coral, then cream, without pulsing", () => {
   const max = 240;
   const field = colorSample("classic", Math.round(max * 0.25), max);
   const edge = colorSample("classic", Math.round(max * 0.85), max);
-  assert.ok(apart(field, edge) > 70, `field and boundary are ${apart(field, edge)} apart`);
+  assert.ok(apart(field, edge) > 35, `field and boundary are ${apart(field, edge)} apart`);
   const end = colorSample("classic", max - 1, max);
-  assert.ok(lum(end) < 210, `the last shade is ${lum(end)}, bright enough to wash the center out`);
+  assert.ok(lum(end) < 130, `the last shade is ${lum(end)}, still bright enough to wash the center out`);
+  assert.ok(lum(field) < 130, `the field is ${lum(field)}`);
   assert.notDeepEqual(colorSample("classic", Math.round(max * 0.05), max), edge);
 });
 

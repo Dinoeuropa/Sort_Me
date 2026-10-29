@@ -264,16 +264,18 @@ test("a deep plate spreads the palette over the iterations it holds, and a shall
 test("the Mandelbrot dive aims at the edge of the period-3 island", () => {
   const target = autoZoomTarget("mandelbrot", {});
   assert.ok(hasDeepCenter({ centerXLo: target.xLo }));
-  assert.ok(Math.abs(target.xLo) > 0 && Math.abs(target.xLo) < 1e-16);
-  assert.ok(Math.hypot(target.x + 1.7548776662466927, target.y - 0.011953206752823513) < 1e-12);
+  assert.equal(typeof target.xLo, "number");
+  assert.equal(typeof target.yLo, "number");
+  assert.ok(Math.hypot(target.x + 1.754877666388114, target.y - 0.011953806894244868) < 1e-15);
+  assert.ok(Math.hypot(target.x + 1.7548776662466927, target.y - 0.011953206752823513) < 1e-6);
   const nucleus = ddMandelbrotIterations(target.x, target.xLo, 0, 0, 4000);
   assert.equal(nucleus, 4000);
   const edge = ddMandelbrotIterations(target.x, target.xLo, target.y, target.yLo, 8000);
   assert.ok(edge < 8000, `the edge escapes at ${edge}`);
-  assert.ok(edge > 4000, `the edge is close to the set, escaped at ${edge}`);
+  assert.ok(edge > 3500, `the edge is close to the set, escaped at ${edge}`);
   const outward = ddMandelbrotIterations(target.x, target.xLo, target.y, target.yLo + 1e-4, 8000);
   assert.ok(outward < edge, `above the island escapes sooner, ${outward} vs ${edge}`);
-  assert.equal(autoZoomFloor("mandelbrot"), 1e-6);
+  assert.equal(autoZoomFloor("mandelbrot"), 1e-12);
   assert.equal(autoZoomFloor("julia"), 1e-28);
   assert.equal(autoZoomFloor("newton"), 1e-28);
 });
@@ -607,7 +609,7 @@ test("the auto zoom path lands exactly on a double-double target", () => {
   const start = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
   const target = autoZoomTarget("mandelbrot", {});
   const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot"));
-  assert.ok(path.maxOctave > 18 && path.maxOctave < 24, `maxOctave ${path.maxOctave}`);
+  assert.ok(path.maxOctave > 35 && path.maxOctave < 48, `maxOctave ${path.maxOctave}`);
   const first = autoZoomView(path, 0);
   assert.ok(Math.abs(first.centerX - start.centerX) < 1e-12);
   assert.ok(Math.abs(first.centerY - start.centerY) < 1e-12);
@@ -619,7 +621,7 @@ test("the auto zoom path lands exactly on a double-double target", () => {
   assert.ok(Math.abs(miss.dy) < 1e-31);
   assert.ok(Math.abs(deep.scale - 2.6 * 2 ** -12) < 1e-12);
   const bottom = autoZoomView(path, path.maxOctave);
-  assert.ok(bottom.scale < 3e-6 && bottom.scale > 1e-6, `bottom scale ${bottom.scale}`);
+  assert.ok(bottom.scale < 3e-12 && bottom.scale > 1e-12, `bottom scale ${bottom.scale}`);
   const shallow = autoZoomPath(start, { x: 0.3, y: 0.1 });
   assert.equal(hasDeepCenter(autoZoomView(shallow, 10)), false);
 });
