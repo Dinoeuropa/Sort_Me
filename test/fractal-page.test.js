@@ -154,7 +154,7 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /advanceAutoZoom/);
   assert.doesNotMatch(fractalApp, /AUTO_OCTAVES_PER_FRAME/);
   assert.match(fractalApp, /autoZoomView/);
-  assert.match(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, elapsed \/ 1000\)/);
+  assert.match(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, 1\)/);
   assert.match(fractalApp, /new Worker\(new URL\("\.\/zoom-gpu-worker\.js"/);
   assert.match(fractalApp, /OffscreenCanvas/);
   assert.match(zoomWorker, /setTimeout/);
