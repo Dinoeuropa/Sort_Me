@@ -1997,18 +1997,19 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of deep zoom. The magnification doubles once a second from the first frame and
- * the picture already on screen is what moves. A new frame is only copied in once the GPU
- * has finished it, so a slow render never holds the dive. Passing the deepest point fades
- * back to the opening picture and the dive continues.
+ * One frame of deep zoom. Magnification grows by 3 percent, and only by that one step, so a
+ * late refresh does not skip ahead. The picture already on screen is what moves. A new frame
+ * is only copied in once the GPU has finished it, so a slow render never holds the dive.
+ * Passing the deepest point fades back to the opening picture and the dive continues.
  */
 function stepAutoZoom(token) {
   const now = performance.now();
-  const elapsed = Math.min(100, Math.max(0, now - (state.zoomStamp || now)));
+  const gap = Math.max(0, now - (state.zoomStamp || now));
+  if (gap > 0 && gap < 250) state.zoomFrameMs = gap;
   state.zoomStamp = now;
   const path = state.autoPath;
   if (path && !state.autoHold && state.autoPlates.length) {
-    const next = advanceAutoZoom(path, state.autoOctave, elapsed / 1000);
+    const next = advanceAutoZoom(path, state.autoOctave, 1);
     state.autoOctave = next.octave;
     if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
     if (state.autoFade) {
@@ -2040,8 +2041,10 @@ function plateLookahead() {
   const path = state.autoPath;
   if (!path) return 0;
   const seconds = Math.max(0.05, Math.min(1.2, (state.zoomExpect || state.zoomTook || 40) / 1000));
-  const next = advanceAutoZoom(path, state.autoOctave, seconds);
-  return Math.min(1.2, Math.max(0.05, next.octave - (Number(state.autoOctave) || 0)));
+  const frameMs = Math.min(50, Math.max(8, state.zoomFrameMs || 16.7));
+  const frames = Math.max(1, (seconds * 1000) / frameMs);
+  const next = advanceAutoZoom(path, state.autoOctave, frames);
+  return Math.min(2, Math.max(0.05, next.octave - (Number(state.autoOctave) || 0)));
 }
 
 function ensureAutoPlate(token, box) {

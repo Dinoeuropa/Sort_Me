@@ -131,7 +131,7 @@ test("gpuDrawLimit is the smallest drawing-buffer guarantee, or null without Web
   assert.match(app, /zoomFrameBlit\(/);
   assert.match(app, /gpuZoomPlan\(/);
   assert.match(app, /queueGpuEscape\(/);
-  assert.match(app, /advanceAutoZoom\(path, state\.autoOctave, elapsed \/ 1000\)/);
+  assert.match(app, /advanceAutoZoom\(path, state\.autoOctave, 1\)/);
   assert.match(app, /if \(next\.done && !state\.autoFade && state\.autoStart\) beginAutoFade\(\)/);
   assert.match(app, /queueGpuZoom\(/);
   assert.doesNotMatch(app, /overlayGpuZoom\(/);

@@ -13,11 +13,11 @@ export const DRAW_RASTER_EDGE = 960;
 export const SHARP_RASTER_EDGE = 3840;
 
 /**
- * Octaves a deep zoom travels in one second.
- * One octave doubles the magnification, and the same second does that at every depth,
- * so a dive past a trillion times keeps the pace it opened with.
+ * Magnification multiplier for one deep-zoom frame.
+ * Each frame is the next step and nothing more: three percent closer than the frame before it.
+ * The same percent applies at every depth, so a dive past a trillion times keeps the pace it opened with.
  */
-export const AUTO_OCTAVES_PER_SECOND = 1;
+export const AUTO_ZOOM_STEP = 1.03;
 
 const RATIOS = {
   koch: 3,
@@ -179,15 +179,15 @@ export function autoZoomView(path, octave) {
 }
 
 /**
- * Next position on the path. The same number of octaves is added per second at every depth,
- * so the picture keeps doubling instead of slowing to a stop. `done` marks passing the deepest point.
+ * Next position on the path. `frames` is how many steps to take, and each step multiplies the
+ * magnification by {@link AUTO_ZOOM_STEP}. One frame is one step. `done` marks passing the deepest point.
  */
-export function advanceAutoZoom(path, octave, seconds) {
+export function advanceAutoZoom(path, octave, frames) {
   const base = Math.max(0, Number.isFinite(octave) ? octave : 0);
   const limit = path && Number.isFinite(path.maxOctave) ? path.maxOctave : Infinity;
-  const span = Math.max(0, Number(seconds) || 0);
-  if (!(span > 0)) return { octave: base, done: base >= limit };
-  const next = base + AUTO_OCTAVES_PER_SECOND * span;
+  const steps = Math.max(0, Number(frames) || 0);
+  if (!(steps > 0) || !(AUTO_ZOOM_STEP > 1)) return { octave: base, done: base >= limit };
+  const next = base + Math.log2(AUTO_ZOOM_STEP) * steps;
   if (!Number.isFinite(next)) return { octave: base, done: base >= limit };
   return { octave: next, done: next >= limit };
 }
