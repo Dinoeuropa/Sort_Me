@@ -3,7 +3,7 @@ import test from "node:test";
 import { autoZoomFloor, autoZoomTarget, boundaryAnchor, escapeBand, escapeValue, planePoint, reliefCenter } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
-  AUTO_OCTAVES_PER_SECOND,
+  AUTO_ZOOM_STEP,
   AUTO_RAMP_MS,
   MANUAL_MAGNIFICATION,
   PLATE_EDGE_MIN,
@@ -195,7 +195,7 @@ test("zooming out stays inside the plate until a wider one exists", () => {
 test("zooming in is not paused while the next plate is still drawing", () => {
   const camera = { centerX: 0, centerY: 0, scale: 2, flipY: false };
   const path = autoZoomPath(camera, { x: 1, y: 0 });
-  const look = advanceAutoZoom(path, 3, 0.6);
+  const look = advanceAutoZoom(path, 3, 0.6 / Math.log2(AUTO_ZOOM_STEP));
   const ahead = autoZoomView(path, look.octave);
   const now = autoZoomView(path, 3);
   const grown = now.scale / ahead.scale;
@@ -454,29 +454,30 @@ test("auto zoom follows one fixed path into its target", () => {
   assert.ok(biggest < 0.05);
 });
 
-test("deep zoom doubles once a second at every depth, including past a trillion times", () => {
-  assert.equal(AUTO_OCTAVES_PER_SECOND, 1);
+test("each deep-zoom frame multiplies magnification by 3 percent, including past a trillion times", () => {
+  assert.equal(AUTO_ZOOM_STEP, 1.03);
   const path = autoZoomPath(
     { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false },
     { x: -0.7436, y: 0.1317, xLo: 0, yLo: 0 },
     1e-290,
   );
-  const frame = 1 / 60;
-  const shallow = advanceAutoZoom(path, 0, frame);
+  const shallow = advanceAutoZoom(path, 0, 1);
   const deepOctave = Math.log2(3e12);
-  const deep = advanceAutoZoom(path, deepOctave, frame);
+  const deep = advanceAutoZoom(path, deepOctave, 1);
   const shallowGrow = 2 ** (shallow.octave - 0);
   const deepGrow = 2 ** (deep.octave - deepOctave);
   assert.ok(Math.abs(shallowGrow - deepGrow) < 1e-9);
-  assert.ok(Math.abs(deepGrow - 2 ** frame) < 1e-9);
+  assert.ok(Math.abs(shallowGrow - 1.03) < 1e-9);
+  assert.ok(Math.abs(deepGrow - 1.03) < 1e-9);
   assert.ok(deepGrow > 1.01, "one frame past 3e12× still moves the picture");
   assert.equal(advanceAutoZoom(path, deepOctave, 0).octave, deepOctave);
-  const later = advanceAutoZoom(path, deepOctave, 1);
-  assert.ok(Math.abs(later.octave - (deepOctave + 1)) < 1e-9);
-  assert.equal(later.done, false);
-  const near = path.maxOctave - 0.05;
-  assert.equal(advanceAutoZoom(path, near, frame).done, false);
-  const past = advanceAutoZoom(path, near, 0.1);
+  const two = advanceAutoZoom(path, deepOctave, 2);
+  assert.ok(Math.abs(2 ** (two.octave - deepOctave) - 1.03 ** 2) < 1e-9);
+  assert.equal(two.done, false);
+  const step = Math.log2(AUTO_ZOOM_STEP);
+  const near = path.maxOctave - step * 1.5;
+  assert.equal(advanceAutoZoom(path, near, 1).done, false);
+  const past = advanceAutoZoom(path, near, 2);
   assert.equal(past.done, true);
   assert.ok(past.octave >= path.maxOctave);
   const beyond = autoZoomView(path, path.maxOctave + 1);
@@ -546,14 +547,15 @@ test("plates lose their wide margin once the target sits in the middle of the fr
   assert.equal(coverViews([camera], 1.5, 0).scale, wide.scale);
 });
 
-test("one second of auto zoom is one doubling wherever the dive is", () => {
+test("sixty frames each add 3 percent, and the same ratio holds at every depth", () => {
   const path = autoZoomPath({ centerX: 0, centerY: 0, scale: 2, flipY: false }, { x: 0, y: 0 });
-  const fromRest = advanceAutoZoom(path, 0, 1);
-  const fromDeep = advanceAutoZoom(path, 40, 1);
-  assert.ok(Math.abs(fromRest.octave - 1) < 1e-12);
-  assert.ok(Math.abs(fromDeep.octave - 41) < 1e-12);
-  assert.ok(Math.abs(2 ** fromRest.octave - 2) < 1e-9);
-  assert.ok(Math.abs((2 ** fromDeep.octave) / 2 ** 40 - 2) < 1e-6);
+  const fromRest = advanceAutoZoom(path, 0, 60);
+  const fromDeep = advanceAutoZoom(path, 40, 60);
+  const ratio = AUTO_ZOOM_STEP ** 60;
+  assert.ok(Math.abs(2 ** fromRest.octave - ratio) < 1e-9);
+  assert.ok(Math.abs(2 ** (fromDeep.octave - 40) - ratio) < 1e-6);
+  const one = advanceAutoZoom(path, 40, 1);
+  assert.ok(Math.abs(2 ** (one.octave - 40) - AUTO_ZOOM_STEP) < 1e-9);
 });
 
 test("each reactive fractal has a fixed point to dive into", () => {
@@ -647,7 +649,7 @@ test("each zoom step stays inside the frame before it and inside the picture it 
   const aspect = 3840 / 2160;
   for (let octave = 0; octave < path.maxOctave; octave += 1) {
     const from = autoZoomView(path, octave);
-    const step = advanceAutoZoom(path, octave, 1 / 60);
+    const step = advanceAutoZoom(path, octave, 1);
     const to = autoZoomView(path, Math.min(step.octave, path.maxOctave));
     const blit = zoomFrameBlit({ ...from, width: 3840, height: 2160 }, to, 3840, 2160);
     assert.ok(blit, `octave ${octave}`);
