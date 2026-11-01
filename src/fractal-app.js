@@ -1183,7 +1183,7 @@ function blitPlate() {
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  ctx.imageSmoothingQuality = "low";
   ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, dest.width, dest.height);
   drawEscapePlate(state.plate.canvas, state.plate, pictureView(), dest.width, dest.height);
@@ -1474,8 +1474,10 @@ function rememberGpuFrame(sheet, view, width, height, blend = false) {
 }
 
 function showStoredFrame(view, dest, warp) {
-  if (!gpuWarp.canvas || gpuWarp.width !== dest.width || gpuWarp.height !== dest.height) return false;
-  const blit = warp ? zoomFrameBlit(gpuWarp.view, view, dest.width, dest.height) : null;
+  if (!gpuWarp.canvas || !(gpuWarp.width > 0) || !(gpuWarp.height > 0)) return false;
+  const blit = warp
+    ? zoomFrameBlit(gpuWarp.view, view, dest.width, dest.height, gpuWarp.width, gpuWarp.height)
+    : null;
   if (warp && !blit) return false;
   if (canvas.width !== dest.width || canvas.height !== dest.height) {
     canvas.width = dest.width;
@@ -1484,11 +1486,18 @@ function showStoredFrame(view, dest, warp) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  ctx.imageSmoothingQuality = "low";
   if (blit) {
+    const fills = blit.dw >= dest.width - 1 && blit.dh >= dest.height - 1 && blit.dx <= 1 && blit.dy <= 1;
+    if (!fills) {
+      ctx.fillStyle = PAPER;
+      ctx.fillRect(0, 0, dest.width, dest.height);
+    }
     ctx.drawImage(gpuWarp.canvas, blit.sx, blit.sy, blit.sw, blit.sh, blit.dx, blit.dy, blit.dw, blit.dh);
-  } else {
+  } else if (gpuWarp.width === dest.width && gpuWarp.height === dest.height) {
     ctx.drawImage(gpuWarp.canvas, 0, 0);
+  } else {
+    ctx.drawImage(gpuWarp.canvas, 0, 0, gpuWarp.width, gpuWarp.height, 0, 0, dest.width, dest.height);
   }
   return true;
 }
@@ -1544,12 +1553,14 @@ function paintGpuFrame(view, box, settle = false) {
         cancelGpuFrame();
         gpuWarp.pending = false;
       }
-      const stored = gpuWarp.view && gpuWarp.width === width && gpuWarp.height === height;
-      const ready = Boolean(stored && gpuWarp.pending && gpuFrameReady());
+      const haveFrame = Boolean(gpuWarp.canvas && gpuWarp.view && gpuWarp.width > 0 && gpuWarp.height > 0);
+      const ready = Boolean(
+        haveFrame && gpuWarp.pending && gpuWarp.width === width && gpuWarp.height === height && gpuFrameReady(),
+      );
       const shown = ready ? gpuWarp.pendingView : gpuWarp.view;
-      const blit = stored && shown ? zoomFrameBlit(shown, view, width, height) : null;
+      const blit = haveFrame && shown ? zoomFrameBlit(shown, view, width, height, gpuWarp.width, gpuWarp.height) : null;
       const covered = Boolean(blit) && blit.dw >= width - 1 && blit.dh >= height - 1 && blit.dx <= 1 && blit.dy <= 1;
-      const plan = !settle && stored
+      const plan = !settle && haveFrame
         ? gpuZoomPlan({
           hasSnapshot: true,
           pending: gpuWarp.pending,
@@ -1596,7 +1607,7 @@ function paintGpuFrame(view, box, settle = false) {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.globalAlpha = 1;
         ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
+        ctx.imageSmoothingQuality = "low";
         ctx.drawImage(sheet, 0, 0, width, height, 0, 0, dest.width, dest.height);
         rememberGpuFrame(canvas, view, dest.width, dest.height);
         gpuWarp.pending = false;
@@ -2180,7 +2191,7 @@ function drawAutoFrame(box, now) {
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  ctx.imageSmoothingQuality = "low";
   ctx.globalAlpha = 1;
   ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, width, height);

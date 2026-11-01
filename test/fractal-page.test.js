@@ -276,6 +276,17 @@ test("auto zoom turns cursor reaction off without forgetting the preference", ()
   assert.doesNotMatch(start, /state\.reactive = false/);
 });
 
+test("a moving zoom reuses the snapshot and resamples it cheaply", () => {
+  assert.match(fractalApp, /zoomFrameBlit\(shown, view, width, height, gpuWarp\.width, gpuWarp\.height\)/);
+  const shown = fractalApp.slice(fractalApp.indexOf("function showStoredFrame"), fractalApp.indexOf("function paintGpuFrame"));
+  assert.match(shown, /imageSmoothingQuality = "low"/);
+  assert.doesNotMatch(shown, /imageSmoothingQuality = "high"/);
+  const draw = fractalApp.slice(fractalApp.indexOf("function drawAutoFrame"), fractalApp.indexOf("function displayRaster"));
+  assert.match(draw, /imageSmoothingQuality = "low"/);
+  assert.doesNotMatch(draw, /imageSmoothingQuality = "high"/);
+  assert.match(zoomWorker, /nextZoomBandRows\(/);
+});
+
 test("reset during auto zoom refreshes the reactive badge", () => {
   const reset = fractalApp.slice(fractalApp.indexOf("function resetExplore"), fractalApp.indexOf("function redrawExplored"));
   assert.match(reset, /haltAutoZoom\(\);/);

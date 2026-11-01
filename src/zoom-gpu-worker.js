@@ -1,27 +1,17 @@
 import { paintGpuEscape, useGpuSurface } from "./escape-gpu.js";
+import { nextZoomBandRows } from "./fractal-view.js";
 
 let canvas = null;
 let busy = false;
 let waiting = null;
-// Rows drawn before the worker yields. A whole plate in one draw holds the graphics
-// lock long enough to freeze the page, and a tiny band pays that lock again on every call.
+// Rows drawn before the worker yields. The count stays small until a strip proves
+// it can grow, so one finish cannot hold the graphics lock for the whole plate.
 let bandRows = 0;
 let tunedCap = 0;
+let bandMs = 0;
 
 function yieldThread() {
   return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function startingRows(height, cap) {
-  // A heavier picture starts in short strips. Reusing a tall strip from an easier
-  // depth holds the graphics lock for seconds and the zoom appears to stop.
-  if (!(bandRows > 0) || cap > tunedCap * 1.15) {
-    if (cap > 3200) return Math.min(height, 2);
-    if (cap > 1600) return Math.min(height, 6);
-    if (cap > 800) return Math.min(height, 16);
-    return height;
-  }
-  return Math.min(height, bandRows);
 }
 
 async function renderFrame(message) {
@@ -35,7 +25,7 @@ async function renderFrame(message) {
     const ctx = acc.getContext("2d");
     if (!ctx) throw new Error("no 2d");
     let y = 0;
-    let rows = startingRows(height, paint.cap | 0);
+    let rows = nextZoomBandRows(height, paint.cap | 0, bandRows, tunedCap, bandMs);
     while (y < height) {
       const tall = Math.max(1, Math.min(rows, height - y));
       const t0 = performance.now();
@@ -51,11 +41,10 @@ async function renderFrame(message) {
       band.close();
       const dt = performance.now() - t0;
       gpu += dt;
+      bandRows = tall;
       tunedCap = paint.cap | 0;
-      if (dt > 48 && tall > 1) bandRows = Math.max(1, tall >> 1);
-      else if (dt < 20) bandRows = Math.min(height, Math.max(tall + 2, tall << 1));
-      else bandRows = tall;
-      rows = bandRows;
+      bandMs = dt;
+      rows = nextZoomBandRows(height, paint.cap | 0, bandRows, tunedCap, bandMs);
       y += tall;
       if (y < height) await yieldThread();
     }

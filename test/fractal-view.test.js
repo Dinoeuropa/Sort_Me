@@ -44,6 +44,7 @@ import {
   panPixels,
   panRepaint,
   gpuZoomPlan,
+  nextZoomBandRows,
   zoomFrameBlit,
   plateCovers,
   pickPlate,
@@ -689,6 +690,31 @@ test("a moving zoom shows the scaled frame until the next full frame is ready", 
     show: "sharp", start: false, adopt: false,
   });
   assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: false, ready: false, sameView: false, covered: false }), {
-    show: "fresh", start: true, adopt: false,
+    show: "warp", start: true, adopt: false,
   });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: true, ready: false, sameView: false, covered: false }), {
+    show: "warp", start: false, adopt: false,
+  });
+  assert.deepEqual(gpuZoomPlan({ hasSnapshot: true, pending: true, ready: true, sameView: false, covered: false }), {
+    show: "warp", start: true, adopt: true,
+  });
+});
+
+test("a zoom plate starts in a short band so one finish cannot lock the page", () => {
+  assert.equal(nextZoomBandRows(2160, 400, 0, 0, 0), 8);
+  assert.ok(nextZoomBandRows(2160, 400, 0, 0, 0) < 64);
+  assert.equal(nextZoomBandRows(2160, 2000, 0, 0, 0), 4);
+  assert.equal(nextZoomBandRows(2160, 4000, 0, 0, 0), 2);
+  assert.equal(nextZoomBandRows(2160, 400, 8, 400, 5), 16);
+  assert.equal(nextZoomBandRows(2160, 400, 64, 400, 80), 32);
+  assert.equal(nextZoomBandRows(2160, 500, 128, 400, 10), 8);
+  assert.equal(nextZoomBandRows(4, 100, 0, 0, 0), 4);
+});
+
+test("a larger snapshot scales into the moving frame", () => {
+  const view = { centerX: -0.75, centerY: 0, scale: 1, flipY: false };
+  const blit = zoomFrameBlit(view, view, 200, 100, 400, 200);
+  assert.ok(blit);
+  assert.ok(Math.abs(blit.dw - 200) < 1 && Math.abs(blit.dh - 100) < 1, `dest ${blit.dw} x ${blit.dh}`);
+  assert.ok(Math.abs(blit.sw - 400) < 1 && Math.abs(blit.sh - 200) < 1, `source ${blit.sw} x ${blit.sh}`);
 });
