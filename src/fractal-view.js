@@ -263,27 +263,51 @@ export function escapeSourceBlit(plate, view, width, height) {
  * Where the previous full-resolution frame is drawn for a new camera.
  * A zoom about the center crops the middle of that frame and fills the new one.
  */
-export function zoomFrameBlit(oldView, newView, width, height) {
+export function zoomFrameBlit(oldView, newView, width, height, sourceWidth = width, sourceHeight = height) {
   if (!oldView || !newView || Boolean(oldView.flipY) !== Boolean(newView.flipY)) return null;
   if (!(oldView.scale > 0) || !(newView.scale > 0)) return null;
-  return escapeSourceBlit({ ...oldView, width, height }, newView, width, height);
+  const plateW = sourceWidth > 0 ? sourceWidth : width;
+  const plateH = sourceHeight > 0 ? sourceHeight : height;
+  return escapeSourceBlit({ ...oldView, width: plateW, height: plateH }, newView, width, height);
 }
 
 /**
  * What to show while a full-resolution frame is on the GPU.
- * The previous frame is scaled into the new camera until the draw for this camera is finished.
- * `fresh` means nothing on screen covers this view, so the draw is shown when it is issued.
+ * Any snapshot already on screen is scaled into the new camera. The sharp frame is queued
+ * and copied in when it finishes. `fresh` is only the case with nothing to scale, because
+ * painting that frame on the page thread stalls the zoom for as long as the GPU takes.
  */
-export function gpuZoomPlan({ hasSnapshot, pending, ready, sameView, covered }) {
+export function gpuZoomPlan({ hasSnapshot, pending, ready, sameView }) {
+  if (!hasSnapshot) return { show: "fresh", start: true, adopt: false };
   if (pending && ready) {
     if (sameView) return { show: "sharp", start: false, adopt: true };
-    if (covered) return { show: "warp", start: true, adopt: true };
-    return { show: "fresh", start: true, adopt: true };
+    return { show: "warp", start: true, adopt: true };
   }
-  if (pending) return { show: hasSnapshot && covered ? "warp" : "hold", start: false, adopt: false };
-  if (!hasSnapshot || (!covered && !sameView)) return { show: "fresh", start: true, adopt: false };
-  if (!sameView) return { show: "warp", start: true, adopt: false };
-  return { show: "sharp", start: false, adopt: false };
+  if (pending) return { show: "warp", start: false, adopt: false };
+  if (sameView) return { show: "sharp", start: false, adopt: false };
+  return { show: "warp", start: true, adopt: false };
+}
+
+/**
+ * Rows for the next strip of a zoom plate.
+ * A new plate, or one whose iteration cap jumped, starts short. A strip that finished
+ * quickly at most doubles, and one that ran long halves. The first strip of a tall frame
+ * is a handful of rows, so one GPU finish cannot freeze the page for the whole plate.
+ */
+export function nextZoomBandRows(height, cap, previousRows = 0, previousCap = 0, lastMs = 0) {
+  const h = Math.max(1, height | 0);
+  const prev = previousRows | 0;
+  const reset = !(prev > 0) || (cap | 0) > (previousCap | 0) * 1.15;
+  let rows;
+  if (reset) {
+    const n = cap | 0;
+    if (n > 3200) rows = 2;
+    else if (n > 1600) rows = 4;
+    else rows = 8;
+  } else if (lastMs > 48 && prev > 1) rows = prev >> 1;
+  else if (lastMs > 0 && lastMs < 20) rows = Math.max(prev + 2, prev << 1);
+  else rows = prev;
+  return Math.max(1, Math.min(h, rows));
 }
 
 /**
