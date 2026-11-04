@@ -328,25 +328,70 @@ export function gpuZoomPlan({ hasSnapshot, pending, ready, sameView }) {
 }
 
 /**
- * Rows for the next strip of a zoom plate.
- * A new plate, or one whose iteration cap jumped, starts short. A strip that finished
- * quickly at most doubles, and one that ran long halves. The first strip of a tall frame
- * is a handful of rows, so one GPU finish cannot freeze the page for the whole plate.
+ * A strip should finish inside one refresh. Above this the next strip shrinks.
+ * Below half of it the next strip grows, by a couple of rows rather than by doubling,
+ * so a fast strip cannot come back as a freeze.
  */
-export function nextZoomBandRows(height, cap, previousRows = 0, previousCap = 0, lastMs = 0) {
+export const ZOOM_STRIP_MS = 12;
+
+/** Columns kept when a single row is still slower than a refresh. */
+const ZOOM_STRIP_COLS = 16;
+
+/** Iterations added to the seahorse orbit on one plate. A larger jump waits for the next plate. */
+export const ORBIT_STEP = 2048;
+
+/**
+ * Rows and columns for the next strip of a zoom plate.
+ * A new plate, or one whose iteration cap jumped, starts a few rows wide.
+ * A strip that finished quickly adds two rows, or widens a narrowed row.
+ * A strip that ran past one refresh halves, and a single slow row halves its columns.
+ */
+export function nextZoomStrip(width, height, cap, previous = {}, lastMs = 0) {
+  const w = Math.max(1, width | 0);
   const h = Math.max(1, height | 0);
-  const prev = previousRows | 0;
-  const reset = !(prev > 0) || (cap | 0) > (previousCap | 0) * 1.15;
-  let rows;
+  const prevRows = previous.rows | 0;
+  const prevCols = previous.cols | 0;
+  const reset = !(prevRows > 0) || (cap | 0) > ((previous.cap | 0) || 0) * 1.15;
   if (reset) {
     const n = cap | 0;
-    if (n > 3200) rows = 2;
-    else if (n > 1600) rows = 4;
-    else rows = 8;
-  } else if (lastMs > 48 && prev > 1) rows = prev >> 1;
-  else if (lastMs > 0 && lastMs < 20) rows = Math.max(prev + 2, prev << 1);
-  else rows = prev;
-  return Math.max(1, Math.min(h, rows));
+    const rows = n > 3200 ? 2 : n > 1600 ? 4 : 8;
+    return { rows: Math.max(1, Math.min(h, rows)), cols: w };
+  }
+  let rows = Math.max(1, Math.min(h, prevRows));
+  let cols = Math.max(1, Math.min(w, prevCols > 0 ? prevCols : w));
+  if (lastMs > ZOOM_STRIP_MS) {
+    if (rows > 1) rows >>= 1;
+    else cols = Math.max(ZOOM_STRIP_COLS, cols >> 1);
+  } else if (lastMs > 0 && lastMs < ZOOM_STRIP_MS / 2) {
+    if (cols < w) cols = Math.min(w, cols + Math.max(ZOOM_STRIP_COLS, cols >> 2));
+    else rows = Math.min(h, rows + 2);
+  }
+  return { rows, cols };
+}
+
+/** Rows for the next strip. Columns stay on nextZoomStrip. */
+export function nextZoomBandRows(height, cap, previousRows = 0, previousCap = 0, lastMs = 0) {
+  const strip = nextZoomStrip(
+    4096,
+    height,
+    cap,
+    { rows: previousRows, cols: 4096, cap: previousCap },
+    lastMs,
+  );
+  return strip.rows;
+}
+
+/**
+ * The iteration cap to build this plate.
+ * The dive asks for the whole remaining orbit at the float64 wall. One plate takes at most
+ * ORBIT_STEP new iterations, and the rest follows on the plates after it.
+ */
+export function pacedOrbitCap(wanted, ready = 0) {
+  const need = Math.max(0, wanted | 0);
+  if (!(need > 0)) return 0;
+  const have = Math.max(0, ready | 0);
+  if (need <= have + ORBIT_STEP) return need;
+  return have + ORBIT_STEP;
 }
 
 /**

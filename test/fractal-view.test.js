@@ -33,10 +33,14 @@ import {
   iterationCap,
   FRAME_PACE_MS,
   ZOOM_PLATE_MS,
+  ZOOM_STRIP_MS,
+  ORBIT_STEP,
   MOTION_SCALE_MIN,
   motionPace,
   motionScale,
   zoomShareNext,
+  nextZoomStrip,
+  pacedOrbitCap,
   incomingLevelFade,
   levelBlend,
   mapPointsInto,
@@ -750,10 +754,39 @@ test("a zoom plate starts in a short band so one finish cannot lock the page", (
   assert.ok(nextZoomBandRows(2160, 400, 0, 0, 0) < 64);
   assert.equal(nextZoomBandRows(2160, 2000, 0, 0, 0), 4);
   assert.equal(nextZoomBandRows(2160, 4000, 0, 0, 0), 2);
-  assert.equal(nextZoomBandRows(2160, 400, 8, 400, 5), 16);
+  assert.equal(nextZoomBandRows(2160, 400, 8, 400, 5), 10);
+  assert.equal(nextZoomBandRows(2160, 400, 8, 400, 10), 8);
+  assert.equal(nextZoomBandRows(2160, 400, 64, 400, 16), 32);
   assert.equal(nextZoomBandRows(2160, 400, 64, 400, 80), 32);
   assert.equal(nextZoomBandRows(2160, 500, 128, 400, 10), 8);
   assert.equal(nextZoomBandRows(4, 100, 0, 0, 0), 4);
+  assert.equal(nextZoomBandRows(2160, 400, 1, 400, 40), 1);
+});
+
+test("a strip that is still slow at one row narrows its columns instead of doubling", () => {
+  assert.ok(ZOOM_STRIP_MS <= FRAME_PACE_MS);
+  const held = nextZoomStrip(800, 400, 200, { rows: 8, cols: 800, cap: 200 }, 10);
+  assert.deepEqual(held, { rows: 8, cols: 800 });
+  const grown = nextZoomStrip(800, 400, 200, { rows: 8, cols: 800, cap: 200 }, 4);
+  assert.deepEqual(grown, { rows: 10, cols: 800 });
+  const split = nextZoomStrip(800, 400, 200, { rows: 1, cols: 800, cap: 200 }, 30);
+  assert.deepEqual(split, { rows: 1, cols: 400 });
+  const widen = nextZoomStrip(800, 400, 200, { rows: 1, cols: 400, cap: 200 }, 4);
+  assert.equal(widen.rows, 1);
+  assert.equal(widen.cols, 500);
+  const floor = nextZoomStrip(800, 400, 9000, { rows: 1, cols: 16, cap: 9000 }, 40);
+  assert.deepEqual(floor, { rows: 1, cols: 16 });
+  const reset = nextZoomStrip(800, 400, 5000, { rows: 1, cols: 32, cap: 200 }, 4);
+  assert.deepEqual(reset, { rows: 2, cols: 800 });
+});
+
+test("the seahorse orbit cap climbs by one step when the dive asks for the rest at once", () => {
+  assert.equal(ORBIT_STEP, 2048);
+  assert.equal(pacedOrbitCap(52, 0), 52);
+  assert.equal(pacedOrbitCap(3000, 2500), 3000);
+  assert.equal(pacedOrbitCap(100, 50000), 100);
+  assert.equal(pacedOrbitCap(131072, 114000), 114000 + ORBIT_STEP);
+  assert.equal(pacedOrbitCap(114000 + ORBIT_STEP, 114000 + ORBIT_STEP), 114000 + ORBIT_STEP);
 });
 
 test("a larger snapshot scales into the moving frame", () => {

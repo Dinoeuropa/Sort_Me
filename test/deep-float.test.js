@@ -8,6 +8,7 @@ import {
   fixedToNumber,
   isSeahorseCenter,
   seahorseOrbit,
+  clearSeahorseOrbit,
   seahorsePoint,
   seahorseOffsetIterations,
   SEAHORSE_FLOOR_EXP,
@@ -85,6 +86,24 @@ test("a floatexp offset past the float64 wall matches fixed-point iteration", ()
   assert.notEqual(other, direct);
   const otherScaled = scaledEscape(orbit, 1.5, 0, 131072, { exp });
   assert.notEqual(otherScaled, blocked.iter);
+});
+
+test("a seahorse orbit extended in slices builds the same blocks as one request", () => {
+  clearSeahorseOrbit();
+  seahorseOrbit(2500);
+  seahorseOrbit(6000);
+  const sliced = seahorseOrbit(9000);
+  clearSeahorseOrbit();
+  const full = seahorseOrbit(9000);
+  assert.equal(sliced.count, full.count);
+  assert.equal(sliced.blocks.length, full.blocks.length);
+  for (let i = 0; i < full.blocks.length; i += 1) {
+    assert.equal(sliced.blocks[i].at, full.blocks[i].at);
+    assert.equal(sliced.blocks[i].length, full.blocks[i].length);
+    assert.equal(sliced.blocks[i].radiusExp, full.blocks[i].radiusExp);
+  }
+  const offset = 1e-40;
+  assert.equal(scaledEscape(sliced, offset, 0, 9000), scaledEscape(full, offset, 0, 9000));
 });
 
 test("the live camera's double-double is the refined seahorse center", () => {

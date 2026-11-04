@@ -19,7 +19,7 @@ import {
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
   COVER_SLACK,
-  ZOOM_PLATE_MS,
+  FRAME_PACE_MS,
   PLATE_BLEND_MS,
   PLATE_TARGET_MS,
   advanceAutoZoom,
@@ -46,6 +46,7 @@ import {
   PLATE_EDGE_MAX,
   MOTION_SCALE_MIN,
   zoomShareNext,
+  pacedOrbitCap,
   pickPlate,
   plateBudget,
   plateCovers,
@@ -204,6 +205,7 @@ const state = {
   autoHold: false,
   zoomJob: null,
   zoomShare: 1,
+  orbitReady: 0,
   zoomTook: 32,
   zoomExpect: 32,
   zoomSerial: 0,
@@ -776,6 +778,7 @@ function finish() {
   if (currentFractal().kind === "escape" && state.raster && state.iterations && state.nextRow >= state.raster.height) {
     rememberCurrentPlate();
     scheduleEscape();
+    zoomGpuWorker();
   }
   if (first && !state.sweepPlayed) {
     state.sweepPlayed = true;
@@ -1933,6 +1936,13 @@ function installPixels(pixels, width, height, done) {
   setTimeout(step, 0);
 }
 
+/** The cap this plate may build. A jump past one orbit step is finished on the plates that follow. */
+function paceZoomCap(wanted) {
+  const cap = pacedOrbitCap(wanted, state.orbitReady || 0);
+  state.orbitReady = cap;
+  return cap;
+}
+
 function haltAutoZoom() {
   state.autoZoom = false;
   state.autoHold = false;
@@ -1946,6 +1956,7 @@ function haltAutoZoom() {
   state.frozenParam = null;
   state.zoomJob = null;
   state.zoomShare = 1;
+  state.orbitReady = 0;
   state.zoomTook = 32;
   state.zoomExpect = 32;
   state.zoomSerial += 1;
@@ -2091,7 +2102,7 @@ function ensureAutoPlate(token, box) {
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(path, from + ((to - from) * i) / 4));
   const cover = coverViews(samples, aspect, plateMargin(from));
   const deepest = samples[samples.length - 1];
-  const cap = escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), scaleRatio(state.home || deepest, deepest));
+  const cap = paceZoomCap(escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), scaleRatio(state.home || deepest, deepest)));
   const edge = Math.min(state.plateEdge || plateRasterEdge(cap), PLATE_EDGE_MAX);
   const raster = rasterSize(box.width, box.height, box.dpr, true, edge);
   const view = { ...cover, flipY: Boolean(path.start.flipY) };
@@ -2304,9 +2315,11 @@ function onZoomGpuFrame(event) {
   state.zoomMisses = 0;
   const took = Number(message.ms);
   const wall = Number(message.wall);
+  const band = Number(message.band);
   const previous = state.zoomShare || 1;
   state.zoomTook = took > 0 ? took : state.zoomTook;
-  state.zoomShare = zoomShareNext(previous, state.zoomTook, ZOOM_PLATE_MS);
+  const pace = band > 0 ? band : state.zoomTook;
+  state.zoomShare = zoomShareNext(previous, pace, FRAME_PACE_MS);
   const ratio = previous > 0 ? state.zoomShare / previous : 1;
   const elapsed = wall > 0 ? wall : state.zoomTook;
   state.zoomExpect = Math.max(8, elapsed * ratio * ratio);
@@ -2328,13 +2341,14 @@ function queueGpuZoom(box) {
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(state.autoPath, from + ((ahead - from) * i) / 4));
   const cover = { ...coverViews(samples, aspect, plateMargin(from)), flipY: Boolean(state.autoPath.start.flipY) };
   const raster = zoomJobSize(box);
-  const cap = escapeIterationCap(
+  const wanted = escapeIterationCap(
     state.fractalId,
     state.baseDepth || depthValue(),
     scaleRatio(state.home, samples[samples.length - 1]),
   );
   const depth = gpuDepthMode(cover, raster.height);
-  if (!depth || (depth !== "deep" && cap > GPU_ITER_LIMIT)) return;
+  if (!depth || (depth !== "deep" && wanted > GPU_ITER_LIMIT)) return;
+  const cap = paceZoomCap(wanted);
   const job = renderJob(cover);
   let paint = null;
   try {
