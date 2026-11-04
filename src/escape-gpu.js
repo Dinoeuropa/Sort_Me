@@ -1,6 +1,6 @@
 import { DEEP_ITERATION_LIMIT, DEEP_SHADER_SCALE, isSeahorseCenter, packBlocks, scaleParts, seahorseOrbit } from "./deep-float.js";
 import { escapeLut } from "./palettes.js";
-import { ITERATION_LIMIT } from "./fractal-view.js";
+import { ITERATION_LIMIT, scaleLog } from "./fractal-view.js";
 import {
   juliaReference,
   newtonReference,
@@ -387,12 +387,20 @@ float exp2i(int exponent) {
   return exp2(float(exponent));
 }
 
-// Pixel offset in units of the view scale. The reference is the refined seahorse orbit, and a
-// block adds its whole run when the offset is still inside the block's radius.
+// A term whose exponent is more than a float32 significand below the destination is a rounding error.
+float termPow(int exponent) {
+  if (exponent < -24) return 0.0;
+  return exp2i(exponent);
+}
+
+// Pixel offset in units of the view scale. The c offset keeps uExp for the whole pixel.
+// The z offset carries its own exponent. The reference is the refined seahorse orbit, and a
+// block adds its whole run when both offsets are still inside the block's radius.
 int escapeDeep(vec2 loc, int cap) {
   vec2 dc = loc * uMant;
+  int ec = uExp;
   vec2 d = vec2(0.0);
-  int e = uExp;
+  int e = ec;
   int m = 0;
   int iter = 0;
   int blockIndex = 0;
@@ -410,9 +418,12 @@ int escapeDeep(vec2 loc, int cap) {
       vec4 meta = blockTexel(blockIndex * 2 + 1);
       int at = int(meta.x);
       int len = int(meta.y);
-      float guard = max(max(abs(d.x), abs(d.y)), max(max(abs(dc.x), abs(dc.y)), 1e-6));
-      if (at == m && iter + len <= cap && float(e) + log2(guard) < meta.z) {
-        d = cmul(coef.xy, d) + cmul(coef.zw, dc);
+      float dGuard = max(max(abs(d.x), abs(d.y)), 1e-6);
+      float cGuard = max(max(abs(dc.x), abs(dc.y)), 1e-6);
+      bool inside = float(e) + log2(dGuard) < meta.z && float(ec) + log2(cGuard) < meta.z;
+      if (at == m && iter + len <= cap && inside) {
+        float t = termPow(ec - e);
+        d = cmul(coef.xy, d) + cmul(coef.zw, dc * t);
         m += len;
         iter += len;
         blockIndex += 1;
@@ -423,17 +434,16 @@ int escapeDeep(vec2 loc, int cap) {
     }
     if (!jumped) {
       vec2 z = orbitAt(m).xy;
-      float s = exp2i(e);
-      d = 2.0 * cmul(z, d) + cmul(d, d) * s + dc;
+      float quad = termPow(e);
+      float cScale = termPow(ec - e);
+      d = 2.0 * cmul(z, d) + cmul(d, d) * quad + dc * cScale;
       m += 1;
       iter += 1;
     }
     float mag = length(d);
     if (mag > 1024.0) {
       int shift = int(floor(log2(mag))) - 8;
-      float down = exp2(float(-shift));
-      d *= down;
-      dc *= down;
+      d *= exp2(float(-shift));
       e += shift;
     }
     if (m > last) m = last;
@@ -445,13 +455,19 @@ int escapeDeep(vec2 loc, int cap) {
     bool ranOut = m >= last;
     bool nearer = close && dot(w, w) < dot(d * ws, d * ws);
     if (ranOut || nearer) {
-      float span = exp2i(e);
-      vec2 world = zr + d * span;
-      float size = length(world);
-      int nextE = int(floor(log2(max(size, 1e-20))));
-      d = world * exp2i(-nextE);
-      dc *= exp2i(e - nextE);
-      e = nextE;
+      if (!close) {
+        float zmag = length(zr);
+        if (zmag > 0.0) {
+          int we = int(floor(log2(zmag)));
+          d = zr * exp2i(-we);
+          e = we;
+        }
+      } else {
+        float size = length(w);
+        int we = int(floor(log2(max(size, exp2(-126.0)))));
+        d = w * exp2i(-we);
+        e = we;
+      }
       m = 0;
       blockIndex = 0;
     }
@@ -775,7 +791,7 @@ function referenceCap(mode, cap, deep) {
 }
 
 function usesDeepReference(mode, preset) {
-  return mode === 0 && isSeahorseCenter(preset) && preset.scale < DEEP_SHADER_SCALE;
+  return mode === 0 && isSeahorseCenter(preset) && scaleLog(preset) < Math.log2(DEEP_SHADER_SCALE);
 }
 
 function computeReference(mode, preset, cap) {
@@ -804,7 +820,8 @@ function referenceFor(session, mode, preset, cap) {
   const held = session.reference;
   if (held && held.key === key) {
     const offset = viewOffset(preset, held.center);
-    if (Math.hypot(offset.dx, offset.dy) <= preset.scale * 0.5) return { ...held, offset };
+    const limit = Number.isInteger(preset.scaleExp) ? Infinity : preset.scale * 0.5;
+    if (Math.hypot(offset.dx, offset.dy) <= limit) return { ...held, offset };
   }
   const reference = computeReference(mode, preset, reach);
   const packed = packOrbit(reference);
@@ -906,7 +923,7 @@ export function paintGpuEscape({
   gl.uniform1i(where.uLutWidth, session.lutWidth);
   gl.uniform1i(where.uSpan, iterations + 1);
   gl.uniform1i(where.uPerturb, deep ? 2 : depth === "perturb" ? 1 : 0);
-  const parts = scaleParts(preset.scale);
+  const parts = scaleParts(preset.scale, preset.scaleExp);
   gl.uniform1f(where.uMant, deep ? parts.mant : 1);
   gl.uniform1i(where.uExp, deep ? parts.exp : 0);
   if (depth === "perturb" || deep) {
@@ -917,7 +934,10 @@ export function paintGpuEscape({
     gl.uniform1i(where.uRebaseAt, packed.rebaseAt);
     gl.uniform1i(where.uRebaseLast, packed.rebaseLast);
     if (deep) {
-      gl.uniform2f(where.uOffset, offset.dx / preset.scale, offset.dy / preset.scale);
+      const onPoint = scaleLog(preset) <= -100;
+      const ox = onPoint ? 0 : offset.dx / preset.scale;
+      const oy = onPoint ? 0 : offset.dy / preset.scale;
+      gl.uniform2f(where.uOffset, ox, oy);
       gl.uniform1i(where.uSkip, 0);
       gl.uniform2f(where.uSeries, 0, 0);
       gl.uniform2f(where.uSeries2, 0, 0);

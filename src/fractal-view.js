@@ -1,4 +1,4 @@
-import { DEEP_ITERATION_LIMIT, DEEP_SHADER_SCALE, isSeahorseCenter } from "./deep-float.js";
+import { DEEP_ITERATION_LIMIT, DEEP_SHADER_SCALE, SEAHORSE_FLOOR_EXP, isSeahorseCenter } from "./deep-float.js";
 import { deepCenter, hasDeepCenter, shiftView, viewOffset } from "./precision.js";
 
 export { DEEP_ITERATION_LIMIT };
@@ -62,6 +62,7 @@ export function plateFrame(view, width, height) {
     width,
     height,
   };
+  if (Number.isInteger(view.scaleExp)) frame.scaleExp = view.scaleExp;
   if (hasDeepCenter(view)) {
     frame.centerXLo = view.centerXLo || 0;
     frame.centerYLo = view.centerYLo || 0;
@@ -69,8 +70,33 @@ export function plateFrame(view, width, height) {
   return frame;
 }
 
+/** log2 of the view width. A floatexp view stores the mantissa in `scale` and the exponent beside it. */
+export function scaleLog(view) {
+  if (!view || !(view.scale > 0) || !Number.isFinite(view.scale)) return Number.NaN;
+  if (Number.isInteger(view.scaleExp)) return view.scaleExp + Math.log2(view.scale);
+  return Math.log2(view.scale);
+}
+
+/** Width of `a` divided by the width of `b`, without forming a product that underflows. */
+export function scaleRatio(a, b) {
+  const diff = scaleLog(a) - scaleLog(b);
+  if (!Number.isFinite(diff)) return Number.NaN;
+  if (diff > 1023) return Infinity;
+  if (diff < -1074) return 0;
+  return 2 ** diff;
+}
+
+/** True when `a` is a finer view than `b`. */
+export function scaleLess(a, b) {
+  return scaleLog(a) < scaleLog(b);
+}
+
+function hasScaleExp(view) {
+  return Number.isInteger(view?.scaleExp);
+}
+
 export function escapeMagnification(home, view) {
-  return home.scale / view.scale;
+  return scaleRatio(home, view);
 }
 
 export function boundsMagnification(home, view) {
@@ -94,7 +120,11 @@ const NEWTON_STEPS_PER_OCTAVE = 5;
 
 export function escapeIterationCap(fractalId, baseDepth, magnification) {
   if (fractalId === "mandelbrot") {
-    const extra = Math.max(0, Math.round(Math.log2(Math.max(1, magnification)) * 96));
+    const log2mag = Math.log2(Math.max(1, magnification));
+    if (!Number.isFinite(log2mag)) return DEEP_ITERATION_LIMIT;
+    // Past a few hundred octaves the boundary needs a little more than 96 iterations per halving.
+    const per = log2mag > 400 ? 112 : 96;
+    const extra = Math.max(0, Math.round(log2mag * per));
     return Math.min(DEEP_ITERATION_LIMIT, Math.max(1, baseDepth + extra));
   }
   if (fractalId !== "newton") return iterationCap(baseDepth, magnification);
@@ -143,10 +173,15 @@ export const PLATE_EDGE_MAX = SHARP_RASTER_EDGE;
  * `floor` keeps the pixel size above what the arithmetic can tell apart.
  * A target with `xLo` and `yLo` is double-double, and the camera center then stays double-double.
  */
-export function autoZoomPath(start, target, floor = 5e-12) {
+export function autoZoomPath(start, target, floor = 5e-12, floorExp = null) {
   const reach = Math.max(1, Math.hypot(target.x, target.y));
-  const minScale = Math.max(Number(floor) || 5e-12, 0) * reach;
-  const maxOctave = Math.max(1, Math.log2(start.scale / minScale));
+  let maxOctave;
+  if (Number.isInteger(floorExp)) {
+    maxOctave = Math.max(1, Math.log2(start.scale) - floorExp);
+  } else {
+    const minScale = Math.max(Number(floor) || 5e-12, 0) * reach;
+    maxOctave = Math.max(1, Math.log2(start.scale / minScale));
+  }
   const deep = typeof target.xLo === "number" || typeof target.yLo === "number";
   const aim = { centerX: target.x, centerY: target.y, centerXLo: target.xLo || 0, centerYLo: target.yLo || 0 };
   const offset = viewOffset(aim, start);
@@ -164,18 +199,22 @@ export function autoZoomView(path, octave) {
   const o = Math.max(0, Number.isFinite(octave) ? octave : 0);
   const p = Math.min(1, o / AUTO_ENTER_OCTAVES);
   const keep = 1 - p * p * (3 - 2 * p);
-  const scale = path.start.scale * 2 ** -o;
-  const dx = -path.offsetX * keep * scale;
-  const dy = -path.offsetY * keep * scale;
-  if (typeof path.target.xLo === "number") {
-    return { ...deepCenter(path.target, dx, dy), scale, flipY: path.start.flipY };
+  const logScale = Math.log2(path.start.scale) - o;
+  const plain = logScale > -900;
+  const scale = plain ? path.start.scale * 2 ** -o : 2 ** (logScale - Math.floor(logScale));
+  const dx = plain ? -path.offsetX * keep * scale : 0;
+  const dy = plain ? -path.offsetY * keep * scale : 0;
+  const placed = typeof path.target.xLo === "number"
+    ? { ...deepCenter(path.target, dx, dy), flipY: path.start.flipY }
+    : {
+      centerX: path.target.x + dx,
+      centerY: path.target.y + dy,
+      flipY: path.start.flipY,
+    };
+  if (!plain) {
+    return { ...placed, scale, scaleExp: Math.floor(logScale) };
   }
-  return {
-    centerX: path.target.x + dx,
-    centerY: path.target.y + dy,
-    scale,
-    flipY: path.start.flipY,
-  };
+  return { ...placed, scale };
 }
 
 /**
@@ -357,6 +396,7 @@ export function clampViewToPlate(plate, view, aspect = 1) {
 
 /** One window that contains every camera, widened so the view can keep moving inside it. */
 export function coverViews(views, aspect = 1, margin = PLATE_SCALE) {
+  if (views.some((view) => hasScaleExp(view))) return coverViewsLog(views, aspect, margin);
   const camera = views[0];
   const safeAspect = aspect > 0 ? aspect : 1;
   let minX = Infinity;
@@ -391,6 +431,52 @@ function centerOf(view) {
   return center;
 }
 
+/** Center of `from` minus center of `to`, in units of `to`'s height. */
+function offsetInHeights(from, to) {
+  const at = viewOffset(from, to);
+  const log = scaleLog(to);
+  const lift = (value) => {
+    if (value === 0) return 0;
+    const bits = Math.log2(Math.abs(value)) - log;
+    if (bits > 60) return Math.sign(value) * Infinity;
+    if (bits < -60) return 0;
+    return Math.sign(value) * 2 ** bits;
+  };
+  return { dx: lift(at.dx), dy: lift(at.dy) };
+}
+
+function withScale(log) {
+  const exp = Math.floor(log);
+  return { scale: 2 ** (log - exp), scaleExp: exp };
+}
+
+function coverViewsLog(views, aspect, margin) {
+  const camera = views[0];
+  const safeAspect = aspect > 0 ? aspect : 1;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const view of views) {
+    const at = offsetInHeights(view, camera);
+    const half = 0.5 * scaleRatio(view, camera);
+    const halfX = half * safeAspect;
+    minX = Math.min(minX, at.dx - halfX);
+    maxX = Math.max(maxX, at.dx + halfX);
+    minY = Math.min(minY, at.dy - half);
+    maxY = Math.max(maxY, at.dy + half);
+  }
+  const spanX = (maxX - minX) * 1.08;
+  const spanY = (maxY - minY) * 1.08;
+  const pad = Math.max(spanY, spanX / safeAspect, (margin > 1 ? margin : PLATE_SCALE));
+  const log = scaleLog(camera) + Math.log2(pad);
+  return {
+    ...centerOf(camera),
+    ...withScale(log),
+    flipY: Boolean(camera.flipY),
+  };
+}
+
 /**
  * True when the camera rectangle sits inside the plate, including a zoomed-in camera.
  * `slack` is a fraction of the camera height the plate may fall short by, for a picture whose
@@ -400,6 +486,19 @@ export function plateCovers(plate, view, aspect = 1, slack = 0) {
   if (!plate || !view || !(plate.scale > 0) || !(view.scale > 0)) return false;
   const safeAspect = aspect > 0 ? aspect : 1;
   const plateAspect = plate.width > 0 && plate.height > 0 ? plate.width / plate.height : safeAspect;
+  if (hasScaleExp(plate) || hasScaleExp(view)) {
+    const ratio = scaleRatio(plate, view);
+    if (!Number.isFinite(ratio)) return ratio === Infinity;
+    const plateHalfY = ratio * 0.5;
+    const plateHalfX = plateHalfY * plateAspect;
+    const camHalfX = safeAspect * 0.5;
+    const camHalfY = 0.5;
+    const atView = offsetInHeights(view, plate);
+    const marginX = plateHalfX - camHalfX - Math.abs(atView.dx);
+    const marginY = plateHalfY - camHalfY - Math.abs(atView.dy);
+    const allowed = Math.max(1e-9, slack);
+    return marginX >= -allowed && marginY >= -allowed;
+  }
   const plateHalfX = plate.scale * plateAspect * 0.5;
   const plateHalfY = plate.scale * 0.5;
   const camHalfX = view.scale * safeAspect * 0.5;
@@ -433,7 +532,7 @@ export function plateRasterEdge(cap = 500) {
  * more than a pixel, stays on the double-double path.
  */
 export function gpuPrecisionHolds(view, height) {
-  if (!view || !(view.scale > 0)) return false;
+  if (!view || !(view.scale > 0) || hasScaleExp(view)) return false;
   if (!Number.isFinite(view.centerX) || !Number.isFinite(view.centerY)) return false;
   const pixel = view.scale / Math.max(1, height);
   const step = Math.max(float32Ulp(view.centerX), float32Ulp(view.centerY), float32Ulp(view.scale));
@@ -455,10 +554,18 @@ const GPU_PIXEL_FLOOR = 1e-34;
  * pair of doubles can no longer name it, or null when the view is past all three.
  */
 export function gpuDepthMode(view, height) {
-  if (!view || !(view.scale > 0) || !Number.isFinite(view.scale)) return null;
+  if (!view) return null;
+  const log = scaleLog(view);
+  const deepShader = Math.log2(DEEP_SHADER_SCALE);
+  const seahorseDeep = Number.isFinite(log)
+    && isSeahorseCenter(view)
+    && log < deepShader
+    && log >= SEAHORSE_FLOOR_EXP;
+  if (hasScaleExp(view)) return seahorseDeep ? "deep" : null;
+  if (!(view.scale > 0) || !Number.isFinite(view.scale)) return null;
   if (gpuPrecisionHolds(view, height)) return "direct";
   if (!Number.isFinite(view.centerX) || !Number.isFinite(view.centerY)) return null;
-  if (isSeahorseCenter(view) && view.scale < DEEP_SHADER_SCALE && view.scale >= 1e-300) return "deep";
+  if (seahorseDeep) return "deep";
   return view.scale / Math.max(1, height) >= GPU_PIXEL_FLOOR ? "perturb" : null;
 }
 
@@ -607,6 +714,27 @@ export function easeFactor(pending, rate = 0.22) {
 export function escapeBlitRect(plate, view, width, height) {
   const plateW = Math.max(1, plate.width || width);
   const plateH = Math.max(1, plate.height || height);
+  if (hasScaleExp(plate) || hasScaleExp(view)) {
+    const ratio = scaleRatio(plate, view);
+    const spanY = Number.isFinite(ratio) ? ratio : (ratio === Infinity ? 1e9 : 0);
+    const spanX = spanY * (plateW / plateH);
+    const at = offsetInHeights(plate, view);
+    const aspect = width / Math.max(1, height);
+    const toX = (dx) => (dx / aspect + 0.5) * width;
+    const toY = (dy) => (view.flipY ? (dy + 0.5) * height : (0.5 - dy) * height);
+    const left = at.dx - spanX / 2;
+    const right = at.dx + spanX / 2;
+    const topY = at.dy + (plate.flipY ? -spanY / 2 : spanY / 2);
+    const botY = at.dy + (plate.flipY ? spanY / 2 : -spanY / 2);
+    const topLeft = { x: toX(left), y: toY(topY) };
+    const bottomRight = { x: toX(right), y: toY(botY) };
+    return {
+      x: topLeft.x,
+      y: topLeft.y,
+      w: bottomRight.x - topLeft.x,
+      h: bottomRight.y - topLeft.y,
+    };
+  }
   const spanY = plate.scale;
   const spanX = spanY * (plateW / plateH);
   const at = viewOffset(plate, view);

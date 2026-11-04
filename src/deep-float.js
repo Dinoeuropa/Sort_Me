@@ -5,8 +5,10 @@
  * point after 63 steps. A pair of doubles holds about 32 digits of it, so a dive past roughly
  * 10^28 leaves the spiral. Here the same point is refined in fixed point, the reference orbit
  * is stored as doubles (every term stays inside the escape radius), and a pixel is a scaled
- * offset from that orbit. Linear blocks jump the long middle of the orbit in one step, which
- * is what lets a shader loop of 16384 cover an escape time well past that.
+ * offset from that orbit. The pixel's c offset keeps its own exponent, so the view can pass the
+ * float64 wall without flushing that offset when the running z is renormalized. Linear blocks
+ * jump the long middle of the orbit in one step, which is what lets a shader loop of 16384
+ * cover an escape time well past that.
  */
 
 const FRACTION_BITS = 1152;
@@ -33,13 +35,31 @@ const SEAHORSE_HI = {
   yLo: 1.0660999617601176e-17,
 };
 
+/** The published double-double. The live camera stores this pair; the fixed-point point carries the rest. */
+export const SEAHORSE_CENTER = {
+  x: SEAHORSE_HI.x,
+  xLo: SEAHORSE_HI.xLo,
+  y: SEAHORSE_HI.y,
+  yLo: SEAHORSE_HI.yLo,
+};
+
+/**
+ * Deepest seahorse view, as floor(log2(width)). Past 2^-1022, still ~100 bits coarser than the
+ * 1152-bit center, and a pixel there escapes inside the iteration cap with room in the shader loop.
+ */
+export const SEAHORSE_FLOOR_EXP = -1040;
+
 /** True when the camera is on the seahorse center, close enough that a pixel still contains it. */
 export function isSeahorseCenter(view) {
   if (!view || !(view.scale > 0) || !Number.isFinite(view.scale)) return false;
   if (!Number.isFinite(view.centerX) || !Number.isFinite(view.centerY)) return false;
+  const log = Number.isInteger(view.scaleExp) ? view.scaleExp + Math.log2(view.scale) : Math.log2(view.scale);
+  if (!Number.isFinite(log)) return false;
   const dx = (view.centerX - SEAHORSE_HI.x) + ((view.centerXLo || 0) - SEAHORSE_HI.xLo);
   const dy = (view.centerY - SEAHORSE_HI.y) + ((view.centerYLo || 0) - SEAHORSE_HI.yLo);
-  return Math.hypot(dx, dy) <= view.scale * 1e-3;
+  const miss = Math.hypot(dx, dy);
+  if (miss === 0) return true;
+  return Math.log2(miss) <= log + Math.log2(1e-3);
 }
 
 /** Real iterations a Mandelbrot deep zoom may spend. The shader loop is much shorter. */
@@ -134,6 +154,46 @@ function stepFixed(zx, zy, cx, cy) {
 export function fixedMandelbrotIterations(cx, cy, ux, uy, maxIter) {
   const cRe = cx + fixedFromNumber(ux);
   const cIm = cy + fixedFromNumber(uy);
+  let zx = 0n;
+  let zy = 0n;
+  const four = 4n << BigInt(FRACTION_BITS);
+  const cap = maxIter | 0;
+  for (let iter = 0; iter < cap; iter += 1) {
+    const xx = mul(zx, zx);
+    const yy = mul(zy, zy);
+    if (xx + yy > four) return iter;
+    const xy = mul(zx, zy);
+    zx = xx - yy + cRe;
+    zy = (xy << 1n) + cIm;
+  }
+  return cap;
+}
+
+/** mant * 2^exp as a fixed-point offset. `2^exp` itself need not fit in a double. */
+function fixedScaledOffset(exp, mant) {
+  if (!Number.isInteger(exp) || !Number.isFinite(mant) || mant === 0) return 0n;
+  const neg = mant < 0;
+  const abs = Math.abs(mant);
+  const mantExp = Math.floor(Math.log2(abs));
+  const mantNorm = abs * 2 ** -mantExp;
+  const bits = 53;
+  const mantInt = BigInt(Math.round(mantNorm * 2 ** (bits - 1)));
+  const shift = FRACTION_BITS + exp + mantExp - (bits - 1);
+  let out;
+  if (shift >= 0) out = mantInt << BigInt(shift);
+  else {
+    const sh = BigInt(-shift);
+    if (sh > 4096n) return 0n;
+    out = (mantInt + (1n << (sh - 1n))) >> sh;
+  }
+  return neg ? -out : out;
+}
+
+/** Escape time of the seahorse center plus mant * 2^exp, iterated in the 1152-bit point. */
+export function seahorseOffsetIterations(exp, mant, maxIter) {
+  const point = seahorsePoint();
+  const cRe = point.re + fixedScaledOffset(exp, mant);
+  const cIm = point.im;
   let zx = 0n;
   let zy = 0n;
   const four = 4n << BigInt(FRACTION_BITS);
@@ -344,30 +404,37 @@ export function seahorseOrbit(maxIter) {
   return reference;
 }
 
-/** float32 power of two. Exponents outside the normal range flush to zero, as in the shader. */
-function exp2f(exp) {
-  if (exp < -126 || exp > 127) return 0;
-  return Math.fround(2 ** exp);
+/** Power of two that exists in the working precision. Outside that range the factor is a rounding error. */
+function pow2(exp, float32) {
+  const limit = float32 ? 127 : 1023;
+  const floor = float32 ? -126 : -1022;
+  if (exp < floor || exp > limit) return 0;
+  return float32 ? Math.fround(2 ** exp) : 2 ** exp;
 }
 
-function renorm(dx, dy, dcx, dcy, e, float32) {
-  let mag = Math.hypot(dx, dy);
+/**
+ * Scale that adds a term whose exponent sits `exp` above the destination.
+ * A gap wider than the significand is below one rounding error, so the term is skipped
+ * rather than flushed through a power of two the format cannot hold.
+ */
+function termScale(exp, sig, float32) {
+  if (exp < -sig) return 0;
+  return pow2(exp, float32);
+}
+
+function renormDelta(dx, dy, e, float32, round) {
+  const mag = Math.hypot(dx, dy);
   if (mag > 1024) {
     const shift = Math.floor(Math.log2(mag)) - 8;
     const down = 2 ** -shift;
-    dx *= down;
-    dy *= down;
-    dcx *= down;
-    dcy *= down;
+    dx = round(dx * down);
+    dy = round(dy * down);
     e += shift;
-  }
-  if (float32) {
+  } else if (float32) {
     dx = Math.fround(dx);
     dy = Math.fround(dy);
-    dcx = Math.fround(dcx);
-    dcy = Math.fround(dcy);
   }
-  return { dx, dy, dcx, dcy, e };
+  return { dx, dy, e };
 }
 
 function cmul(ax, ay, bx, by, round) {
@@ -376,19 +443,19 @@ function cmul(ax, ay, bx, by, round) {
   return [x, y];
 }
 
-function blockFits(block, dx, dy, dcx, dcy, e, float32) {
-  if (float32) {
-    const guard = Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dcx), Math.abs(dcy), 1e-6);
-    const bits = guard > 0 ? Math.log2(guard) : -20;
-    return e + bits < block.radiusExp;
-  }
-  if (e < -900) return Math.hypot(dcx, dcy) === 0 || block.radius > 0;
-  const span = 2 ** e;
-  return Math.hypot(dx, dy) * span < block.radius && Math.hypot(dcx, dcy) * span < block.radius;
+function blockFits(block, dx, dy, dcx, dcy, e, ec) {
+  const dGuard = Math.max(Math.abs(dx), Math.abs(dy), 1e-6);
+  const cGuard = Math.max(Math.abs(dcx), Math.abs(dcy), 1e-6);
+  const dBits = e + Math.log2(dGuard);
+  const cBits = ec + Math.log2(cGuard);
+  return dBits < block.radiusExp && cBits < block.radiusExp;
 }
 
 /**
- * Escape time of the pixel at world offset (ux, uy) from the seahorse center.
+ * Escape time of the pixel at offset (ux, uy) from the seahorse center.
+ * Without `exp`, (ux, uy) is a world offset and its exponent is split off here.
+ * With `exp`, (ux, uy) is the mantissa and `exp` is kept for the whole pixel: the z offset
+ * carries its own exponent, and a term is added only while the two still share a significand.
  * `blocks: false` steps one iteration at a time. `float32` rounds the way the shader does.
  * With `trace`, returns `{ iter, steps }` where `steps` is the shader loop count.
  */
@@ -396,17 +463,26 @@ export function scaledEscape(reference, ux, uy, maxIter, options = {}) {
   const cap = maxIter | 0;
   const float32 = Boolean(options.float32);
   const round = float32 ? Math.fround : (value) => value;
+  const sig = float32 ? 24 : 53;
   const useBlocks = options.blocks !== false && reference.blocks && reference.blocks.length > 0;
-  const mag = Math.max(Math.abs(ux), Math.abs(uy));
-  let e = 0;
+  const blocks = useBlocks ? reference.blocks : [];
+  let ec = 0;
   let dcx = 0;
   let dcy = 0;
-  if (mag > 0) {
-    e = Math.floor(Math.log2(mag));
-    const inv = 2 ** -e;
-    dcx = round(ux * inv);
-    dcy = round(uy * inv);
+  if (Number.isInteger(options.exp)) {
+    ec = options.exp;
+    dcx = round(ux);
+    dcy = round(uy);
+  } else {
+    const mag = Math.max(Math.abs(ux), Math.abs(uy));
+    if (mag > 0 && Number.isFinite(mag)) {
+      ec = Math.floor(Math.log2(mag));
+      const inv = pow2(-ec, false);
+      dcx = round(ux * inv);
+      dcy = round(uy * inv);
+    }
   }
+  let e = ec;
   let dx = 0;
   let dy = 0;
   let m = 0;
@@ -418,17 +494,17 @@ export function scaledEscape(reference, ux, uy, maxIter, options = {}) {
   const finish = (value) => (options.trace ? { iter: value, steps } : value);
 
   while (iter < cap && steps < cap) {
-    const blocks = useBlocks ? reference.blocks : [];
     while (blockIndex < blocks.length && blocks[blockIndex].at < m) blockIndex += 1;
     const block = blockIndex < blocks.length ? blocks[blockIndex] : null;
     let jumped = false;
-    if (block && block.at === m && iter + block.length <= cap && blockFits(block, dx, dy, dcx, dcy, e, float32)) {
+    if (block && block.at === m && iter + block.length <= cap && blockFits(block, dx, dy, dcx, dcy, e, ec)) {
       const ax = round(block.ax);
       const ay = round(block.ay);
       const bx = round(block.bx);
       const by = round(block.by);
+      const t = termScale(ec - e, sig, float32);
       const [adx, ady] = cmul(ax, ay, dx, dy, round);
-      const [bdx, bdy] = cmul(bx, by, dcx, dcy, round);
+      const [bdx, bdy] = cmul(bx, by, round(dcx * t), round(dcy * t), round);
       dx = round(adx + bdx);
       dy = round(ady + bdy);
       m += block.length;
@@ -441,44 +517,49 @@ export function scaledEscape(reference, ux, uy, maxIter, options = {}) {
     if (!jumped) {
       const zx = round(orbit[m * 2]);
       const zy = round(orbit[m * 2 + 1]);
-      const s = float32 ? exp2f(e) : 2 ** e;
+      const quad = termScale(e, sig, float32);
+      const cScale = termScale(ec - e, sig, float32);
       const [zzx, zzy] = cmul(dx, dy, dx, dy, round);
       const [lix, liy] = cmul(zx, zy, dx, dy, round);
-      dx = round(round(2 * lix) + round(zzx * s) + dcx);
-      dy = round(round(2 * liy) + round(zzy * s) + dcy);
+      dx = round(round(2 * lix) + round(zzx * quad) + round(dcx * cScale));
+      dy = round(round(2 * liy) + round(zzy * quad) + round(dcy * cScale));
       m += 1;
       iter += 1;
     }
     steps += 1;
-    const packed = renorm(dx, dy, dcx, dcy, e, float32);
+    const packed = renormDelta(dx, dy, e, float32, round);
     dx = packed.dx;
     dy = packed.dy;
-    dcx = packed.dcx;
-    dcy = packed.dcy;
     e = packed.e;
     if (m > last) m = last;
     const zx = orbit[m * 2];
     const zy = orbit[m * 2 + 1];
     const close = e >= (float32 ? -60 : -900);
-    const ws = float32 ? (close ? exp2f(e) : 0) : (close ? 2 ** e : 0);
+    const ws = close ? pow2(e, float32) : 0;
     const wx = float32 ? Math.fround(Math.fround(zx) + Math.fround(dx * ws)) : zx + dx * ws;
     const wy = float32 ? Math.fround(Math.fround(zy) + Math.fround(dy * ws)) : zy + dy * ws;
     if ((close ? wx * wx + wy * wy : zx * zx + zy * zy) > 4) return finish(iter);
     const ranOut = m >= last;
     const nearer = close && wx * wx + wy * wy < (dx * dx + dy * dy) * ws * ws;
     if (ranOut || nearer) {
-      const span = float32 ? exp2f(e) : 2 ** e;
-      const worldX = float32 ? Math.fround(Math.fround(zx) + Math.fround(dx * span)) : zx + dx * (2 ** e);
-      const worldY = float32 ? Math.fround(Math.fround(zy) + Math.fround(dy * span)) : zy + dy * (2 ** e);
-      const size = Math.hypot(worldX, worldY);
-      const nextE = Math.floor(Math.log2(Math.max(size, 1e-300)));
-      const down = float32 ? exp2f(e - nextE) : 2 ** (e - nextE);
-      const up = float32 ? exp2f(-nextE) : 2 ** -nextE;
-      dx = round(worldX * up);
-      dy = round(worldY * up);
-      dcx = round(dcx * down);
-      dcy = round(dcy * down);
-      e = nextE;
+      if (!close) {
+        const zmag = Math.hypot(zx, zy);
+        if (zmag > 0) {
+          const we = Math.floor(Math.log2(zmag));
+          const up = pow2(-we, float32);
+          dx = round(zx * up);
+          dy = round(zy * up);
+          e = we;
+        }
+      } else {
+        const size = Math.hypot(wx, wy);
+        const floor = float32 ? 2 ** -126 : 2 ** -1022;
+        const nextE = Math.floor(Math.log2(Math.max(size, floor)));
+        const up = pow2(-nextE, float32);
+        dx = round(wx * up);
+        dy = round(wy * up);
+        e = nextE;
+      }
       m = 0;
       blockIndex = 0;
     }
@@ -486,11 +567,19 @@ export function scaledEscape(reference, ux, uy, maxIter, options = {}) {
   return finish(iter);
 }
 
-/** scale = mant * 2^exp, with mant in [1, 2). */
-export function scaleParts(scale) {
+/**
+ * scale = mant * 2^exp, with mant in [1, 2).
+ * An explicit exponent is used when the width itself would overflow or underflow a float.
+ */
+export function scaleParts(scale, exp) {
+  if (Number.isInteger(exp)) {
+    const mant = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    return { mant, exp };
+  }
   if (!(scale > 0) || !Number.isFinite(scale)) return { mant: 1, exp: 0 };
-  const exp = Math.floor(Math.log2(scale));
-  return { mant: scale * 2 ** -exp, exp };
+  const e = Math.floor(Math.log2(scale));
+  const inv = pow2(-e, false);
+  return { mant: inv === 0 ? 1 : scale * inv, exp: e };
 }
 
 /**

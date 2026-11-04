@@ -1,4 +1,5 @@
 import { renderPart } from "./escape-worker.js";
+import { scaleLog } from "./fractal-view.js";
 
 const CHUNK_ROWS = 80;
 
@@ -10,9 +11,9 @@ let pending = null;
 
 /** A zoom-out replaces a closer plate already on the workers. Zooming in keeps its place in line. */
 function widerView(next, current) {
-  const from = current?.view?.scale;
-  const to = next?.view?.scale;
-  return Number.isFinite(from) && Number.isFinite(to) && to > from * 1.08;
+  const from = scaleLog(current?.view);
+  const to = scaleLog(next?.view);
+  return Number.isFinite(from) && Number.isFinite(to) && to > from + Math.log2(1.08);
 }
 
 function poolSize() {

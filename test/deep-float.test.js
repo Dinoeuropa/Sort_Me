@@ -9,6 +9,8 @@ import {
   isSeahorseCenter,
   seahorseOrbit,
   seahorsePoint,
+  seahorseOffsetIterations,
+  SEAHORSE_FLOOR_EXP,
   scaledEscape,
 } from "../src/deep-float.js";
 
@@ -64,6 +66,25 @@ test("linear blocks keep the same escape time and fit in one shader pass", () =>
   const rounded = scaledEscape(orbit, 1e-40, 0, 20000, { float32: true });
   const exact = scaledEscape(orbit, 1e-40, 0, 20000, { blocks: false });
   assert.ok(Math.abs(rounded - exact) <= 2, `float32 ${rounded} vs ${exact}`);
+});
+
+test("a floatexp offset past the float64 wall matches fixed-point iteration", () => {
+  const exp = SEAHORSE_FLOOR_EXP;
+  assert.ok(exp <= -1040);
+  assert.ok(exp < -1022);
+  const orbit = seahorseOrbit(131072);
+  const direct = seahorseOffsetIterations(exp, 1, 131072);
+  const blocked = scaledEscape(orbit, 1, 0, 131072, { exp, trace: true });
+  const rounded = scaledEscape(orbit, 1, 0, 131072, { exp, float32: true, trace: true });
+  assert.ok(direct > 16384 && direct < 131072, `direct escape ${direct}`);
+  assert.ok(Math.abs(blocked.iter - direct) <= 1, `blocks ${blocked.iter} vs ${direct}`);
+  assert.ok(blocked.steps < 16384, `shader steps ${blocked.steps}`);
+  assert.ok(Math.abs(rounded.iter - direct) <= 1, `float32 ${rounded.iter} vs ${direct}`);
+  assert.ok(rounded.steps < 16384, `float32 steps ${rounded.steps}`);
+  const other = seahorseOffsetIterations(exp, 1.5, 131072);
+  assert.notEqual(other, direct);
+  const otherScaled = scaledEscape(orbit, 1.5, 0, 131072, { exp });
+  assert.notEqual(otherScaled, blocked.iter);
 });
 
 test("the live camera's double-double is the refined seahorse center", () => {
