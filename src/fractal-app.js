@@ -2,6 +2,7 @@ import katex from "../vendor/katex/katex.js";
 import {
   FRACTALS,
   autoZoomFloor,
+  autoZoomFloorExp,
   autoZoomTarget,
   buildGeometry,
   constructionOrder,
@@ -51,6 +52,9 @@ import {
   plateFrame,
   plateMargin,
   plateRasterEdge,
+  scaleLess,
+  scaleLog,
+  scaleRatio,
   pointBudget,
   gpuDepthMode,
   rasterSize,
@@ -246,6 +250,7 @@ function viewedPreset() {
     centerX: state.view.centerX,
     centerY: state.view.centerY,
     scale: state.view.scale,
+    ...(Number.isInteger(state.view.scaleExp) ? { scaleExp: state.view.scaleExp } : {}),
   };
 }
 
@@ -918,10 +923,16 @@ function isReactive(id = state.fractalId) {
 }
 
 function formatMag(mag) {
-  if (!Number.isFinite(mag) || mag < 1.05) return "1×";
-  if (mag >= 1e9) {
-    const power = Math.floor(Math.log10(mag));
-    return `${(mag / 10 ** power).toFixed(1)}e${power}×`;
+  let log10 = Number.NaN;
+  if (Number.isFinite(mag) && mag > 0) log10 = Math.log10(mag);
+  else if (mag === Infinity && state.home && state.view && currentFractal().kind === "escape") {
+    log10 = (scaleLog(state.home) - scaleLog(state.view)) * Math.log10(2);
+  }
+  if (!(log10 > Math.log10(1.05))) return "1×";
+  if (log10 >= 9) {
+    const power = Math.floor(log10);
+    const digits = 10 ** (log10 - power);
+    return `${digits.toFixed(1)}e${power}×`;
   }
   if (mag >= 1e6) return `${(mag / 1e6).toFixed(mag >= 1e7 ? 0 : 1)}M×`;
   if (mag >= 10000) return `${(mag / 1000).toFixed(1)}k×`;
@@ -1317,6 +1328,8 @@ function renderJob(view = pictureView() || state.view) {
     framed.centerX = view.centerX;
     framed.centerY = view.centerY;
     framed.scale = view.scale;
+    if (Number.isInteger(view.scaleExp)) framed.scaleExp = view.scaleExp;
+    else delete framed.scaleExp;
     framed.flipY = Boolean(view.flipY);
     if (hasDeepCenter(view)) {
       framed.centerXLo = view.centerXLo || 0;
@@ -1377,16 +1390,17 @@ function timeGpu(width, height, cap, paint) {
 function gpuPaletteWindow(job, width, height, cap, moving) {
   const preset = job.preset;
   const scene = [job.fractalId, preset.cx, preset.cy, preset.px, preset.py, width, height].join(":");
-  const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
+  const log = scaleLog(preset);
+  const depth = Math.min(1, Math.max(0, -log * Math.log10(2) / 2));
   if (!(depth > 0)) {
     paletteProbe = null;
     paletteFit.scene = scene;
     paletteFit.shown = { floor: 0, top: cap };
     return { floor: 0, top: null };
   }
-  const deepMandelbrot = job.fractalId === "mandelbrot" && preset.scale < 1e-30;
+  const deepMandelbrot = job.fractalId === "mandelbrot" && log < Math.log2(1e-30);
   const slices = moving || deepMandelbrot ? 1 : 4;
-  const key = [scene, Math.round(Math.log2(preset.scale) * slices)].join(":");
+  const key = [scene, Math.round(log * slices), preset.scaleExp ?? ""].join(":");
   if (paletteFit.key !== key) {
     paletteFit.key = key;
     if (moving) {
@@ -1444,6 +1458,7 @@ function dropGpuWarp() {
 function sameGpuView(a, b) {
   if (!a || !b) return false;
   return a.scale === b.scale
+    && (a.scaleExp || 0) === (b.scaleExp || 0)
     && a.centerX === b.centerX
     && a.centerY === b.centerY
     && (a.centerXLo || 0) === (b.centerXLo || 0)
@@ -1512,7 +1527,7 @@ function paintGpuFrame(view, box, settle = false) {
     : motionRaster(box);
   if (
     state.gpuPan
-    && (state.gpuPan.width !== dest.width || state.gpuPan.height !== dest.height || state.gpuPan.view.scale !== view.scale)
+    && (state.gpuPan.width !== dest.width || state.gpuPan.height !== dest.height || state.gpuPan.view.scale !== view.scale || (state.gpuPan.view.scaleExp || 0) !== (view.scaleExp || 0))
   ) {
     state.gpuPan = null;
   }
@@ -1524,7 +1539,7 @@ function paintGpuFrame(view, box, settle = false) {
   }
   const job = renderJob(view);
   const key = [
-    job.fractalId, view.centerX, view.centerXLo, view.centerY, view.centerYLo, view.scale,
+    job.fractalId, view.centerX, view.centerXLo, view.centerY, view.centerYLo, view.scale, view.scaleExp,
     job.preset.cx, job.preset.cy, job.preset.px, job.preset.py, cap, state.paletteId, dest.width, dest.height,
   ].join(":");
   const repaint = !(settle && state.gpuKey === key && (refine.key === key || state.gpuShare < 1));
@@ -1985,7 +2000,12 @@ function startAutoZoom() {
   state.autoDeep = null;
   state.autoZoom = true;
   const job = renderJob(state.view);
-  state.autoPath = autoZoomPath(state.view, autoZoomTarget(job.fractalId, job.preset), autoZoomFloor(job.fractalId, job.preset));
+  state.autoPath = autoZoomPath(
+    state.view,
+    autoZoomTarget(job.fractalId, job.preset),
+    autoZoomFloor(job.fractalId, job.preset),
+    autoZoomFloorExp(job.fractalId, job.preset),
+  );
   state.autoOctave = 0;
   state.autoFade = null;
   state.plateEdge = Math.min(PLATE_EDGE_MAX, plateRasterEdge(escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), 1)));
@@ -2070,8 +2090,8 @@ function ensureAutoPlate(token, box) {
   const samples = [];
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(path, from + ((to - from) * i) / 4));
   const cover = coverViews(samples, aspect, plateMargin(from));
-  const deepest = samples[samples.length - 1].scale;
-  const cap = escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), (state.home?.scale || deepest) / deepest);
+  const deepest = samples[samples.length - 1];
+  const cap = escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), scaleRatio(state.home || deepest, deepest));
   const edge = Math.min(state.plateEdge || plateRasterEdge(cap), PLATE_EDGE_MAX);
   const raster = rasterSize(box.width, box.height, box.dpr, true, edge);
   const view = { ...cover, flipY: Boolean(path.start.flipY) };
@@ -2118,7 +2138,7 @@ function adoptAutoPlate(result, token) {
     if (!plateCovers(finished, state.view, aspect, COVER_SLACK)) return;
     state.shownJob = result.jobId;
     const plate = { canvas: snap, view: finished, born: performance.now() };
-    const plates = state.autoPlates.filter((item) => item.view.scale > finished.scale);
+    const plates = state.autoPlates.filter((item) => scaleLess(finished, item.view));
     plates.push(plate);
     while (plates.length > AUTO_PLATES_KEPT) {
       const index = plates[0] === state.autoStart ? 1 : 0;
@@ -2311,7 +2331,7 @@ function queueGpuZoom(box) {
   const cap = escapeIterationCap(
     state.fractalId,
     state.baseDepth || depthValue(),
-    state.home.scale / Math.max(1e-300, samples[samples.length - 1].scale),
+    scaleRatio(state.home, samples[samples.length - 1]),
   );
   const depth = gpuDepthMode(cover, raster.height);
   if (!depth || (depth !== "deep" && cap > GPU_ITER_LIMIT)) return;
@@ -2354,7 +2374,7 @@ function placeAutoPlate(snap, view, cap) {
   }
   const kept = [];
   for (const item of state.autoPlates) {
-    if (item === state.autoStart || item.view.scale > finished.scale) kept.push(item);
+    if (item === state.autoStart || scaleLess(finished, item.view)) kept.push(item);
     else retirePlate(item);
   }
   kept.push(plate);

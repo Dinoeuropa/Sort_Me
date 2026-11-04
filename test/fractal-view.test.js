@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoZoomFloor, autoZoomTarget, boundaryAnchor, escapeBand, escapeValue, planePoint, reliefCenter } from "../src/fractals.js";
+import { autoZoomFloor, autoZoomFloorExp, autoZoomTarget, boundaryAnchor, escapeBand, escapeValue, planePoint, presetById, reliefCenter } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
   AUTO_ZOOM_STEP,
@@ -28,6 +28,7 @@ import {
   DEEP_ITERATION_LIMIT,
   escapeIterationCap,
   gpuDepthMode,
+  scaleLog,
   ITERATION_LIMIT,
   iterationCap,
   FRAME_PACE_MS,
@@ -307,6 +308,8 @@ test("the shader draws plain coordinates while they hold and offsets from a refe
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "deep");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-40 }, 800), "deep");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-320 }, 800), null);
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1.5, scaleExp: -1040 }, 800), "deep");
+  assert.equal(gpuDepthMode({ centerX: -0.75, centerY: 0.1, scale: 1, scaleExp: -1040 }, 800), null);
   assert.equal(gpuDepthMode(null, 800), null);
 });
 
@@ -482,7 +485,49 @@ test("each deep-zoom frame multiplies magnification by 3 percent, including past
   assert.equal(past.done, true);
   assert.ok(past.octave >= path.maxOctave);
   const beyond = autoZoomView(path, path.maxOctave + 1);
-  assert.ok(Math.abs(beyond.scale - autoZoomView(path, path.maxOctave).scale / 2) < 1e-12);
+  const floorView = autoZoomView(path, path.maxOctave);
+  assert.ok(Math.abs(scaleLog(floorView) - scaleLog(beyond) - 1) < 1e-9);
+});
+
+test("the seahorse dive carries its width past the float64 exponent wall", () => {
+  const start = { ...presetById("mandelbrot", "seahorse"), flipY: false };
+  const target = autoZoomTarget("mandelbrot", start);
+  assert.equal(autoZoomFloor("mandelbrot"), 1e-12);
+  assert.equal(autoZoomFloorExp("mandelbrot", start), -1040);
+  assert.equal(autoZoomFloorExp("mandelbrot", {}), null);
+  const plain = autoZoomPath(start, autoZoomTarget("mandelbrot", {}), autoZoomFloor("mandelbrot"));
+  assert.ok(plain.maxOctave > 35 && plain.maxOctave < 48, `classic octave ${plain.maxOctave}`);
+  const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot"), autoZoomFloorExp("mandelbrot", start));
+  const bottom = autoZoomView(path, path.maxOctave);
+  assert.ok(bottom.scaleExp < -1022, `exponent ${bottom.scaleExp}`);
+  assert.ok(bottom.scale >= 1 && bottom.scale < 2, `mantissa ${bottom.scale}`);
+  const deepOctave = path.maxOctave - 2;
+  const here = autoZoomView(path, deepOctave);
+  const next = autoZoomView(path, deepOctave + Math.log2(1.03));
+  assert.ok(here.scale > 0 && next.scale > 0);
+  assert.ok(Math.abs(scaleLog(here) - scaleLog(next) - Math.log2(1.03)) < 1e-9);
+  assert.equal(gpuDepthMode(bottom, 800), "deep");
+});
+
+test("a floatexp plate still covers the camera and blits to the frame", () => {
+  const center = {
+    centerX: -0.7436965465439123,
+    centerXLo: 1.6423472316984958e-17,
+    centerY: 0.13172167175968114,
+    centerYLo: 1.0660999617601176e-17,
+    flipY: false,
+  };
+  const here = { ...center, scale: 1.4, scaleExp: -1000 };
+  const ahead = { ...center, scale: 1.2, scaleExp: -1002 };
+  const cover = coverViews([here, ahead], 16 / 9, 1.08);
+  assert.equal(Number.isInteger(cover.scaleExp), true);
+  assert.ok(scaleLog(cover) > scaleLog(here));
+  assert.equal(plateCovers({ ...cover, width: 1600, height: 900 }, here, 16 / 9), true);
+  assert.equal(plateCovers({ ...cover, width: 1600, height: 900 }, ahead, 16 / 9), true);
+  const blit = escapeSourceBlit({ ...here, width: 800, height: 450 }, here, 800, 450);
+  assert.ok(blit);
+  assert.ok(Math.abs(blit.dw - 800) < 1e-6);
+  assert.ok(Math.abs(blit.dh - 450) < 1e-6);
 });
 
 test("auto zoom starts from rest and the start is a smooth ramp", () => {

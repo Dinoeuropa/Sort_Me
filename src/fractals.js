@@ -1,4 +1,5 @@
-import { DEEP_ITERATION_LIMIT, isSeahorseCenter, scaledEscape, seahorseOrbit } from "./deep-float.js";
+import { DEEP_ITERATION_LIMIT, SEAHORSE_CENTER, SEAHORSE_FLOOR_EXP, isSeahorseCenter, scaledEscape, seahorseOrbit } from "./deep-float.js";
+import { scaleLog } from "./fractal-view.js";
 import { paletteWindow } from "./palettes.js";
 import {
   ddAdd,
@@ -411,8 +412,12 @@ export function escapeBand(fractalId, preset, width, height, maxIter, y0, rowCou
 const NEWTON_DEEP_STEPS = 48;
 
 /** The reference orbit a deep plate's pixels are offsets from, at the plate's double-double center. */
+function deepMandelbrotView(preset) {
+  return isSeahorseCenter(preset) && scaleLog(preset) < Math.log2(1e-30);
+}
+
 function deepReference(fractalId, preset, cap) {
-  if (fractalId === "mandelbrot" && isSeahorseCenter(preset) && preset.scale < 1e-30) {
+  if (fractalId === "mandelbrot" && deepMandelbrotView(preset)) {
     return seahorseOrbit(Math.min(DEEP_ITERATION_LIMIT, Math.max(1, cap | 0)));
   }
   const x = preset.centerX;
@@ -451,7 +456,11 @@ function deepSampler(fractalId, preset, cap, spanX, spanY, width) {
     return (dx, dy) => newtonDeep(preset, dx, dy, cap, px, py, pixel);
   }
   const reference = deepReference(fractalId, preset, cap);
-  if (reference && reference.deep) return (dx, dy) => scaledEscape(reference, dx, dy, cap);
+  if (reference && reference.deep) {
+    const exp = preset.scaleExp;
+    if (Number.isInteger(exp)) return (dx, dy) => scaledEscape(reference, dx, dy, cap, { exp });
+    return (dx, dy) => scaledEscape(reference, dx, dy, cap);
+  }
   const skip = seriesSkip(reference, Math.hypot(spanX, spanY) / 2);
   return (dx, dy) => perturbIterations(reference, dx, dy, cap, skip);
 }
@@ -491,12 +500,12 @@ let cachedWindow = null;
  * the picture; a plate walks the probe to the end.
  */
 export function openPaletteProbe(fractalId, preset, width, height, maxIter, grid) {
-  const deepMandelbrot = fractalId === "mandelbrot" && isSeahorseCenter(preset) && preset.scale < 1e-30;
+  const deepMandelbrot = fractalId === "mandelbrot" && deepMandelbrotView(preset);
   const cap = deepMandelbrot
     ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
     : clampIter(maxIter);
   if (!(width > 0) || !(height > 0)) return null;
-  const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
+  const depth = Math.min(1, Math.max(0, -scaleLog(preset) * Math.log10(2) / 2));
   if (!(depth > 0)) return null;
   const deep = hasDeepCenter(preset);
   const spanY = preset.scale;
@@ -534,15 +543,15 @@ export function openPaletteProbe(fractalId, preset, width, height, maxIter, grid
  * colored exactly like the picture it left. Every band of a plate asks, so the last answer is kept.
  */
 export function paletteRange(fractalId, preset, width, height, maxIter) {
-  const deepMandelbrot = fractalId === "mandelbrot" && isSeahorseCenter(preset) && preset.scale < 1e-30;
+  const deepMandelbrot = fractalId === "mandelbrot" && deepMandelbrotView(preset);
   const cap = deepMandelbrot
     ? Math.min(DEEP_ITERATION_LIMIT, Math.max(1, Math.floor(maxIter)))
     : clampIter(maxIter);
   if (!(width > 0) || !(height > 0)) return { floor: 0, top: cap };
-  const depth = Math.min(1, Math.max(0, -Math.log10(preset.scale) / 2));
+  const depth = Math.min(1, Math.max(0, -scaleLog(preset) * Math.log10(2) / 2));
   if (!(depth > 0)) return { floor: 0, top: cap };
   const key = [
-    fractalId, preset.centerX, preset.centerXLo, preset.centerY, preset.centerYLo, preset.scale,
+    fractalId, preset.centerX, preset.centerXLo, preset.centerY, preset.centerYLo, preset.scale, preset.scaleExp,
     preset.cx, preset.cy, preset.px, preset.py, width, height, cap,
   ].join(":");
   if (cachedWindow && cachedWindow.key === key) return cachedWindow.window;
@@ -650,7 +659,10 @@ export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CA
  * point ready, so it searches for an edge near the middle of the picture in plain doubles.
  */
 export function autoZoomTarget(fractalId, preset) {
-  if (fractalId === "mandelbrot") return { ...MINIBROT_EDGE };
+  if (fractalId === "mandelbrot") {
+    if (preset && preset.id === "seahorse") return { ...SEAHORSE_CENTER };
+    return { ...MINIBROT_EDGE };
+  }
   if (fractalId === "julia") return ddJuliaBeta(preset.cx || 0, preset.cy || 0);
   if (fractalId === "newton") return ddNewtonPole(preset.px || 0, preset.py || 0);
   if ("cx" in preset || "cy" in preset) {
@@ -672,6 +684,12 @@ export function autoZoomFloor(fractalId, preset = {}) {
   if (fractalId === "burning" && ("cx" in preset || "cy" in preset)) return 2.5e-5;
   if (fractalId === "mandelbrot") return 1e-12;
   return 1e-28;
+}
+
+/** Exponent floor for a dive that carries its width as a mantissa. Null keeps the plain float floor. */
+export function autoZoomFloorExp(fractalId, preset = {}) {
+  if (fractalId === "mandelbrot" && preset.id === "seahorse") return SEAHORSE_FLOOR_EXP;
+  return null;
 }
 
 /**

@@ -214,8 +214,10 @@ test("auto zoom is hidden for fractals that cannot glide and stays available whe
 test("a deep GPU dive refits its palette each quarter octave and eases into it", () => {
   const fit = fractalApp.match(/function gpuPaletteWindow\([^]*?\n\}/);
   assert.ok(fit, "gpuPaletteWindow is in the page");
-  const key = fit[0].match(/\[([^\]]*Math\.log2\(preset\.scale\)[^\]]*)\]/);
+  const key = fit[0].match(/const key = \[([^\]]+)\]/);
   assert.ok(key, "the refit key holds the quarter octave");
+  assert.match(fit[0], /scaleLog\(preset\)/);
+  assert.match(key[1], /log \* slices/);
   assert.doesNotMatch(key[1], /\bcap\b/, "the cap rises every frame of a dive, so it must not force a refit");
   assert.match(fit[0], /easeWindow\(/);
 });
