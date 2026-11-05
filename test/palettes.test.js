@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { buildGeometry, escapeBand, presetById } from "../src/fractals.js";
 import {
@@ -47,16 +48,32 @@ test("escape colors stay in range, share an interior, and separate iterations", 
   }
 });
 
+function siteColor(name) {
+  const css = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+  const hex = css.match(new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`))[1];
+  return [0, 2, 4].map((start) => Number.parseInt(hex.slice(start, start + 2), 16));
+}
+
+test("classic stops are the site background, brass, coral, and text", () => {
+  assert.deepEqual(colorSample("classic", 0, 100), siteColor("bg"));
+  assert.deepEqual(colorSample("classic", 35, 100), siteColor("brass"));
+  assert.deepEqual(colorSample("classic", 75, 100), siteColor("coral"));
+  const end = colorSample("classic", 99, 100);
+  const text = siteColor("text");
+  const apart = Math.hypot(end[0] - text[0], end[1] - text[1], end[2] - text[2]);
+  assert.ok(apart < 40, `the boundary is ${apart} from the site text`);
+});
+
 test("classic walks dark, brass, coral, then cream, without pulsing", () => {
   const lum = (color) => 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
   const apart = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-  const brass = [156, 120, 42];
-  const coral = [168, 70, 48];
+  const brass = siteColor("brass");
+  const coral = siteColor("coral");
   const cap = 4800;
   assert.ok(apart(colorSample("classic", 0.35 * cap, cap), brass) <= 1);
   assert.ok(apart(colorSample("classic", 0.75 * cap, cap), coral) <= 1);
   assert.ok(colorSample("classic", 0.2 * cap, cap)[1] > 70);
-  assert.ok(lum(brass) < 130 && lum(coral) < 130, "the bright stops stay dim enough to read");
+  assert.ok(lum(brass) > 160 && lum(coral) > 120, "the site brass and coral are the bright stops");
 
   for (const max of [48, 160, 4800]) {
     let reversals = 0;
@@ -90,8 +107,8 @@ test("classic walks dark, brass, coral, then cream, without pulsing", () => {
   const edge = colorSample("classic", Math.round(max * 0.85), max);
   assert.ok(apart(field, edge) > 35, `field and boundary are ${apart(field, edge)} apart`);
   const end = colorSample("classic", max - 1, max);
-  assert.ok(lum(end) < 130, `the last shade is ${lum(end)}, still bright enough to wash the center out`);
-  assert.ok(lum(field) < 130, `the field is ${lum(field)}`);
+  assert.ok(lum(end) > lum(coral), `the last shade is ${lum(end)}, brighter than coral`);
+  assert.ok(lum(field) > 80, `the field is ${lum(field)}`);
   assert.notDeepEqual(colorSample("classic", Math.round(max * 0.05), max), edge);
 });
 

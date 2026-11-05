@@ -11,7 +11,7 @@ export const PALETTES = [
   {
     id: "classic",
     name: "Classic",
-    blurb: "Brass on a dark ground, through coral, to a warm boundary.",
+    blurb: "The site brass and coral, from the page background to the page text.",
     paint: classicPaint,
   },
   {
@@ -483,14 +483,13 @@ function rgb(channels) {
 
 function classicPaint(iter, max) {
   const t = Math.min(1, iter / Math.max(1, max));
-  const dark = [24, 20, 16];
-  const brass = [156, 120, 42];
-  const coral = [168, 70, 48];
-  const cream = [112, 88, 72];
-  // The original classic inks, in their original order. The sine that striped
-  // them is gone, so neighboring iterations stay close and a zoom cannot flash.
-  // Coral is darker than brass, so luminance dips once on that leg, then rises
-  // into a warm boundary that stays readable over the center of a deep picture.
+  // styles.css: --bg, --brass, --coral, --text. The same hexes as the page.
+  const dark = [18, 16, 14];
+  const brass = [226, 182, 87];
+  const coral = [239, 111, 76];
+  const cream = [246, 239, 228];
+  // Neighboring iterations stay close, so a zoom cannot flash. Coral is darker
+  // than brass, so luminance dips once on that leg, then rises into the page text.
   if (t < 0.35) return mix(dark, brass, t / 0.35);
   if (t < 0.75) return mix(brass, coral, (t - 0.35) / 0.4);
   return mix(coral, cream, (t - 0.75) / 0.25);
