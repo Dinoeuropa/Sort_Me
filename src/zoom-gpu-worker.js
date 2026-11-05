@@ -1,5 +1,6 @@
+import { seahorseOrbit } from "./deep-float.js";
 import { paintGpuEscape, useGpuSurface } from "./escape-gpu.js";
-import { nextZoomStrip } from "./fractal-view.js";
+import { ORBIT_SLICE, nextZoomStrip } from "./fractal-view.js";
 
 let canvas = null;
 let busy = false;
@@ -11,6 +12,21 @@ let stripMs = 0;
 
 function yieldThread() {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Extend the seahorse path a slice at a time before any pixel strip waits on it. */
+async function extendDeepOrbit(paint) {
+  if (paint.depth !== "deep") return;
+  const cap = paint.cap | 0;
+  if (!(cap > 0)) return;
+  let built = 0;
+  while (built < cap) {
+    const ref = seahorseOrbit(Math.min(cap, built + ORBIT_SLICE));
+    const reached = Math.max(0, (ref.count || 1) - 1);
+    if (!(reached > built)) return;
+    built = reached;
+    if (built < cap) await yieldThread();
+  }
 }
 
 async function renderFrame(message) {
@@ -25,6 +41,7 @@ async function renderFrame(message) {
     const ctx = acc.getContext("2d");
     if (!ctx) throw new Error("no 2d");
     ctx.imageSmoothingEnabled = false;
+    await extendDeepOrbit(paint);
     let x = 0;
     let y = 0;
     let plan = nextZoomStrip(width, height, paint.cap | 0, strip, stripMs);

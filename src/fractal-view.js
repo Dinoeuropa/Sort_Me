@@ -334,31 +334,50 @@ export function gpuZoomPlan({ hasSnapshot, pending, ready, sameView }) {
  */
 export const ZOOM_STRIP_MS = 12;
 
-/** Columns kept when a single row is still slower than a refresh. */
-const ZOOM_STRIP_COLS = 16;
+/** Columns kept when a single row is still slower than a refresh. One pixel is the floor. */
+const ZOOM_STRIP_COLS = 1;
 
 /** Iterations added to the seahorse orbit on one plate. A larger jump waits for the next plate. */
 export const ORBIT_STEP = 2048;
 
+/** Orbit iterations extended on one turn, so the build stays inside a refresh. */
+export const ORBIT_SLICE = 512;
+
+/**
+ * A strip of `cells` pixels, kept short in rows so a slow strip does not span the window.
+ */
+function pacedStrip(rows, cols, width, height, factor) {
+  const cells = Math.max(1, Math.floor((rows * cols) / Math.max(factor, 1)));
+  if (cells >= width * height) return { rows: height, cols: width };
+  if (cells <= width) return { rows: 1, cols: cells };
+  const band = Math.min(height, Math.ceil(cells / width));
+  return { rows: band, cols: Math.min(width, Math.ceil(cells / band)) };
+}
+
 /**
  * Rows and columns for the next strip of a zoom plate.
- * A new plate, or one whose iteration cap jumped, starts a few rows wide.
- * A strip that finished quickly adds two rows, or widens a narrowed row.
- * A strip that ran past one refresh halves, and a single slow row halves its columns.
+ * A new plate starts a few rows wide. A strip that finished quickly adds two rows,
+ * or widens a narrowed row. A strip that ran past one refresh halves, down to one pixel.
+ * A jump in the iteration count shrinks that same strip so the heavier pixels still fit.
  */
 export function nextZoomStrip(width, height, cap, previous = {}, lastMs = 0) {
   const w = Math.max(1, width | 0);
   const h = Math.max(1, height | 0);
   const prevRows = previous.rows | 0;
   const prevCols = previous.cols | 0;
-  const reset = !(prevRows > 0) || (cap | 0) > ((previous.cap | 0) || 0) * 1.15;
-  if (reset) {
+  if (!(prevRows > 0)) {
     const n = cap | 0;
     const rows = n > 3200 ? 2 : n > 1600 ? 4 : 8;
     return { rows: Math.max(1, Math.min(h, rows)), cols: w };
   }
   let rows = Math.max(1, Math.min(h, prevRows));
   let cols = Math.max(1, Math.min(w, prevCols > 0 ? prevCols : w));
+  const prevCap = previous.cap | 0;
+  const growth = prevCap > 0 ? (cap | 0) / prevCap : 1;
+  if (growth > 1.15) {
+    const predicted = (lastMs > 0 ? lastMs : ZOOM_STRIP_MS) * growth;
+    if (predicted > ZOOM_STRIP_MS) return pacedStrip(rows, cols, w, h, predicted / ZOOM_STRIP_MS);
+  }
   if (lastMs > ZOOM_STRIP_MS) {
     if (rows > 1) rows >>= 1;
     else cols = Math.max(ZOOM_STRIP_COLS, cols >> 1);
@@ -636,6 +655,30 @@ export const FRAME_PACE_MS = 20;
  * not how long the page may freeze.
  */
 export const ZOOM_PLATE_MS = 400;
+
+/**
+ * Largest enlargement of the picture already on screen while the next full-size one is drawn.
+ * Two times is one octave, about the stretch of a 400ms picture at one 3% step per refresh.
+ */
+export const ZOOM_STRETCH_MAX = 2;
+
+/** Most 3% steps one on-time frame may take. Four steps are about 12.6% closer. */
+export const ZOOM_STEP_CAP = 4;
+
+/**
+ * How many 3% steps this frame may take.
+ * The picture stays within ZOOM_STRETCH_MAX until the next full-size picture arrives.
+ * A frame later than one refresh takes at most one step, so a hitch does not skip ahead.
+ */
+export function zoomFrameSteps(frameMs, plateMs, budgetMs = FRAME_PACE_MS) {
+  const frame = frameMs > 0 && frameMs <= budgetMs ? frameMs : budgetMs;
+  const plate = plateMs > 0 ? plateMs : ZOOM_PLATE_MS;
+  const room = Math.log(ZOOM_STRETCH_MAX) / Math.log(AUTO_ZOOM_STEP);
+  const steps = (room * frame) / plate;
+  const paced = Math.min(ZOOM_STEP_CAP, Math.max(steps, 1 / ZOOM_STEP_CAP));
+  if (frameMs > budgetMs) return Math.min(1, paced);
+  return paced;
+}
 
 /**
  * Next share of a moving picture from how long the last frame actually took.

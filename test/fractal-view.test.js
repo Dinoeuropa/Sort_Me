@@ -40,6 +40,9 @@ import {
   motionScale,
   zoomShareNext,
   nextZoomStrip,
+  zoomFrameSteps,
+  ZOOM_STEP_CAP,
+  ZOOM_STRETCH_MAX,
   pacedOrbitCap,
   incomingLevelFade,
   levelBlend,
@@ -758,7 +761,7 @@ test("a zoom plate starts in a short band so one finish cannot lock the page", (
   assert.equal(nextZoomBandRows(2160, 400, 8, 400, 10), 8);
   assert.equal(nextZoomBandRows(2160, 400, 64, 400, 16), 32);
   assert.equal(nextZoomBandRows(2160, 400, 64, 400, 80), 32);
-  assert.equal(nextZoomBandRows(2160, 500, 128, 400, 10), 8);
+  assert.equal(nextZoomBandRows(2160, 500, 128, 400, 10), 123);
   assert.equal(nextZoomBandRows(4, 100, 0, 0, 0), 4);
   assert.equal(nextZoomBandRows(2160, 400, 1, 400, 40), 1);
 });
@@ -775,9 +778,26 @@ test("a strip that is still slow at one row narrows its columns instead of doubl
   assert.equal(widen.rows, 1);
   assert.equal(widen.cols, 500);
   const floor = nextZoomStrip(800, 400, 9000, { rows: 1, cols: 16, cap: 9000 }, 40);
-  assert.deepEqual(floor, { rows: 1, cols: 16 });
+  assert.deepEqual(floor, { rows: 1, cols: 8 });
+  const narrower = nextZoomStrip(800, 400, 9000, { rows: 1, cols: 2, cap: 9000 }, 40);
+  assert.deepEqual(narrower, { rows: 1, cols: 1 });
+  const stayed = nextZoomStrip(800, 400, 9000, { rows: 1, cols: 1, cap: 9000 }, 40);
+  assert.deepEqual(stayed, { rows: 1, cols: 1 });
   const reset = nextZoomStrip(800, 400, 5000, { rows: 1, cols: 32, cap: 200 }, 4);
-  assert.deepEqual(reset, { rows: 2, cols: 800 });
+  assert.deepEqual(reset, { rows: 1, cols: 3 });
+});
+
+test("an on-time frame zooms as far as a full picture can refresh before it stretches twice", () => {
+  assert.equal(ZOOM_STRETCH_MAX, 2);
+  assert.equal(ZOOM_STEP_CAP, 4);
+  assert.equal(zoomFrameSteps(16.7, 40), ZOOM_STEP_CAP);
+  const steady = zoomFrameSteps(16.7, ZOOM_PLATE_MS);
+  assert.ok(steady > 0.9 && steady < 1.1, `steady ${steady}`);
+  const slow = zoomFrameSteps(16.7, 2000);
+  assert.ok(slow < 0.5 && slow >= 0.25, `slow ${slow}`);
+  assert.equal(zoomFrameSteps(80, 40), 1);
+  assert.ok(zoomFrameSteps(80, 2000) <= slow);
+  assert.equal(zoomFrameSteps(16.7, 0), zoomFrameSteps(16.7, ZOOM_PLATE_MS));
 });
 
 test("the seahorse orbit cap climbs by one step when the dive asks for the rest at once", () => {
