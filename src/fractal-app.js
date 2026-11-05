@@ -324,8 +324,8 @@ function legendInk(iteration, max) {
 
 function paintLegend() {
   document.querySelector(".swatch.inside").style.background = legendInk(24, 24);
-  document.querySelector(".swatch.early").style.background = legendInk(6, 24);
-  document.querySelector(".swatch.late").style.background = legendInk(21, 24);
+  document.querySelector(".swatch.early").style.background = legendInk(7, 20);
+  document.querySelector(".swatch.late").style.background = legendInk(15, 20);
 }
 
 function renderChrome() {
