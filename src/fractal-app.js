@@ -19,7 +19,6 @@ import {
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
   COVER_SLACK,
-  FRAME_PACE_MS,
   PLATE_BLEND_MS,
   PLATE_TARGET_MS,
   advanceAutoZoom,
@@ -44,9 +43,10 @@ import {
   panRepaint,
   DRAW_RASTER_EDGE,
   PLATE_EDGE_MAX,
-  MOTION_SCALE_MIN,
-  zoomShareNext,
   pacedOrbitCap,
+  zoomFrameSteps,
+  ORBIT_SLICE,
+  ZOOM_PLATE_MS,
   pickPlate,
   plateBudget,
   plateCovers,
@@ -68,6 +68,7 @@ import {
   gpuZoomPlan,
   zoomFrameBlit,
 } from "./fractal-view.js";
+import { seahorseOrbit } from "./deep-float.js";
 import { renderEscape } from "./escape-pool.js";
 import {
   GPU_ITER_LIMIT,
@@ -207,7 +208,7 @@ const state = {
   zoomShare: 1,
   orbitReady: 0,
   zoomTook: 32,
-  zoomExpect: 32,
+  zoomExpect: ZOOM_PLATE_MS,
   zoomSerial: 0,
   zoomMisses: 0,
   zoomGpuOk: true,
@@ -1367,6 +1368,7 @@ const gpuClock = { cost: Number.NaN };
 const refine = { raf: 0, key: "" };
 const paletteFit = { key: "", window: null, scene: "", shown: null };
 let paletteProbe = null;
+let paletteTicket = 0;
 let gpuPanScratch = null;
 
 function cancelRefine() {
@@ -1434,6 +1436,38 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
     paletteFit.shown = easeWindow(paletteFit.shown, paletteFit.window);
   }
   return paletteFit.shown;
+}
+
+/** Colors for a picture that is about to be drawn. The fit already in hand is what this frame uses. */
+function zoomPalette(cap) {
+  return paletteFit.shown || { floor: 0, top: cap };
+}
+
+/**
+ * Fit the next picture's colors off the frame that moves the view.
+ * The seahorse path is extended ORBIT_SLICE iterations a turn, then the color samples run.
+ */
+function kickZoomPalette(job, width, height, cap, depth) {
+  const ticket = ++paletteTicket;
+  const goal = Math.max(1, cap | 0);
+  let built = 0;
+  const turn = () => {
+    if (ticket !== paletteTicket || !state.autoZoom) return;
+    if (depth === "deep" && built < goal) {
+      const ref = seahorseOrbit(Math.min(goal, built + ORBIT_SLICE));
+      const reached = Math.max(0, (ref.count || 1) - 1);
+      built = reached > built ? reached : goal;
+      setTimeout(turn, 0);
+      return;
+    }
+    const probe = openPaletteProbe(job.fractalId, job.preset, width, height, goal, 4);
+    if (!probe) return;
+    let fitted = null;
+    while (!(fitted = probe.step())) { /* sixteen samples, once the path exists */ }
+    paletteFit.window = fitted;
+    paletteFit.shown = fitted;
+  };
+  setTimeout(turn, 0);
 }
 
 /**
@@ -1958,7 +1992,8 @@ function haltAutoZoom() {
   state.zoomShare = 1;
   state.orbitReady = 0;
   state.zoomTook = 32;
-  state.zoomExpect = 32;
+  state.zoomExpect = ZOOM_PLATE_MS;
+  paletteTicket += 1;
   state.zoomSerial += 1;
   state.zoomMisses = 0;
   state.zoomGpuOk = true;
@@ -2039,10 +2074,10 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of deep zoom. Magnification grows by 3 percent, and only by that one step, so a
- * late refresh does not skip ahead. The picture already on screen is what moves. A new frame
- * is only copied in once the GPU has finished it, so a slow render never holds the dive.
- * Passing the deepest point fades back to the opening picture and the dive continues.
+ * One frame of deep zoom. An on-time frame takes as many 3% steps as the full-size picture
+ * can refresh before it has stretched twice. A late frame takes at most one step, so a hitch
+ * does not skip ahead. The picture already on screen is what moves. A new frame is only copied
+ * in once the GPU has finished it. Passing the deepest point fades back to the opening picture.
  */
 function stepAutoZoom(token) {
   const now = performance.now();
@@ -2051,7 +2086,9 @@ function stepAutoZoom(token) {
   state.zoomStamp = now;
   const path = state.autoPath;
   if (path && !state.autoHold && state.autoPlates.length) {
-    const next = advanceAutoZoom(path, state.autoOctave, 1);
+    const plateMs = state.zoomExpect || state.zoomTook || ZOOM_PLATE_MS;
+    const steps = zoomFrameSteps(gap, plateMs);
+    const next = advanceAutoZoom(path, state.autoOctave, steps);
     state.autoOctave = next.octave;
     if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
     if (state.autoFade) {
@@ -2082,9 +2119,11 @@ function beginAutoFade() {
 function plateLookahead() {
   const path = state.autoPath;
   if (!path) return 0;
-  const seconds = Math.max(0.05, Math.min(1.2, (state.zoomExpect || state.zoomTook || 40) / 1000));
+  const plateMs = state.zoomExpect || state.zoomTook || ZOOM_PLATE_MS;
+  const seconds = Math.max(0.05, Math.min(1.2, plateMs / 1000));
   const frameMs = Math.min(50, Math.max(8, state.zoomFrameMs || 16.7));
-  const frames = Math.max(1, (seconds * 1000) / frameMs);
+  const steps = zoomFrameSteps(frameMs, plateMs);
+  const frames = Math.max(1, (seconds * 1000) / frameMs) * steps;
   const next = advanceAutoZoom(path, state.autoOctave, frames);
   return Math.min(2, Math.max(0.05, next.octave - (Number(state.autoOctave) || 0)));
 }
@@ -2255,12 +2294,7 @@ function displayRaster(box) {
 }
 
 function zoomJobSize(box) {
-  const full = displayRaster(box);
-  const share = Math.min(1, Math.max(MOTION_SCALE_MIN, state.zoomShare || 1));
-  return {
-    width: Math.max(1, Math.round(full.width * share)),
-    height: Math.max(1, Math.round(full.height * share)),
-  };
+  return displayRaster(box);
 }
 
 function retirePlate(plate) {
@@ -2315,14 +2349,10 @@ function onZoomGpuFrame(event) {
   state.zoomMisses = 0;
   const took = Number(message.ms);
   const wall = Number(message.wall);
-  const band = Number(message.band);
-  const previous = state.zoomShare || 1;
   state.zoomTook = took > 0 ? took : state.zoomTook;
-  const pace = band > 0 ? band : state.zoomTook;
-  state.zoomShare = zoomShareNext(previous, pace, FRAME_PACE_MS);
-  const ratio = previous > 0 ? state.zoomShare / previous : 1;
+  state.zoomShare = 1;
   const elapsed = wall > 0 ? wall : state.zoomTook;
-  state.zoomExpect = Math.max(8, elapsed * ratio * ratio);
+  state.zoomExpect = Math.max(8, elapsed);
   placeAutoPlate(message.bitmap, job.view, job.cap);
 }
 
@@ -2352,7 +2382,8 @@ function queueGpuZoom(box) {
   const job = renderJob(cover);
   let paint = null;
   try {
-    const fit = gpuPaletteWindow(job, raster.width, raster.height, cap, true);
+    const fit = zoomPalette(cap);
+    kickZoomPalette(job, raster.width, raster.height, cap, depth);
     paint = {
       fractalId: job.fractalId,
       preset: job.preset,
