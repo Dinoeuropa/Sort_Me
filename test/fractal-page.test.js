@@ -286,7 +286,10 @@ test("a moving zoom reuses the snapshot and resamples it cheaply", () => {
   const draw = fractalApp.slice(fractalApp.indexOf("function drawAutoFrame"), fractalApp.indexOf("function displayRaster"));
   assert.match(draw, /imageSmoothingQuality = "low"/);
   assert.doesNotMatch(draw, /imageSmoothingQuality = "high"/);
-  assert.match(zoomWorker, /nextZoomBandRows\(/);
+  assert.match(zoomWorker, /nextZoomStrip\(/);
+  assert.match(zoomWorker, /band: slowest/);
+  assert.match(fractalApp, /pacedOrbitCap\(/);
+  assert.match(fractalApp, /zoomShareNext\(previous, pace, FRAME_PACE_MS\)/);
 });
 
 test("reset during auto zoom refreshes the reactive badge", () => {

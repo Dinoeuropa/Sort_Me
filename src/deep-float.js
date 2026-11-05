@@ -291,6 +291,11 @@ export function seahorsePoint() {
 
 let orbitCache = null;
 
+/** Drop the cached seahorse orbit. Tests use this to compare a sliced build with a fresh one. */
+export function clearSeahorseOrbit() {
+  orbitCache = null;
+}
+
 function extendOrbit(cap) {
   const point = seahorsePoint();
   if (!orbitCache) {
@@ -325,9 +330,16 @@ function extendOrbit(cap) {
   }
 }
 
-function buildBlocks(orbit, count) {
-  const blocks = [];
-  let n = 0;
+/**
+ * Append linear blocks for the new tail of the orbit.
+ * A block that stopped only because the orbit ran out stays open, so the next extension
+ * continues it instead of sealing a short block and walking the whole orbit again.
+ */
+function growBlocks() {
+  const orbit = orbitCache.orbit;
+  const count = orbitCache.count;
+  const blocks = orbitCache.blocks;
+  let n = orbitCache.blockAt || 0;
   while (n < count - 2) {
     let ax = 1;
     let ay = 0;
@@ -335,20 +347,30 @@ function buildBlocks(orbit, count) {
     let by = 0;
     let length = 0;
     let radius = Infinity;
+    let closed = false;
     while (length < BLOCK_LIMIT && n + length < count - 2) {
       const zx = orbit[(n + length) * 2];
       const zy = orbit[(n + length) * 2 + 1];
       const size = Math.hypot(zx, zy);
-      if (!(size > 1e-6)) break;
+      if (!(size > 1e-6)) {
+        closed = true;
+        break;
+      }
       const nax = 2 * (zx * ax - zy * ay);
       const nay = 2 * (zx * ay + zy * ax);
       const nbx = 2 * (zx * bx - zy * by) + 1;
       const nby = 2 * (zx * by + zy * bx);
       const peak = Math.max(Math.abs(nax), Math.abs(nay), Math.abs(nbx), Math.abs(nby));
-      if (!Number.isFinite(peak) || peak > COEFFICIENT_LIMIT) break;
+      if (!Number.isFinite(peak) || peak > COEFFICIENT_LIMIT) {
+        closed = true;
+        break;
+      }
       const growth = Math.hypot(nax, nay) + Math.hypot(nbx, nby);
       const allow = Math.min(1e-4, (1e-7 * size) / growth);
-      if (!(allow > 0) || !Number.isFinite(allow)) break;
+      if (!(allow > 0) || !Number.isFinite(allow)) {
+        closed = true;
+        break;
+      }
       ax = nax;
       ay = nay;
       bx = nbx;
@@ -356,6 +378,7 @@ function buildBlocks(orbit, count) {
       radius = Math.min(radius, allow);
       length += 1;
     }
+    if (!closed && length < BLOCK_LIMIT) break;
     if (length >= 8 && radius < Infinity) {
       blocks.push({
         at: n,
@@ -372,7 +395,7 @@ function buildBlocks(orbit, count) {
       n += Math.max(1, length);
     }
   }
-  return blocks;
+  orbitCache.blockAt = n;
 }
 
 /**
@@ -382,10 +405,8 @@ function buildBlocks(orbit, count) {
 export function seahorseOrbit(maxIter) {
   const cap = Math.max(1, maxIter | 0);
   extendOrbit(cap);
-  if (!orbitCache.blocksBuilt || orbitCache.blocksBuilt < orbitCache.count) {
-    orbitCache.blocks = buildBlocks(orbitCache.orbit, orbitCache.count);
-    orbitCache.blocksBuilt = orbitCache.count;
-  }
+  if (!orbitCache.blocks) orbitCache.blocks = [];
+  if ((orbitCache.blockAt || 0) < orbitCache.count) growBlocks();
   const count = Math.min(orbitCache.count, cap + 1);
   const blocks = [];
   for (const block of orbitCache.blocks) {
