@@ -40,9 +40,6 @@ import {
   motionScale,
   zoomShareNext,
   nextZoomStrip,
-  zoomFrameSteps,
-  ZOOM_STEP_CAP,
-  ZOOM_STRETCH_MAX,
   pacedOrbitCap,
   incomingLevelFade,
   levelBlend,
@@ -787,17 +784,23 @@ test("a strip that is still slow at one row narrows its columns instead of doubl
   assert.deepEqual(reset, { rows: 1, cols: 3 });
 });
 
-test("an on-time frame zooms as far as a full picture can refresh before it stretches twice", () => {
-  assert.equal(ZOOM_STRETCH_MAX, 2);
-  assert.equal(ZOOM_STEP_CAP, 4);
-  assert.equal(zoomFrameSteps(16.7, 40), ZOOM_STEP_CAP);
-  const steady = zoomFrameSteps(16.7, ZOOM_PLATE_MS);
-  assert.ok(steady > 0.9 && steady < 1.1, `steady ${steady}`);
-  const slow = zoomFrameSteps(16.7, 2000);
-  assert.ok(slow < 0.5 && slow >= 0.25, `slow ${slow}`);
-  assert.equal(zoomFrameSteps(80, 40), 1);
-  assert.ok(zoomFrameSteps(80, 2000) <= slow);
-  assert.equal(zoomFrameSteps(16.7, 0), zoomFrameSteps(16.7, ZOOM_PLATE_MS));
+test("the classic dive passes a trillion times and is still a seahorse picture at 10^100", () => {
+  const start = { ...presetById("mandelbrot", "classic"), flipY: false };
+  const target = autoZoomTarget("mandelbrot", start);
+  assert.equal(autoZoomFloor("mandelbrot"), 1e-12);
+  assert.equal(autoZoomFloorExp("mandelbrot", start), -1040);
+  assert.equal(autoZoomFloorExp("mandelbrot", presetById("mandelbrot", "mini")), null);
+  const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot"), autoZoomFloorExp("mandelbrot", start));
+  const trillion = Math.log2(1e12);
+  assert.equal(advanceAutoZoom(path, trillion, 1).done, false);
+  const hundred = Math.log2(1e100);
+  assert.ok(path.maxOctave > hundred, `maxOctave ${path.maxOctave}`);
+  const there = autoZoomView(path, hundred);
+  assert.equal(gpuDepthMode(there, 800), "deep");
+  const bottom = autoZoomView(path, path.maxOctave);
+  const magnification = start.scale / (bottom.scale * 2 ** bottom.scaleExp);
+  assert.ok(magnification >= 1e100, `magnification ${magnification}`);
+  assert.equal(gpuDepthMode(bottom, 800), "deep");
 });
 
 test("the seahorse orbit cap climbs by one step when the dive asks for the rest at once", () => {

@@ -660,7 +660,7 @@ export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CA
  */
 export function autoZoomTarget(fractalId, preset) {
   if (fractalId === "mandelbrot") {
-    if (preset && preset.id === "seahorse") return { ...SEAHORSE_CENTER };
+    if (preset && (preset.id === "seahorse" || preset.id === "classic")) return { ...SEAHORSE_CENTER };
     return { ...MINIBROT_EDGE };
   }
   if (fractalId === "julia") return ddJuliaBeta(preset.cx || 0, preset.cy || 0);
@@ -674,7 +674,8 @@ export function autoZoomTarget(fractalId, preset) {
 /**
  * How small a view auto zoom may reach, as a multiple of the target's distance from the origin.
  * Julia, Newton, and the burning ship are drawn in double-double, so they run until a plate pixel
- * nears the 32nd digit. The Mandelbrot dive keeps going past a million times. When the
+ * nears the 32nd digit. The Mini Mandelbrot dive keeps going past a million times. Classic and
+ * Seahorse carry a separate exponent and pass 10^100 on the seahorse center. When the
  * frame would fill with the interior, the camera turns toward a nearby filament that still
  * has detail, so the picture does not go blank or jump back to the start.
  * A burning ship with c from the cursor dives toward a plain-double edge that breaks into dust a
@@ -688,7 +689,9 @@ export function autoZoomFloor(fractalId, preset = {}) {
 
 /** Exponent floor for a dive that carries its width as a mantissa. Null keeps the plain float floor. */
 export function autoZoomFloorExp(fractalId, preset = {}) {
-  if (fractalId === "mandelbrot" && preset.id === "seahorse") return SEAHORSE_FLOOR_EXP;
+  if (fractalId === "mandelbrot" && preset && (preset.id === "seahorse" || preset.id === "classic")) {
+    return SEAHORSE_FLOOR_EXP;
+  }
   return null;
 }
 
