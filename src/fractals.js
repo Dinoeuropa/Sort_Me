@@ -69,7 +69,7 @@ export const FRACTALS = [
     kind: "escape",
     latex: "z_{n+1}=z_n^2+c",
     blurb: "Square z and add the pixel. Points that stay bounded form the set.",
-    note: "Depth is the escape-time cap. Move the cursor to see the Julia set of that point. Deep zoom then dives into the edge of that copy.",
+    note: "Depth is the escape-time cap. Move the cursor to see the Julia set of that point. Deep zoom then dives into the seahorse valley.",
     depthLabel: "Iterations",
     legend: ["Inside", "Early", "Late"],
     minDepth: 8,
@@ -565,22 +565,6 @@ export function paletteRange(fractalId, preset, width, height, maxIter) {
 const ANCHOR_CAP = 2400;
 
 /**
- * A filament on the upper edge of the period-3 island, the largest small copy of the
- * Mandelbrot set. The island's center, the real root of c³ + 2c² + c + 1 = 0, sits
- * directly below. The smooth top of that copy reads as solid interior past about
- * seventy million times. This point is a few millionths above that top, where the
- * boundary keeps crossing the frame through a trillion times, so the dive stays on
- * the copy's recursive detail.
- * About −1.754877666388114 + 0.011953806894244868i.
- */
-const MINIBROT_EDGE = {
-  x: -1.754877666388114,
-  xLo: 0,
-  y: 0.011953806894244868,
-  yLo: 0,
-};
-
-/**
  * A point on the edge of the burning ship beside the small ship near −1.861: the critical orbit
  * lands on a repelling cycle of period 5 after 26 steps. The picture turns and shrinks onto it by
  * the cycle's multiplier, so the structure holds at every depth and the escape time rises by
@@ -653,16 +637,14 @@ export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CA
 /**
  * The one point auto zoom dives toward for a fractal, each held to double-double precision so the
  * edge stays in the frame at every depth.
- * Mandelbrot dives into the period-3 island on the spike, a Julia set into its repelling
- * fixed point, Newton's method into the pole where the three basins meet, and the burning ship
- * into a spiral beside its small ship. A burning ship with c fixed by the cursor has no such
- * point ready, so it searches for an edge near the middle of the picture in plain doubles.
+ * Mandelbrot dives into the seahorse valley, the one point a deep picture can still draw past
+ * 10^100. A Julia set dives into its repelling fixed point, Newton's method into the pole where
+ * the three basins meet, and the burning ship into a spiral beside its small ship. A burning ship
+ * with c fixed by the cursor has no such point ready, so it searches for an edge near the middle
+ * of the picture in plain doubles.
  */
 export function autoZoomTarget(fractalId, preset) {
-  if (fractalId === "mandelbrot") {
-    if (preset && preset.id === "seahorse") return { ...SEAHORSE_CENTER };
-    return { ...MINIBROT_EDGE };
-  }
+  if (fractalId === "mandelbrot") return { ...SEAHORSE_CENTER };
   if (fractalId === "julia") return ddJuliaBeta(preset.cx || 0, preset.cy || 0);
   if (fractalId === "newton") return ddNewtonPole(preset.px || 0, preset.py || 0);
   if ("cx" in preset || "cy" in preset) {
@@ -674,9 +656,9 @@ export function autoZoomTarget(fractalId, preset) {
 /**
  * How small a view auto zoom may reach, as a multiple of the target's distance from the origin.
  * Julia, Newton, and the burning ship are drawn in double-double, so they run until a plate pixel
- * nears the 32nd digit. The Mandelbrot dive keeps going past a million times. When the
- * frame would fill with the interior, the camera turns toward a nearby filament that still
- * has detail, so the picture does not go blank or jump back to the start.
+ * nears the 32nd digit. Every Mandelbrot dive uses the exponent floor instead and keeps going
+ * past 10^100 on the seahorse center. When the frame would fill with the interior, a nearby
+ * filament still has detail, so a plate of the period-3 island does not have to go blank.
  * A burning ship with c from the cursor dives toward a plain-double edge that breaks into dust a
  * few thousand times in, so it turns back sooner.
  */
@@ -686,9 +668,12 @@ export function autoZoomFloor(fractalId, preset = {}) {
   return 1e-28;
 }
 
-/** Exponent floor for a dive that carries its width as a mantissa. Null keeps the plain float floor. */
-export function autoZoomFloorExp(fractalId, preset = {}) {
-  if (fractalId === "mandelbrot" && preset.id === "seahorse") return SEAHORSE_FLOOR_EXP;
+/**
+ * Exponent floor for a dive that carries its width as a mantissa. Null keeps the plain float floor.
+ * Every Mandelbrot preset, including Classic and Mini, stops at the seahorse shader limit.
+ */
+export function autoZoomFloorExp(fractalId) {
+  if (fractalId === "mandelbrot") return SEAHORSE_FLOOR_EXP;
   return null;
 }
 

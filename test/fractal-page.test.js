@@ -154,7 +154,8 @@ test("a finished fractal can be dragged and zoomed", () => {
   assert.match(fractalApp, /advanceAutoZoom/);
   assert.doesNotMatch(fractalApp, /AUTO_OCTAVES_PER_FRAME/);
   assert.match(fractalApp, /autoZoomView/);
-  assert.match(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, steps\)/);
+  assert.match(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, 1\)/);
+  assert.doesNotMatch(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, steps\)/);
   assert.match(fractalApp, /new Worker\(new URL\("\.\/zoom-gpu-worker\.js"/);
   assert.match(fractalApp, /OffscreenCanvas/);
   assert.match(zoomWorker, /setTimeout/);
@@ -289,7 +290,7 @@ test("a moving zoom reuses the snapshot and resamples it cheaply", () => {
   assert.match(zoomWorker, /nextZoomStrip\(/);
   assert.match(zoomWorker, /band: slowest/);
   assert.match(fractalApp, /pacedOrbitCap\(/);
-  assert.match(fractalApp, /zoomFrameSteps\(/);
+  assert.doesNotMatch(fractalApp, /zoomFrameSteps\(/);
   assert.match(fractalApp, /state\.zoomShare = 1/);
   assert.doesNotMatch(fractalApp, /zoomShareNext\(previous, pace, FRAME_PACE_MS\)/);
   assert.match(zoomWorker, /ORBIT_SLICE/);
