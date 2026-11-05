@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isSeahorseCenter } from "../src/deep-float.js";
 import { autoZoomFloor, autoZoomFloorExp, autoZoomTarget, boundaryAnchor, escapeBand, escapeValue, planePoint, presetById, reliefCenter } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
@@ -40,9 +41,6 @@ import {
   motionScale,
   zoomShareNext,
   nextZoomStrip,
-  zoomFrameSteps,
-  ZOOM_STEP_CAP,
-  ZOOM_STRETCH_MAX,
   pacedOrbitCap,
   incomingLevelFade,
   levelBlend,
@@ -501,9 +499,6 @@ test("the seahorse dive carries its width past the float64 exponent wall", () =>
   const target = autoZoomTarget("mandelbrot", start);
   assert.equal(autoZoomFloor("mandelbrot"), 1e-12);
   assert.equal(autoZoomFloorExp("mandelbrot", start), -1040);
-  assert.equal(autoZoomFloorExp("mandelbrot", {}), null);
-  const plain = autoZoomPath(start, autoZoomTarget("mandelbrot", {}), autoZoomFloor("mandelbrot"));
-  assert.ok(plain.maxOctave > 35 && plain.maxOctave < 48, `classic octave ${plain.maxOctave}`);
   const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot"), autoZoomFloorExp("mandelbrot", start));
   const bottom = autoZoomView(path, path.maxOctave);
   assert.ok(bottom.scaleExp < -1022, `exponent ${bottom.scaleExp}`);
@@ -613,13 +608,20 @@ test("sixty frames each add 3 percent, and the same ratio holds at every depth",
 
 test("each reactive fractal has a fixed point to dive into", () => {
   const mandelbrot = autoZoomTarget("mandelbrot", {});
-  assert.ok(Math.hypot(mandelbrot.x + 1.754877666388114, mandelbrot.y - 0.011953806894244868) < 1e-15);
+  assert.equal(isSeahorseCenter({
+    centerX: mandelbrot.x,
+    centerY: mandelbrot.y,
+    centerXLo: mandelbrot.xLo,
+    centerYLo: mandelbrot.yLo,
+    scale: 1,
+  }), true);
+  assert.notEqual(mandelbrot.xLo, 0);
   const preset = { cx: -0.8, cy: 0.156 };
   const beta = autoZoomTarget("julia", preset);
   const x2 = beta.x * beta.x - beta.y * beta.y + preset.cx;
   const y2 = 2 * beta.x * beta.y + preset.cy;
   assert.ok(Math.hypot(x2 - beta.x, y2 - beta.y) < 1e-12);
-  for (const [id, base, cap, step] of [["mandelbrot", {}, 8000, 1e-5], ["newton", {}, 2400, 1e-9]]) {
+  for (const [id, base, cap, step] of [["newton", {}, 2400, 1e-9]]) {
     const point = autoZoomTarget(id, base);
     assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
     const classes = new Set();
@@ -642,7 +644,12 @@ test("each reactive fractal has a fixed point to dive into", () => {
   assert.ok(Number.isFinite(cursorShip.x) && Number.isFinite(cursorShip.y));
   assert.equal(autoZoomFloor("burning", { cx: -1.76, cy: -0.03 }), 2.5e-5);
   assert.equal(autoZoomFloor("burning"), 1e-28);
-  assert.equal(autoZoomFloor("mandelbrot"), 1e-12);
+  assert.equal(autoZoomFloor("julia"), 1e-28);
+  assert.equal(autoZoomFloor("newton"), 1e-28);
+  assert.equal(autoZoomFloorExp("mandelbrot"), -1040);
+  assert.equal(autoZoomFloorExp("julia"), null);
+  assert.equal(autoZoomFloorExp("newton"), null);
+  assert.equal(autoZoomFloorExp("burning"), null);
 });
 
 test("a boundary anchor lands on the edge of the set", () => {
@@ -674,7 +681,13 @@ test("the smooth top of the period-3 island fills in, and a filament beside it d
   const healthy = autoZoomView(filled, 12);
   assert.equal(reliefCenter("mandelbrot", healthy, escapeIterationCap("mandelbrot", 48, start.scale / healthy.scale)), null);
 
-  const live = autoZoomPath(start, autoZoomTarget("mandelbrot", {}), autoZoomFloor("mandelbrot"));
+  const filament = {
+    x: -1.754877666388114,
+    xLo: 0,
+    y: 0.011953806894244868,
+    yLo: 0,
+  };
+  const live = autoZoomPath(start, filament, autoZoomFloor("mandelbrot"));
   for (const octave of [20, 26, 36]) {
     const camera = autoZoomView(live, octave);
     const limit = escapeIterationCap("mandelbrot", 48, start.scale / camera.scale);
@@ -787,17 +800,28 @@ test("a strip that is still slow at one row narrows its columns instead of doubl
   assert.deepEqual(reset, { rows: 1, cols: 3 });
 });
 
-test("an on-time frame zooms as far as a full picture can refresh before it stretches twice", () => {
-  assert.equal(ZOOM_STRETCH_MAX, 2);
-  assert.equal(ZOOM_STEP_CAP, 4);
-  assert.equal(zoomFrameSteps(16.7, 40), ZOOM_STEP_CAP);
-  const steady = zoomFrameSteps(16.7, ZOOM_PLATE_MS);
-  assert.ok(steady > 0.9 && steady < 1.1, `steady ${steady}`);
-  const slow = zoomFrameSteps(16.7, 2000);
-  assert.ok(slow < 0.5 && slow >= 0.25, `slow ${slow}`);
-  assert.equal(zoomFrameSteps(80, 40), 1);
-  assert.ok(zoomFrameSteps(80, 2000) <= slow);
-  assert.equal(zoomFrameSteps(16.7, 0), zoomFrameSteps(16.7, ZOOM_PLATE_MS));
+test("every Mandelbrot dive passes 10^100 on the seahorse center before it fades", () => {
+  const hundred = Math.log2(1e100);
+  const cases = [
+    presetById("mandelbrot", "classic"),
+    presetById("mandelbrot", "mini"),
+    presetById("mandelbrot", "seahorse"),
+  ];
+  for (const preset of cases) {
+    const start = { ...preset, flipY: false };
+    assert.equal(autoZoomFloorExp("mandelbrot", preset), -1040, preset.id);
+    const target = autoZoomTarget("mandelbrot", preset);
+    const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot", preset), autoZoomFloorExp("mandelbrot", preset));
+    assert.ok(path.maxOctave > hundred, `${preset.id} octave ${path.maxOctave}`);
+    assert.equal(advanceAutoZoom(path, Math.log2(1e12), 1).done, false, preset.id);
+    const there = autoZoomView(path, hundred);
+    assert.equal(isSeahorseCenter(there), true, preset.id);
+    assert.equal(gpuDepthMode(there, 800), "deep", preset.id);
+    const bottom = autoZoomView(path, path.maxOctave);
+    const magnification = start.scale / (bottom.scale * 2 ** bottom.scaleExp);
+    assert.ok(magnification >= 1e100, `${preset.id} magnification ${magnification}`);
+    assert.equal(gpuDepthMode(bottom, 800), "deep", preset.id);
+  }
 });
 
 test("the seahorse orbit cap climbs by one step when the dive asks for the rest at once", () => {

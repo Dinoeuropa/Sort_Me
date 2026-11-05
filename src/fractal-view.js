@@ -657,30 +657,6 @@ export const FRAME_PACE_MS = 20;
 export const ZOOM_PLATE_MS = 400;
 
 /**
- * Largest enlargement of the picture already on screen while the next full-size one is drawn.
- * Two times is one octave, about the stretch of a 400ms picture at one 3% step per refresh.
- */
-export const ZOOM_STRETCH_MAX = 2;
-
-/** Most 3% steps one on-time frame may take. Four steps are about 12.6% closer. */
-export const ZOOM_STEP_CAP = 4;
-
-/**
- * How many 3% steps this frame may take.
- * The picture stays within ZOOM_STRETCH_MAX until the next full-size picture arrives.
- * A frame later than one refresh takes at most one step, so a hitch does not skip ahead.
- */
-export function zoomFrameSteps(frameMs, plateMs, budgetMs = FRAME_PACE_MS) {
-  const frame = frameMs > 0 && frameMs <= budgetMs ? frameMs : budgetMs;
-  const plate = plateMs > 0 ? plateMs : ZOOM_PLATE_MS;
-  const room = Math.log(ZOOM_STRETCH_MAX) / Math.log(AUTO_ZOOM_STEP);
-  const steps = (room * frame) / plate;
-  const paced = Math.min(ZOOM_STEP_CAP, Math.max(steps, 1 / ZOOM_STEP_CAP));
-  if (frameMs > budgetMs) return Math.min(1, paced);
-  return paced;
-}
-
-/**
  * Next share of a moving picture from how long the last frame actually took.
  * A frame that misses the refresh shrinks; one that lands grows back toward full size.
  * A gap long enough to be a paused tab is ignored. The GPU timer is not required.

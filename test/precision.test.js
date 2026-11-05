@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoZoomFloor, autoZoomTarget, escapeBand, escapeValue, paletteRange, presetById } from "../src/fractals.js";
+import { isSeahorseCenter } from "../src/deep-float.js";
+import { autoZoomFloor, autoZoomFloorExp, autoZoomTarget, escapeBand, escapeValue, paletteRange, presetById } from "../src/fractals.js";
 import { easeWindow, paintEscape, paletteWindow } from "../src/palettes.js";
 import {
   autoZoomIterations,
@@ -8,9 +9,11 @@ import {
   autoZoomView,
   coverViews,
   escapeBlitRect,
+  gpuDepthMode,
   panEscape,
   plateCovers,
   plateFrame,
+  scaleLog,
   zoomEscape,
 } from "../src/fractal-view.js";
 import {
@@ -35,6 +38,14 @@ import {
   shipReference,
   viewOffset,
 } from "../src/precision.js";
+
+/** Filament on the period-3 island. Deep zoom aims at the seahorse valley; these checks keep the island's arithmetic. */
+const PERIOD3_EDGE = {
+  x: -1.754877666388114,
+  xLo: 0,
+  y: 0.011953806894244868,
+  yLo: 0,
+};
 
 test("double-double sums and products keep the digits a double drops", () => {
   const [hi, lo] = ddAdd(1, 0, 1e-20, 0);
@@ -111,7 +122,7 @@ test("a pixel outliving its reference rebases onto the start of the orbit", () =
 });
 
 test("perturbation matches double-double iteration at a depth doubles cannot reach", () => {
-  const target = autoZoomTarget("mandelbrot", {});
+  const target = PERIOD3_EDGE;
   const scale = 1e-20;
   const cap = autoZoomIterations(48, 2.6 / scale);
   const reference = referenceOrbit(target.x, target.xLo, target.y, target.yLo, cap);
@@ -162,7 +173,7 @@ test("perturbation matches double-double iteration at a depth doubles cannot rea
 });
 
 test("the linear skip only reaches far when the plate is small next to the reference", () => {
-  const target = autoZoomTarget("mandelbrot", {});
+  const target = PERIOD3_EDGE;
   const reference = referenceOrbit(target.x, target.xLo, target.y, target.yLo, 4000);
   assert.equal(seriesSkip(reference, 0), 0);
   assert.ok(seriesSkip(reference, 0.1) < 4);
@@ -178,7 +189,7 @@ test("the linear skip only reaches far when the plate is small next to the refer
 });
 
 test("bivariate blocks match direct iteration and skip the tail of a deep plate", () => {
-  const target = autoZoomTarget("mandelbrot", {});
+  const target = PERIOD3_EDGE;
   const scale = 1e-16;
   const cap = 4096;
   const reference = referenceOrbit(target.x, target.xLo, target.y, target.yLo, cap);
@@ -205,7 +216,7 @@ test("bivariate blocks match direct iteration and skip the tail of a deep plate"
 });
 
 test("the quadratic skip matches an unskipped perturbation on a small plate", () => {
-  const target = autoZoomTarget("mandelbrot", {});
+  const target = PERIOD3_EDGE;
   const scale = 1e-12;
   const cap = 2048;
   const reference = referenceOrbit(target.x, target.xLo, target.y, target.yLo, cap);
@@ -228,7 +239,7 @@ test("the quadratic skip matches an unskipped perturbation on a small plate", ()
 });
 
 test("a deep plate spreads the palette over the iterations it holds, and a shallow one is unchanged", () => {
-  const target = autoZoomTarget("mandelbrot", {});
+  const target = PERIOD3_EDGE;
   const seahorse = presetById("mandelbrot", "seahorse");
   const zoomed = { centerX: -1.7548776662466927, centerY: 0.0125, scale: 0.01, flipY: false };
   const crowded = paletteRange("mandelbrot", zoomed, 24, 16, 2000);
@@ -261,8 +272,8 @@ test("a deep plate spreads the palette over the iterations it holds, and a shall
   assert.deepEqual([...lifted.subarray(8, 11)], [...plain.subarray(8, 11)]);
 });
 
-test("the Mandelbrot dive aims at the edge of the period-3 island", () => {
-  const target = autoZoomTarget("mandelbrot", {});
+test("the period-3 island edge escapes late and its interior does not", () => {
+  const target = PERIOD3_EDGE;
   assert.ok(hasDeepCenter({ centerXLo: target.xLo }));
   assert.equal(typeof target.xLo, "number");
   assert.equal(typeof target.yLo, "number");
@@ -557,7 +568,7 @@ test("the auto zoom path lands on the Julia, Newton, and burning ship targets", 
 });
 
 test("a double-double camera keeps its offset from a plate below the double floor", () => {
-  const target = autoZoomTarget("mandelbrot", {});
+  const target = PERIOD3_EDGE;
   const scale = 1e-27;
   const plate = { ...deepCenter(target, 0, 0), scale: scale * 1.65, flipY: false, width: 400, height: 300 };
   const nudge = 2e-28;
@@ -583,7 +594,7 @@ test("a double-double camera keeps its offset from a plate below the double floo
 });
 
 test("covering, panning, and zooming keep a double-double center", () => {
-  const target = autoZoomTarget("mandelbrot", {});
+  const target = PERIOD3_EDGE;
   const scale = 1e-24;
   const camera = { ...deepCenter(target, 0, 0), scale, flipY: false };
   const ahead = { ...shiftView(camera, 3e-25, 1e-25), scale: scale / 4 };
@@ -608,8 +619,8 @@ test("covering, panning, and zooming keep a double-double center", () => {
 test("the auto zoom path lands exactly on a double-double target", () => {
   const start = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
   const target = autoZoomTarget("mandelbrot", {});
-  const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot"));
-  assert.ok(path.maxOctave > 35 && path.maxOctave < 48, `maxOctave ${path.maxOctave}`);
+  const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot"), autoZoomFloorExp("mandelbrot"));
+  assert.ok(path.maxOctave >= Math.log2(1e100), `maxOctave ${path.maxOctave}`);
   const first = autoZoomView(path, 0);
   assert.ok(Math.abs(first.centerX - start.centerX) < 1e-12);
   assert.ok(Math.abs(first.centerY - start.centerY) < 1e-12);
@@ -621,7 +632,9 @@ test("the auto zoom path lands exactly on a double-double target", () => {
   assert.ok(Math.abs(miss.dy) < 1e-31);
   assert.ok(Math.abs(deep.scale - 2.6 * 2 ** -12) < 1e-12);
   const bottom = autoZoomView(path, path.maxOctave);
-  assert.ok(bottom.scale < 3e-12 && bottom.scale > 1e-12, `bottom scale ${bottom.scale}`);
+  assert.equal(isSeahorseCenter(bottom), true);
+  assert.equal(gpuDepthMode(bottom, 800), "deep");
+  assert.ok(scaleLog(start) - scaleLog(bottom) >= Math.log2(1e100), `depth ${scaleLog(bottom)}`);
   const shallow = autoZoomPath(start, { x: 0.3, y: 0.1 });
   assert.equal(hasDeepCenter(autoZoomView(shallow, 10)), false);
 });

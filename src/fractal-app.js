@@ -44,7 +44,6 @@ import {
   DRAW_RASTER_EDGE,
   PLATE_EDGE_MAX,
   pacedOrbitCap,
-  zoomFrameSteps,
   ORBIT_SLICE,
   ZOOM_PLATE_MS,
   pickPlate,
@@ -324,8 +323,8 @@ function legendInk(iteration, max) {
 
 function paintLegend() {
   document.querySelector(".swatch.inside").style.background = legendInk(24, 24);
-  document.querySelector(".swatch.early").style.background = legendInk(6, 24);
-  document.querySelector(".swatch.late").style.background = legendInk(21, 24);
+  document.querySelector(".swatch.early").style.background = legendInk(7, 20);
+  document.querySelector(".swatch.late").style.background = legendInk(15, 20);
 }
 
 function renderChrome() {
@@ -2074,10 +2073,10 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of deep zoom. An on-time frame takes as many 3% steps as the full-size picture
- * can refresh before it has stretched twice. A late frame takes at most one step, so a hitch
- * does not skip ahead. The picture already on screen is what moves. A new frame is only copied
- * in once the GPU has finished it. Passing the deepest point fades back to the opening picture.
+ * One frame of deep zoom. Every displayed frame takes one 3% step, the same pace as the
+ * double-precision dive. A late frame still takes one step, so a hitch is a pause.
+ * The picture already on screen is what moves. A new frame is only copied in once the GPU
+ * has finished it. Passing the deepest point fades back to the opening picture.
  */
 function stepAutoZoom(token) {
   const now = performance.now();
@@ -2086,9 +2085,7 @@ function stepAutoZoom(token) {
   state.zoomStamp = now;
   const path = state.autoPath;
   if (path && !state.autoHold && state.autoPlates.length) {
-    const plateMs = state.zoomExpect || state.zoomTook || ZOOM_PLATE_MS;
-    const steps = zoomFrameSteps(gap, plateMs);
-    const next = advanceAutoZoom(path, state.autoOctave, steps);
+    const next = advanceAutoZoom(path, state.autoOctave, 1);
     state.autoOctave = next.octave;
     if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
     if (state.autoFade) {
@@ -2122,8 +2119,7 @@ function plateLookahead() {
   const plateMs = state.zoomExpect || state.zoomTook || ZOOM_PLATE_MS;
   const seconds = Math.max(0.05, Math.min(1.2, plateMs / 1000));
   const frameMs = Math.min(50, Math.max(8, state.zoomFrameMs || 16.7));
-  const steps = zoomFrameSteps(frameMs, plateMs);
-  const frames = Math.max(1, (seconds * 1000) / frameMs) * steps;
+  const frames = Math.max(1, (seconds * 1000) / frameMs);
   const next = advanceAutoZoom(path, state.autoOctave, frames);
   return Math.min(2, Math.max(0.05, next.octave - (Number(state.autoOctave) || 0)));
 }
