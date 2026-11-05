@@ -1,0 +1,27 @@
+---
+description: Answer questions in plain steps, with what you would see, and a diagram when a process is easier to see
+alwaysApply: true
+---
+
+# Plain answers
+
+When the user asks a question, answer in the manner below. This covers how, why, and which option to choose.
+
+- Use short sentences about what the person sees or what happens next.
+- Name a thing, then say what it does, before using a code name for it.
+- When one thing leads to the next, number the steps.
+- When offering choices, number them. For each one, say what would change, then what the person would see.
+- End with the one choice to make, and why, in one or two sentences.
+- Draw a diagram when two things happen at the same time, or when a change is a before-and-after picture. A canvas the user can open beside the chat is the diagram.
+
+```text
+A slow strip makes the next picture smaller.
+The window stretches that small picture.
+The squares on screen are those stretched pixels.
+
+1. Keep the strips small, and make the picture full size again.
+   A slow strip makes the next strip thinner. The picture stays the size of the window.
+   You see a sharp picture. Between pictures, the old one looks slightly soft for a moment.
+
+Do the first one. The strips that stopped the freezes stay, and a slow strip no longer shrinks the picture.
+```
