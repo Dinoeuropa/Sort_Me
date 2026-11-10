@@ -13,11 +13,14 @@ export const DRAW_RASTER_EDGE = 960;
 export const SHARP_RASTER_EDGE = 3840;
 
 /**
- * Magnification multiplier for one deep-zoom frame.
- * Each frame is half a percent closer than the frame before it, so at 60 Hz the view doubles
- * about every two seconds. The same percent applies at every depth.
+ * Magnification multiplier for one deep-zoom step.
+ * A step is one sixtieth of a second, and it is half a percent closer than the step before it,
+ * so the view doubles about every two seconds. The same percent applies at every depth.
  */
 export const AUTO_ZOOM_STEP = 1.005;
+
+/** Milliseconds one deep-zoom step stands for. The pace is this long, not one refresh. */
+export const ZOOM_FRAME_MS = 1000 / 60;
 
 const RATIOS = {
   koch: 3,
@@ -200,7 +203,8 @@ export function autoZoomPath(start, target, floor = 5e-12, floorExp = null) {
 export function autoZoomView(path, octave) {
   const o = Math.max(0, Number.isFinite(octave) ? octave : 0);
   const p = Math.min(1, o / AUTO_ENTER_OCTAVES);
-  const keep = 1 - p * p * (3 - 2 * p);
+  // The target slides to the center at a steady rate. A smoothstep here sped up, then slowed down.
+  const keep = 1 - p;
   const logScale = Math.log2(path.start.scale) - o;
   const plain = logScale > -900;
   const scale = plain ? path.start.scale * 2 ** -o : 2 ** (logScale - Math.floor(logScale));
@@ -231,6 +235,19 @@ export function advanceAutoZoom(path, octave, frames) {
   const next = base + Math.log2(AUTO_ZOOM_STEP) * steps;
   if (!Number.isFinite(next)) return { octave: base, done: base >= limit };
   return { octave: next, done: next >= limit };
+}
+
+/**
+ * How many deep-zoom steps a gap between displayed frames is worth.
+ * One step is {@link ZOOM_FRAME_MS}, so a 30Hz frame takes two and a 120Hz frame takes half.
+ * The magnification per second stays the same when the refresh speeds up or drops.
+ * A gap long enough to be a paused tab is one step, so coming back does not fast-forward.
+ */
+export function autoZoomSteps(gapMs) {
+  const gap = Number(gapMs);
+  if (!(gap > 0)) return 0;
+  if (gap >= 250) return 1;
+  return gap / ZOOM_FRAME_MS;
 }
 
 /** Pace from rest to full over the first moments, so the start is a glide rather than a lurch. */

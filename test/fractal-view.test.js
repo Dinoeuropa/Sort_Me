@@ -17,7 +17,9 @@ import {
   autoZoomIterations,
   autoZoomPath,
   autoZoomRamp,
+  autoZoomSteps,
   autoZoomView,
+  ZOOM_FRAME_MS,
   boundsMagnification,
   clampViewToPlate,
   coverViews,
@@ -594,6 +596,52 @@ test("plates lose their wide margin once the target sits in the middle of the fr
   assert.ok(plateCovers(snug, camera, 1.5));
   assert.ok(plateCovers(snug, ahead, 1.5));
   assert.equal(coverViews([camera], 1.5, 0).scale, wide.scale);
+});
+
+test("a slow frame and a fast one move the dive the same distance per second", () => {
+  assert.equal(autoZoomSteps(0), 0);
+  assert.ok(Math.abs(autoZoomSteps(ZOOM_FRAME_MS) - 1) < 1e-12);
+  assert.ok(Math.abs(autoZoomSteps(ZOOM_FRAME_MS * 2) - 2) < 1e-12);
+  assert.ok(Math.abs(autoZoomSteps(ZOOM_FRAME_MS / 2) - 0.5) < 1e-12);
+  assert.equal(autoZoomSteps(1000), 1);
+  const path = autoZoomPath({ centerX: 0, centerY: 0, scale: 2, flipY: false }, { x: 0, y: 0 });
+  const even = advanceAutoZoom(path, 0, 60);
+  let octave = 0;
+  const gaps = [12, 28, 16, 16, 40, 8, 14, 22, 18, 16, 10, 30];
+  let spent = 0;
+  while (spent < 1000) {
+    const gap = gaps[Math.floor(spent / 10) % gaps.length];
+    const step = autoZoomSteps(gap);
+    octave = advanceAutoZoom(path, octave, step).octave;
+    spent += gap;
+  }
+  const seconds = spent / 1000;
+  assert.ok(Math.abs(octave / seconds - even.octave) < 1e-9);
+});
+
+test("the dive approaches its target at a steady rate, then only zooms", () => {
+  const path = autoZoomPath(
+    { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false },
+    { x: -0.5, y: 0.4 },
+  );
+  const screen = (octave) => {
+    const view = autoZoomView(path, octave);
+    return {
+      x: (path.target.x - view.centerX) / view.scale,
+      y: (path.target.y - view.centerY) / view.scale,
+    };
+  };
+  const drift = (octave) => {
+    const a = screen(octave);
+    const b = screen(octave + 0.5);
+    return Math.hypot(b.x - a.x, b.y - a.y);
+  };
+  const early = drift(0.5);
+  const mid = drift(3);
+  const late = drift(5);
+  assert.ok(Math.abs(mid - early) / early < 0.05, `drift ${early} then ${mid}`);
+  assert.ok(Math.abs(late - early) / early < 0.05, `drift ${early} then ${late}`);
+  assert.ok(drift(8) < early * 0.01);
 });
 
 test("sixty frames each add half a percent, and the same ratio holds at every depth", () => {

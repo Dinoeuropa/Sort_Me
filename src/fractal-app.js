@@ -23,6 +23,7 @@ import {
   PLATE_TARGET_MS,
   advanceAutoZoom,
   autoZoomPath,
+  autoZoomSteps,
   autoZoomView,
   boundsMagnification,
   coverViews,
@@ -1464,8 +1465,8 @@ function kickZoomPalette(job, width, height, cap, depth) {
     if (!probe) return;
     let fitted = null;
     while (!(fitted = probe.step())) { /* sixteen samples, once the path exists */ }
+    if (!paletteFit.shown) paletteFit.shown = { floor: 0, top: goal };
     paletteFit.window = fitted;
-    paletteFit.shown = fitted;
   };
   setTimeout(turn, 0);
 }
@@ -1994,6 +1995,10 @@ function haltAutoZoom() {
   state.zoomTook = 32;
   state.zoomExpect = ZOOM_PLATE_MS;
   paletteTicket += 1;
+  paletteFit.key = "";
+  paletteFit.window = null;
+  paletteFit.scene = "";
+  paletteFit.shown = null;
   state.zoomSerial += 1;
   state.zoomMisses = 0;
   state.zoomGpuOk = true;
@@ -2074,8 +2079,9 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of deep zoom. Every displayed frame takes one half-percent step, the same pace at
- * every depth. A late frame still takes one step, so a hitch is a pause.
+ * One frame of deep zoom. The magnification advances by elapsed time, one half-percent step per
+ * sixtieth of a second, the same pace at every depth. A dropped frame moves the same distance
+ * it would have at a steady refresh, and a paused tab does not fast-forward.
  * The picture already on screen is what moves. A new frame is only copied in once the GPU
  * has finished it. Passing the deepest point fades back to the opening picture.
  */
@@ -2086,7 +2092,8 @@ function stepAutoZoom(token) {
   state.zoomStamp = now;
   const path = state.autoPath;
   if (path && !state.autoHold && state.autoPlates.length) {
-    const next = advanceAutoZoom(path, state.autoOctave, 1);
+    if (paletteFit.window) paletteFit.shown = easeWindow(paletteFit.shown, paletteFit.window);
+    const next = advanceAutoZoom(path, state.autoOctave, autoZoomSteps(gap));
     state.autoOctave = next.octave;
     if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
     if (state.autoFade) {

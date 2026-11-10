@@ -129,8 +129,9 @@ export function easeWindow(shown, target, rate = WINDOW_EASE) {
 
 /**
  * Color an iteration grid. `floorIter` is where the palette starts: iterations at or below it take
- * the first color. The ramp runs from there to `topIter`, or to `shownIter` when no top is given,
- * and iterations past the top take its last color. Pixels at `shownIter` are inside.
+ * the first color. The ramp runs from there to `topIter`, or to `shownIter` when no top is given.
+ * Iterations past a fitted top take the interior color, so the gap under the cap is not a solid
+ * bright band. Pixels at `shownIter` are inside.
  */
 export function paintEscape(
   paletteId,
@@ -194,12 +195,16 @@ export function escapeLut(paletteId, shownIter, floorIter = 0, topIter = null) {
   const top = topIter == null ? max : Math.min(max, Math.max(floor + 1, topIter | 0));
   const range = top - floor;
   const lut = new Uint8ClampedArray(4 * span * 3);
+  const hole = colorSample(paletteId, max, max, -1);
   for (let iter = 0; iter < span; iter += 1) {
     const lifted = Math.max(0, iter - floor);
     const inside = iter >= max;
+    // A fitted window used to paint every iteration above its top with the last, brightest
+    // shade. That is a solid light band around the set, and a zoom flashes it at each layer.
+    const beyond = !inside && top < max && iter > top;
     const value = inside ? lifted : Math.min(lifted, range);
     const over = inside ? lifted : top < max ? range + 1 : range;
-    writeLut(lut, span, 3, iter, colorSample(paletteId, value, over, -1));
+    writeLut(lut, span, 3, iter, beyond || inside ? hole : colorSample(paletteId, value, over, -1));
     for (let basin = 0; basin < 3; basin += 1) {
       writeLut(lut, span, basin, iter, colorSample(paletteId, value, over, basin));
     }
