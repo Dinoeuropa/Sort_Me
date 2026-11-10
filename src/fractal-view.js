@@ -14,10 +14,10 @@ export const SHARP_RASTER_EDGE = 3840;
 
 /**
  * Magnification multiplier for one deep-zoom frame.
- * Each frame is the next step and nothing more: three percent closer than the frame before it.
- * The same percent applies at every depth, so a dive past a trillion times keeps the pace it opened with.
+ * Each frame is half a percent closer than the frame before it, so at 60 Hz the view doubles
+ * about every two seconds. The same percent applies at every depth.
  */
-export const AUTO_ZOOM_STEP = 1.03;
+export const AUTO_ZOOM_STEP = 1.005;
 
 const RATIOS = {
   koch: 3,
