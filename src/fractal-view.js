@@ -118,13 +118,15 @@ export function iterationCap(baseDepth, magnification) {
  */
 const NEWTON_STEPS_PER_OCTAVE = 5;
 
-export function escapeIterationCap(fractalId, baseDepth, magnification) {
+export function escapeIterationCap(fractalId, baseDepth, magnification, log2mag = Number.NaN) {
   if (fractalId === "mandelbrot") {
-    const log2mag = Math.log2(Math.max(1, magnification));
-    if (!Number.isFinite(log2mag)) return DEEP_ITERATION_LIMIT;
+    // A double magnification overflows to Infinity near 10^308. The caller can pass the real
+    // log2 so the cap keeps climbing all the way to 10^10000 instead of snapping to the maximum.
+    const log = Number.isFinite(log2mag) ? Math.max(0, log2mag) : Math.log2(Math.max(1, magnification));
+    if (!Number.isFinite(log)) return DEEP_ITERATION_LIMIT;
     // Past a few hundred octaves the boundary needs a little more than 96 iterations per halving.
-    const per = log2mag > 400 ? 112 : 96;
-    const extra = Math.max(0, Math.round(log2mag * per));
+    const per = log > 400 ? 112 : 96;
+    const extra = Math.max(0, Math.round(log * per));
     return Math.min(DEEP_ITERATION_LIMIT, Math.max(1, baseDepth + extra));
   }
   if (fractalId !== "newton") return iterationCap(baseDepth, magnification);

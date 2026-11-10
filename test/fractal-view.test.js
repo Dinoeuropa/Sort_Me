@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isSeahorseCenter } from "../src/deep-float.js";
+import { DEEP_ZOOM_DIGITS, SEAHORSE_FLOOR_EXP, isSeahorseCenter } from "../src/deep-float.js";
 import { autoZoomFloor, autoZoomFloorExp, autoZoomTarget, boundaryAnchor, escapeBand, escapeValue, planePoint, presetById, reliefCenter } from "../src/fractals.js";
 import { fitTransform } from "../src/palettes.js";
 import {
@@ -312,7 +312,8 @@ test("the shader draws plain coordinates while they hold and offsets from a refe
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-6 }, 800), "perturb");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-20 }, 800), "deep");
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-40 }, 800), "deep");
-  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-320 }, 800), null);
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1e-320 }, 800), "deep");
+  assert.equal(gpuDepthMode({ ...onSpiral, scale: 1, scaleExp: SEAHORSE_FLOOR_EXP - 1 }, 800), null);
   assert.equal(gpuDepthMode({ ...onSpiral, scale: 1.5, scaleExp: -1040 }, 800), "deep");
   assert.equal(gpuDepthMode({ centerX: -0.75, centerY: 0.1, scale: 1, scaleExp: -1040 }, 800), null);
   assert.equal(gpuDepthMode(null, 800), null);
@@ -498,7 +499,7 @@ test("the seahorse dive carries its width past the float64 exponent wall", () =>
   const start = { ...presetById("mandelbrot", "seahorse"), flipY: false };
   const target = autoZoomTarget("mandelbrot", start);
   assert.equal(autoZoomFloor("mandelbrot"), 1e-12);
-  assert.equal(autoZoomFloorExp("mandelbrot", start), -1040);
+  assert.equal(autoZoomFloorExp("mandelbrot", start), SEAHORSE_FLOOR_EXP);
   const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot"), autoZoomFloorExp("mandelbrot", start));
   const bottom = autoZoomView(path, path.maxOctave);
   assert.ok(bottom.scaleExp < -1022, `exponent ${bottom.scaleExp}`);
@@ -646,7 +647,7 @@ test("each reactive fractal has a fixed point to dive into", () => {
   assert.equal(autoZoomFloor("burning"), 1e-28);
   assert.equal(autoZoomFloor("julia"), 1e-28);
   assert.equal(autoZoomFloor("newton"), 1e-28);
-  assert.equal(autoZoomFloorExp("mandelbrot"), -1040);
+  assert.equal(autoZoomFloorExp("mandelbrot"), SEAHORSE_FLOOR_EXP);
   assert.equal(autoZoomFloorExp("julia"), null);
   assert.equal(autoZoomFloorExp("newton"), null);
   assert.equal(autoZoomFloorExp("burning"), null);
@@ -800,7 +801,7 @@ test("a strip that is still slow at one row narrows its columns instead of doubl
   assert.deepEqual(reset, { rows: 1, cols: 3 });
 });
 
-test("every Mandelbrot dive passes 10^100 on the seahorse center before it fades", () => {
+test("every Mandelbrot dive passes 10^10000 on the seahorse center before it fades", () => {
   const hundred = Math.log2(1e100);
   const cases = [
     presetById("mandelbrot", "classic"),
@@ -809,7 +810,7 @@ test("every Mandelbrot dive passes 10^100 on the seahorse center before it fades
   ];
   for (const preset of cases) {
     const start = { ...preset, flipY: false };
-    assert.equal(autoZoomFloorExp("mandelbrot", preset), -1040, preset.id);
+    assert.equal(autoZoomFloorExp("mandelbrot", preset), SEAHORSE_FLOOR_EXP, preset.id);
     const target = autoZoomTarget("mandelbrot", preset);
     const path = autoZoomPath(start, target, autoZoomFloor("mandelbrot", preset), autoZoomFloorExp("mandelbrot", preset));
     assert.ok(path.maxOctave > hundred, `${preset.id} octave ${path.maxOctave}`);
@@ -818,10 +819,20 @@ test("every Mandelbrot dive passes 10^100 on the seahorse center before it fades
     assert.equal(isSeahorseCenter(there), true, preset.id);
     assert.equal(gpuDepthMode(there, 800), "deep", preset.id);
     const bottom = autoZoomView(path, path.maxOctave);
-    const magnification = start.scale / (bottom.scale * 2 ** bottom.scaleExp);
-    assert.ok(magnification >= 1e100, `${preset.id} magnification ${magnification}`);
+    const digits = (scaleLog(start) - scaleLog(bottom)) * Math.log10(2);
+    assert.ok(digits >= DEEP_ZOOM_DIGITS, `${preset.id} reaches ${digits} digits`);
     assert.equal(gpuDepthMode(bottom, 800), "deep", preset.id);
+    assert.equal(isSeahorseCenter(bottom), true, preset.id);
   }
+});
+
+test("the mandelbrot iteration cap follows the real depth after a double magnification overflows", () => {
+  const mid = escapeIterationCap("mandelbrot", 48, Infinity, 2000);
+  const deep = escapeIterationCap("mandelbrot", 48, Infinity, DEEP_ZOOM_DIGITS * Math.log2(10));
+  assert.ok(mid < DEEP_ITERATION_LIMIT, `mid cap ${mid}`);
+  assert.ok(deep > mid, `deep ${deep} vs mid ${mid}`);
+  assert.ok(deep <= DEEP_ITERATION_LIMIT, `deep cap ${deep}`);
+  assert.ok(deep > 3_000_000, `a 10^10000 view needs millions of iterations, got ${deep}`);
 });
 
 test("the seahorse orbit cap climbs by one step when the dive asks for the rest at once", () => {

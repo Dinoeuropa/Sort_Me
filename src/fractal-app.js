@@ -890,7 +890,8 @@ function exploredLevel() {
   const magnification = currentMagnification();
   const base = state.baseDepth || depthValue();
   if (fractal.kind === "escape") {
-    return escapeIterationCap(state.fractalId, base, magnification);
+    const log = state.home && state.view ? scaleLog(state.home) - scaleLog(state.view) : Number.NaN;
+    return escapeIterationCap(state.fractalId, base, magnification, log);
   }
   if (fractal.kind === "ifs") return pointBudget(base, magnification, 80000);
   if (!state.view) return recursionLevel(fractal.id, base, magnification, fractal.minDepth, fractal.maxDepth, state.presetId);
@@ -2137,7 +2138,12 @@ function ensureAutoPlate(token, box) {
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(path, from + ((to - from) * i) / 4));
   const cover = coverViews(samples, aspect, plateMargin(from));
   const deepest = samples[samples.length - 1];
-  const cap = paceZoomCap(escapeIterationCap(state.fractalId, state.baseDepth || depthValue(), scaleRatio(state.home || deepest, deepest)));
+  const cap = paceZoomCap(escapeIterationCap(
+    state.fractalId,
+    state.baseDepth || depthValue(),
+    scaleRatio(state.home || deepest, deepest),
+    scaleLog(state.home || deepest) - scaleLog(deepest),
+  ));
   const edge = Math.min(state.plateEdge || plateRasterEdge(cap), PLATE_EDGE_MAX);
   const raster = rasterSize(box.width, box.height, box.dpr, true, edge);
   const view = { ...cover, flipY: Boolean(path.start.flipY) };
@@ -2367,10 +2373,12 @@ function queueGpuZoom(box) {
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(state.autoPath, from + ((ahead - from) * i) / 4));
   const cover = { ...coverViews(samples, aspect, plateMargin(from)), flipY: Boolean(state.autoPath.start.flipY) };
   const raster = zoomJobSize(box);
+  const deepestSample = samples[samples.length - 1];
   const wanted = escapeIterationCap(
     state.fractalId,
     state.baseDepth || depthValue(),
-    scaleRatio(state.home, samples[samples.length - 1]),
+    scaleRatio(state.home, deepestSample),
+    scaleLog(state.home) - scaleLog(deepestSample),
   );
   const depth = gpuDepthMode(cover, raster.height);
   if (!depth || (depth !== "deep" && wanted > GPU_ITER_LIMIT)) return;

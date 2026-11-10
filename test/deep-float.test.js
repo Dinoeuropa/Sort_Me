@@ -3,6 +3,9 @@ import test from "node:test";
 import { escapeValue, openPaletteProbe, paletteRange } from "../src/fractals.js";
 import { ddAdd, ddSub } from "../src/precision.js";
 import {
+  DEEP_ITERATION_LIMIT,
+  DEEP_ZOOM_DIGITS,
+  DEEP_ZOOM_SCALE_BITS,
   fixedFromNumber,
   fixedMandelbrotIterations,
   fixedToNumber,
@@ -69,23 +72,45 @@ test("linear blocks keep the same escape time and fit in one shader pass", () =>
   assert.ok(Math.abs(rounded - exact) <= 2, `float32 ${rounded} vs ${exact}`);
 });
 
-test("a floatexp offset past the float64 wall matches fixed-point iteration", () => {
-  const exp = SEAHORSE_FLOOR_EXP;
-  assert.ok(exp <= -1040);
+test("a floatexp offset past the float64 wall matches single-step perturbation", () => {
+  const exp = -1040;
   assert.ok(exp < -1022);
-  const orbit = seahorseOrbit(131072);
-  const direct = seahorseOffsetIterations(exp, 1, 131072);
-  const blocked = scaledEscape(orbit, 1, 0, 131072, { exp, trace: true });
-  const rounded = scaledEscape(orbit, 1, 0, 131072, { exp, float32: true, trace: true });
-  assert.ok(direct > 16384 && direct < 131072, `direct escape ${direct}`);
-  assert.ok(Math.abs(blocked.iter - direct) <= 1, `blocks ${blocked.iter} vs ${direct}`);
+  assert.ok(SEAHORSE_FLOOR_EXP < exp);
+  const cap = 131072;
+  const orbit = seahorseOrbit(cap);
+  const plain = scaledEscape(orbit, 1, 0, cap, { exp, blocks: false });
+  const blocked = scaledEscape(orbit, 1, 0, cap, { exp, trace: true });
+  const rounded = scaledEscape(orbit, 1, 0, cap, { exp, float32: true, trace: true });
+  assert.ok(plain > 16384 && plain < cap, `escape ${plain}`);
+  assert.equal(blocked.iter, plain);
   assert.ok(blocked.steps < 16384, `shader steps ${blocked.steps}`);
-  assert.ok(Math.abs(rounded.iter - direct) <= 1, `float32 ${rounded.iter} vs ${direct}`);
+  assert.ok(Math.abs(rounded.iter - plain) <= 1, `float32 ${rounded.iter} vs ${plain}`);
   assert.ok(rounded.steps < 16384, `float32 steps ${rounded.steps}`);
-  const other = seahorseOffsetIterations(exp, 1.5, 131072);
-  assert.notEqual(other, direct);
-  const otherScaled = scaledEscape(orbit, 1.5, 0, 131072, { exp });
-  assert.notEqual(otherScaled, blocked.iter);
+  assert.notEqual(scaledEscape(orbit, 1.5, 0, cap, { exp }), plain);
+});
+
+test("a 10^10000 view escapes from one reference orbit inside a shader pass", () => {
+  assert.equal(DEEP_ZOOM_DIGITS, 10000);
+  assert.ok(DEEP_ZOOM_SCALE_BITS >= Math.ceil(10000 * Math.log2(10)));
+  assert.ok(SEAHORSE_FLOOR_EXP <= -DEEP_ZOOM_SCALE_BITS);
+  const exp = SEAHORSE_FLOOR_EXP;
+  const probe = seahorseOrbit(128);
+  const lambda = 2 * Math.hypot(probe.orbit[80 * 2], probe.orbit[80 * 2 + 1]);
+  const anchor = scaledEscape(seahorseOrbit(20000), 1, 0, 20000, { exp: -80 });
+  const orbit = seahorseOrbit(DEEP_ITERATION_LIMIT);
+  const deep = scaledEscape(orbit, 1, 0, DEEP_ITERATION_LIMIT, { exp, trace: true });
+  const perBit = (deep.iter - anchor) / ((-exp) - 80);
+  assert.ok(anchor > 1000 && anchor < 20000, `anchor escape ${anchor}`);
+  assert.ok(deep.iter > anchor && deep.iter < DEEP_ITERATION_LIMIT, `escape ${deep.iter}`);
+  assert.ok(Math.abs(perBit - 1 / Math.log2(lambda)) < 0.5, `iterations per bit ${perBit}`);
+  assert.ok(deep.steps < 16384, `shader steps ${deep.steps}`);
+  const rounded = scaledEscape(orbit, 1, 0, DEEP_ITERATION_LIMIT, { exp, float32: true });
+  assert.ok(Math.abs(rounded - deep.iter) <= 2, `float32 ${rounded} vs ${deep.iter}`);
+  const nearer = scaledEscape(orbit, 0.25, 0, DEEP_ITERATION_LIMIT, { exp });
+  assert.ok(nearer > deep.iter, `closer pixel escaped at ${nearer}, edge at ${deep.iter}`);
+  const interior = scaledEscape(orbit, 0, 0, DEEP_ITERATION_LIMIT, { exp, trace: true });
+  assert.equal(interior.iter, DEEP_ITERATION_LIMIT);
+  assert.ok(interior.steps < 16384, `interior shader steps ${interior.steps}`);
 });
 
 test("a seahorse orbit extended in slices builds the same blocks as one request", () => {

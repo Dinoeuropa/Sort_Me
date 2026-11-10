@@ -1,19 +1,36 @@
 /**
  * High-precision Mandelbrot orbit for the deep zoom.
  *
- * The seahorse center is a Misiurewicz point: the critical orbit lands on a repelling fixed
- * point after 63 steps. A pair of doubles holds about 32 digits of it, so a dive past roughly
- * 10^28 leaves the spiral. Here the same point is refined in fixed point, the reference orbit
- * is stored as doubles (every term stays inside the escape radius), and a pixel is a scaled
- * offset from that orbit. The pixel's c offset keeps its own exponent, so the view can pass the
- * float64 wall without flushing that offset when the running z is renormalized. Linear blocks
- * jump the long middle of the orbit in one step, which is what lets a shader loop of 16384
- * cover an escape time well past that.
+ * A magnification of 10^10000 needs about 10000 log2(10) bits just to name the width. That
+ * precision is spent once, on the camera center and its reference orbit. The seahorse center is a
+ * Misiurewicz point: the critical orbit lands on a repelling fixed point after 63 steps, and from
+ * there the reference value repeats. Pixels never redo that arithmetic. A pixel is
+ * c = C + δc, iterated as δz ← 2 Z δz + δz² + δc, with δ stored as a float mantissa and a separate
+ * exponent so 10^-10000 is an ordinary number. When a pixel's own orbit cancels against the
+ * reference, or the reference runs out, it rebases onto the start of the critical orbit. Bilinear
+ * blocks then skip the long periodic tail, which is what lets a shader loop of 16384 cover an
+ * escape counted in the millions.
  */
 
-const FRACTION_BITS = 1152;
-const ONE = 1n << BigInt(FRACTION_BITS);
-const HALF = 1n << BigInt(FRACTION_BITS - 1);
+/** Decimal digits of magnification the Mandelbrot deep zoom is built to reach. */
+export const DEEP_ZOOM_DIGITS = 10000;
+
+/** Bits needed to represent a scale of 10^10000. ceil(10000 log2(10)) is 33220. */
+export const DEEP_ZOOM_SCALE_BITS = Math.ceil(DEEP_ZOOM_DIGITS * Math.log2(10));
+
+/** Extra bits so the reference residual stays below a double at the bottom of the dive. */
+const GUARD_BITS = 256;
+
+/**
+ * Bits of headroom under the smallest Mandelbrot preset. log2(1/0.012) is about 6.4, and the
+ * mantissa at the floor can add almost another bit, so 16 keeps every preset at 10^10000.
+ */
+const PRESET_SPAN_BITS = 16;
+
+const FRACTION_BITS = DEEP_ZOOM_SCALE_BITS + GUARD_BITS;
+
+/** Working fraction bits. Newton's method doubles this; the stored point always uses FRACTION_BITS. */
+let workBits = FRACTION_BITS;
 
 /** Deepest Mandelbrot view scale, as a fraction of the target's distance from the origin. */
 export const MANDELBROT_ZOOM_FLOOR = 1e-290;
@@ -44,10 +61,11 @@ export const SEAHORSE_CENTER = {
 };
 
 /**
- * Deepest seahorse view, as floor(log2(width)). Past 2^-1022, still ~100 bits coarser than the
- * 1152-bit center, and a pixel there escapes inside the iteration cap with room in the shader loop.
+ * Deepest seahorse view, as floor(log2(width)). Past 2^-1022, and still a few hundred bits
+ * coarser than the reference center. A classic frame and the smallest Mandelbrot preset both
+ * reach 10^10000 here, and a pixel still escapes inside the iteration cap.
  */
-export const SEAHORSE_FLOOR_EXP = -1040;
+export const SEAHORSE_FLOOR_EXP = -(DEEP_ZOOM_SCALE_BITS + PRESET_SPAN_BITS);
 
 /** True when the camera is on the seahorse center, close enough that a pixel still contains it. */
 export function isSeahorseCenter(view) {
@@ -62,16 +80,21 @@ export function isSeahorseCenter(view) {
   return Math.log2(miss) <= log + Math.log2(1e-3);
 }
 
-/** Real iterations a Mandelbrot deep zoom may spend. The shader loop is much shorter. */
-export const DEEP_ITERATION_LIMIT = 131072;
+/**
+ * Real iterations a Mandelbrot deep zoom may spend. The shader loop is 16384 steps; bilinear
+ * blocks cover this many iterations inside that loop. Four million sits above the escape at
+ * 10^10000 and still indexes exactly in a float32 texture.
+ */
+export const DEEP_ITERATION_LIMIT = 4000000;
 
-const BLOCK_LIMIT = 64;
+/** Longest bilinear jump. On the fixed-point tail |2Z| ≈ 1.0067, so a long block still fits in a float. */
+const BLOCK_LIMIT = 1024;
 const COEFFICIENT_LIMIT = 1e20;
 
 function roundShift(product) {
   const neg = product < 0n;
   const abs = neg ? -product : product;
-  const rounded = (abs + HALF) >> BigInt(FRACTION_BITS);
+  const rounded = (abs + (1n << BigInt(workBits - 1))) >> BigInt(workBits);
   return neg ? -rounded : rounded;
 }
 
@@ -89,17 +112,17 @@ function roundDiv(num, den) {
 }
 
 function div(a, b) {
-  return roundDiv(a << BigInt(FRACTION_BITS), b);
+  return roundDiv(a << BigInt(workBits), b);
 }
 
-/** Decimal string to fixed point, rounded to the nearest unit. */
-function fixedFromDecimal(text) {
+/** Decimal string to fixed point at `bits` fraction bits, rounded to the nearest unit. */
+function fixedFromDecimal(text, bits = FRACTION_BITS) {
   const neg = text.startsWith("-");
   const body = neg ? text.slice(1) : text;
   const [whole, frac = ""] = body.split(".");
   const digits = `${whole}${frac}`.replace(/^0+(?=\d)/, "") || "0";
   const scale = frac.length;
-  const num = BigInt(digits) << BigInt(FRACTION_BITS);
+  const num = BigInt(digits) << BigInt(bits);
   const den = 10n ** BigInt(scale);
   const rounded = (num + den / 2n) / den;
   return neg ? -rounded : rounded;
@@ -125,18 +148,17 @@ export function fixedFromNumber(value) {
 }
 
 /** Fixed point back to a double, rounded to the leading 53 bits. */
-export function fixedToNumber(value) {
+export function fixedToNumber(value, bits = FRACTION_BITS) {
   if (value === 0n) return 0;
   const neg = value < 0n;
   const abs = neg ? -value : value;
-  const bits = abs.toString(2).length;
-  if (bits <= 53) {
-    const n = Number(abs) / 2 ** FRACTION_BITS;
-    return neg ? -n : n;
-  }
-  const shift = bits - 53;
-  const top = Number(abs >> BigInt(shift));
-  const n = top * 2 ** (shift - FRACTION_BITS);
+  const width = abs.toString(2).length;
+  const shift = width <= 53 ? 0 : width - 53;
+  const top = shift === 0 ? Number(abs) : Number(abs >> BigInt(shift));
+  const exp = shift - bits;
+  if (exp < -1074) return 0;
+  if (exp > 1023) return neg ? -Infinity : Infinity;
+  const n = top * 2 ** exp;
   return neg ? -n : n;
 }
 
@@ -228,7 +250,7 @@ function newtonStep(cx, cy) {
     const ry = mul(zy, dy);
     const ix = mul(zx, dy);
     const iy = mul(zy, dx);
-    const ndx = ((rx - ry) << 1n) + ONE;
+    const ndx = ((rx - ry) << 1n) + (1n << BigInt(workBits));
     const ndy = (ix + iy) << 1n;
     const next = stepFixed(zx, zy, cx, cy);
     zx = next[0];
@@ -263,30 +285,61 @@ function measureResidual(cx, cy) {
 
 let refined = null;
 
-/** The seahorse center refined until the fixed-point residual is far below a double. */
+/** Shift a fixed-point value from one fraction width to another, rounding when narrowing. */
+function liftFixed(value, fromBits, toBits) {
+  if (toBits === fromBits) return value;
+  if (toBits > fromBits) return value << BigInt(toBits - fromBits);
+  const sh = BigInt(fromBits - toBits);
+  const neg = value < 0n;
+  const abs = neg ? -value : value;
+  const rounded = (abs + (1n << (sh - 1n))) >> sh;
+  return neg ? -rounded : rounded;
+}
+
+/**
+ * The seahorse center refined until z₆₄ lands on z₆₃.
+ * Precision doubles each round, so the last step is the only one at full width. The stored point
+ * is wide enough that a 10^10000 pixel is still many units away from the bottom bit.
+ */
 export function seahorsePoint() {
   if (refined) return refined;
-  let cx = fixedFromDecimal("-0.74369654654391224602677650092828");
-  let cy = fixedFromDecimal("0.13172167175968114661019334859519");
-  for (let step = 0; step < 12; step += 1) {
-    const next = newtonStep(cx, cy);
-    const moved = Math.hypot(fixedToNumber(next[0] - cx), fixedToNumber(next[1] - cy));
-    cx = next[0];
-    cy = next[1];
-    if (!(moved > 0)) break;
+  const seedX = "-0.74369654654391224602677650092828";
+  const seedY = "0.13172167175968114661019334859519";
+  try {
+    let bits = 256;
+    workBits = bits;
+    let cx = fixedFromDecimal(seedX, bits);
+    let cy = fixedFromDecimal(seedY, bits);
+    while (bits <= FRACTION_BITS) {
+      for (let step = 0; step < 2; step += 1) {
+        const next = newtonStep(cx, cy);
+        const moved = Math.hypot(fixedToNumber(next[0] - cx, bits), fixedToNumber(next[1] - cy, bits));
+        cx = next[0];
+        cy = next[1];
+        if (!(moved > 0)) break;
+      }
+      if (bits === FRACTION_BITS) break;
+      const nextBits = Math.min(FRACTION_BITS, bits * 2);
+      cx = liftFixed(cx, bits, nextBits);
+      cy = liftFixed(cy, bits, nextBits);
+      bits = nextBits;
+      workBits = bits;
+    }
+    const x = fixedToNumber(cx);
+    const y = fixedToNumber(cy);
+    refined = {
+      re: cx,
+      im: cy,
+      x,
+      xLo: fixedToNumber(cx - fixedFromNumber(x)),
+      y,
+      yLo: fixedToNumber(cy - fixedFromNumber(y)),
+      residual: measureResidual(cx, cy),
+    };
+    return refined;
+  } finally {
+    workBits = FRACTION_BITS;
   }
-  const x = fixedToNumber(cx);
-  const y = fixedToNumber(cy);
-  refined = {
-    re: cx,
-    im: cy,
-    x,
-    xLo: fixedToNumber(cx - fixedFromNumber(x)),
-    y,
-    yLo: fixedToNumber(cy - fixedFromNumber(y)),
-    residual: measureResidual(cx, cy),
-  };
-  return refined;
 }
 
 let orbitCache = null;
@@ -316,17 +369,53 @@ function extendOrbit(cap) {
     orbitCache.orbit = next;
   }
   const four = 4n << BigInt(FRACTION_BITS);
+  const gapLimit = 1n << BigInt(FRACTION_BITS - 128);
+  if (orbitCache.cycling) {
+    if (orbitCache.count < needed) {
+      const { cycleX, cycleY, orbit } = orbitCache;
+      for (let n = orbitCache.count; n < needed; n += 1) {
+        orbit[n * 2] = cycleX;
+        orbit[n * 2 + 1] = cycleY;
+      }
+      orbitCache.count = needed;
+    }
+    return;
+  }
   while (orbitCache.count < needed) {
     const n = orbitCache.count;
+    const prevZx = orbitCache.zx;
+    const prevZy = orbitCache.zy;
     const xx = mul(orbitCache.zx, orbitCache.zx);
     const yy = mul(orbitCache.zy, orbitCache.zy);
     if (xx + yy > four) break;
     const xy = mul(orbitCache.zx, orbitCache.zy);
     orbitCache.zx = xx - yy + orbitCache.re;
     orbitCache.zy = (xy << 1n) + orbitCache.im;
-    orbitCache.orbit[n * 2] = fixedToNumber(orbitCache.zx);
-    orbitCache.orbit[n * 2 + 1] = fixedToNumber(orbitCache.zy);
+    const x = fixedToNumber(orbitCache.zx);
+    const y = fixedToNumber(orbitCache.zy);
+    orbitCache.orbit[n * 2] = x;
+    orbitCache.orbit[n * 2 + 1] = y;
     orbitCache.count = n + 1;
+    const gapRe = orbitCache.zx > prevZx ? orbitCache.zx - prevZx : prevZx - orbitCache.zx;
+    const gapIm = orbitCache.zy > prevZy ? orbitCache.zy - prevZy : prevZy - orbitCache.zy;
+    const landed = n > 32
+      && n > 1
+      && x === orbitCache.orbit[(n - 1) * 2]
+      && y === orbitCache.orbit[(n - 1) * 2 + 1]
+      && (x !== 0 || y !== 0)
+      && gapRe < gapLimit
+      && gapIm < gapLimit;
+    if (landed) {
+      orbitCache.cycling = true;
+      orbitCache.cycleX = x;
+      orbitCache.cycleY = y;
+      for (let fill = orbitCache.count; fill < needed; fill += 1) {
+        orbitCache.orbit[fill * 2] = x;
+        orbitCache.orbit[fill * 2 + 1] = y;
+      }
+      orbitCache.count = needed;
+      break;
+    }
   }
 }
 
@@ -380,7 +469,7 @@ function growBlocks() {
     }
     if (!closed && length < BLOCK_LIMIT) break;
     if (length >= 8 && radius < Infinity) {
-      blocks.push({
+      const block = {
         at: n,
         length,
         ax,
@@ -389,13 +478,35 @@ function growBlocks() {
         by,
         radius,
         radiusExp: Math.floor(Math.log2(radius)),
-      });
+      };
+      blocks.push(block);
       n += length;
+      // The fixed-point tail is the same bilinear step at every index, so one block is copied
+      // forward instead of being derived again for each of the millions of iterations.
+      if (constantTail(orbit, block.at, count - 2)) {
+        while (n + length < count - 2) {
+          blocks.push({ ...block, at: n });
+          n += length;
+        }
+      }
     } else {
       n += Math.max(1, length);
     }
   }
   orbitCache.blockAt = n;
+}
+
+/** True when every sample from `from` through `to` is the same non-zero point. */
+function constantTail(orbit, from, to) {
+  if (to <= from) return false;
+  const x = orbit[from * 2];
+  const y = orbit[from * 2 + 1];
+  if (x === 0 && y === 0) return false;
+  const last = Math.min(to, orbit.length / 2 - 1);
+  for (let i = from + 1; i <= last; i += 1) {
+    if (orbit[i * 2] !== x || orbit[i * 2 + 1] !== y) return false;
+  }
+  return last === to;
 }
 
 /**
@@ -477,7 +588,9 @@ function blockFits(block, dx, dy, dcx, dcy, e, ec) {
  * Without `exp`, (ux, uy) is a world offset and its exponent is split off here.
  * With `exp`, (ux, uy) is the mantissa and `exp` is kept for the whole pixel: the z offset
  * carries its own exponent, and a term is added only while the two still share a significand.
- * `blocks: false` steps one iteration at a time. `float32` rounds the way the shader does.
+ * When the pixel's orbit cancels the reference, or the reference runs out, the pixel rebases
+ * onto the critical orbit so a bad reference does not paint a glitch. Bilinear blocks skip the
+ * periodic tail. `blocks: false` steps one iteration at a time. `float32` rounds the way the shader does.
  * With `trace`, returns `{ iter, steps }` where `steps` is the shader loop count.
  */
 export function scaledEscape(reference, ux, uy, maxIter, options = {}) {
