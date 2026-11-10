@@ -637,8 +637,8 @@ export function boundaryAnchor(fractalId, preset, start, radius, cap = ANCHOR_CA
 /**
  * The one point auto zoom dives toward for a fractal, each held to double-double precision so the
  * edge stays in the frame at every depth.
- * Mandelbrot dives into the seahorse valley, the point a deep picture can still draw past
- * 10^100. A Julia set dives into its repelling fixed point, Newton's method into the pole where
+ * Mandelbrot dives into the seahorse valley, the point a deep picture can still draw at
+ * 10^10000. A Julia set dives into its repelling fixed point, Newton's method into the pole where
  * the three basins meet, and the burning ship into a spiral beside its small ship. A burning ship
  * with c fixed by the cursor has no such point ready, so it searches for an edge near the middle
  * of the picture in plain doubles.
@@ -657,7 +657,7 @@ export function autoZoomTarget(fractalId, preset) {
  * How small a view auto zoom may reach, as a multiple of the target's distance from the origin.
  * Julia, Newton, and the burning ship are drawn in double-double, so they run until a plate pixel
  * nears the 32nd digit. Every Mandelbrot dive uses the exponent floor instead and keeps going
- * past 10^100 on the seahorse center. When the frame would fill with the interior, a nearby
+ * to 10^10000 on the seahorse center. When the frame would fill with the interior, a nearby
  * filament still has detail, so a plate of the period-3 island does not have to go blank.
  * A burning ship with c from the cursor dives toward a plain-double edge that breaks into dust a
  * few thousand times in, so it turns back sooner.
