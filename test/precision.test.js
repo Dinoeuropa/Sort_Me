@@ -519,7 +519,9 @@ test("the palette window fits a crowded plate and leaves a wide or shallow one a
   assert.notDeepEqual([...painted.subarray(4, 7)], [...flat.subarray(4, 7)]);
   assert.deepEqual([...painted.subarray(12, 15)], [...flat.subarray(12, 15)]);
   const capped = paintEscape("ink", Uint16Array.from([70, 200, 300]), Int8Array.from([-1, -1, -1]), 3, 1, 6000, 1, 6000, 0, 200);
-  assert.deepEqual([...capped.subarray(4, 7)], [...capped.subarray(8, 11)]);
+  const hole = paintEscape("ink", Uint16Array.from([6000]), Int8Array.from([-1]), 1, 1, 6000, 1, 6000, 0, 200);
+  assert.notDeepEqual([...capped.subarray(4, 7)], [...capped.subarray(8, 11)]);
+  assert.deepEqual([...capped.subarray(8, 11)], [...hole.subarray(0, 3)]);
 });
 
 test("a shown palette window eases toward a new fit instead of jumping to it", () => {
