@@ -464,8 +464,8 @@ test("auto zoom follows one fixed path into its target", () => {
   assert.ok(biggest < 0.05);
 });
 
-test("each deep-zoom frame multiplies magnification by 3 percent, including past a trillion times", () => {
-  assert.equal(AUTO_ZOOM_STEP, 1.03);
+test("each deep-zoom frame multiplies magnification by half a percent, including past a trillion times", () => {
+  assert.equal(AUTO_ZOOM_STEP, 1.005);
   const path = autoZoomPath(
     { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false },
     { x: -0.7436, y: 0.1317, xLo: 0, yLo: 0 },
@@ -477,12 +477,12 @@ test("each deep-zoom frame multiplies magnification by 3 percent, including past
   const shallowGrow = 2 ** (shallow.octave - 0);
   const deepGrow = 2 ** (deep.octave - deepOctave);
   assert.ok(Math.abs(shallowGrow - deepGrow) < 1e-9);
-  assert.ok(Math.abs(shallowGrow - 1.03) < 1e-9);
-  assert.ok(Math.abs(deepGrow - 1.03) < 1e-9);
-  assert.ok(deepGrow > 1.01, "one frame past 3e12× still moves the picture");
+  assert.ok(Math.abs(shallowGrow - AUTO_ZOOM_STEP) < 1e-9);
+  assert.ok(Math.abs(deepGrow - AUTO_ZOOM_STEP) < 1e-9);
+  assert.ok(deepGrow > 1.001, "one frame past 3e12× still moves the picture");
   assert.equal(advanceAutoZoom(path, deepOctave, 0).octave, deepOctave);
   const two = advanceAutoZoom(path, deepOctave, 2);
-  assert.ok(Math.abs(2 ** (two.octave - deepOctave) - 1.03 ** 2) < 1e-9);
+  assert.ok(Math.abs(2 ** (two.octave - deepOctave) - AUTO_ZOOM_STEP ** 2) < 1e-9);
   assert.equal(two.done, false);
   const step = Math.log2(AUTO_ZOOM_STEP);
   const near = path.maxOctave - step * 1.5;
@@ -506,9 +506,9 @@ test("the seahorse dive carries its width past the float64 exponent wall", () =>
   assert.ok(bottom.scale >= 1 && bottom.scale < 2, `mantissa ${bottom.scale}`);
   const deepOctave = path.maxOctave - 2;
   const here = autoZoomView(path, deepOctave);
-  const next = autoZoomView(path, deepOctave + Math.log2(1.03));
+  const next = autoZoomView(path, deepOctave + Math.log2(AUTO_ZOOM_STEP));
   assert.ok(here.scale > 0 && next.scale > 0);
-  assert.ok(Math.abs(scaleLog(here) - scaleLog(next) - Math.log2(1.03)) < 1e-9);
+  assert.ok(Math.abs(scaleLog(here) - scaleLog(next) - Math.log2(AUTO_ZOOM_STEP)) < 1e-9);
   assert.equal(gpuDepthMode(bottom, 800), "deep");
 });
 
@@ -596,7 +596,7 @@ test("plates lose their wide margin once the target sits in the middle of the fr
   assert.equal(coverViews([camera], 1.5, 0).scale, wide.scale);
 });
 
-test("sixty frames each add 3 percent, and the same ratio holds at every depth", () => {
+test("sixty frames each add half a percent, and the same ratio holds at every depth", () => {
   const path = autoZoomPath({ centerX: 0, centerY: 0, scale: 2, flipY: false }, { x: 0, y: 0 });
   const fromRest = advanceAutoZoom(path, 0, 60);
   const fromDeep = advanceAutoZoom(path, 40, 60);

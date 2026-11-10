@@ -2074,8 +2074,8 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of deep zoom. Every displayed frame takes one 3% step, the same pace as the
- * double-precision dive. A late frame still takes one step, so a hitch is a pause.
+ * One frame of deep zoom. Every displayed frame takes one half-percent step, the same pace at
+ * every depth. A late frame still takes one step, so a hitch is a pause.
  * The picture already on screen is what moves. A new frame is only copied in once the GPU
  * has finished it. Passing the deepest point fades back to the opening picture.
  */
