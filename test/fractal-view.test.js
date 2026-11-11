@@ -598,25 +598,32 @@ test("plates lose their wide margin once the target sits in the middle of the fr
   assert.equal(coverViews([camera], 1.5, 0).scale, wide.scale);
 });
 
-test("a slow frame and a fast one move the dive the same distance per second", () => {
+test("a delayed frame never jumps farther than one visible zoom step", () => {
   assert.equal(autoZoomSteps(0), 0);
   assert.ok(Math.abs(autoZoomSteps(ZOOM_FRAME_MS) - 1) < 1e-12);
-  assert.ok(Math.abs(autoZoomSteps(ZOOM_FRAME_MS * 2) - 2) < 1e-12);
+  assert.equal(autoZoomSteps(ZOOM_FRAME_MS * 2), 1);
+  assert.equal(autoZoomSteps(249), 1);
   assert.ok(Math.abs(autoZoomSteps(ZOOM_FRAME_MS / 2) - 0.5) < 1e-12);
   assert.equal(autoZoomSteps(1000), 1);
-  const path = autoZoomPath({ centerX: 0, centerY: 0, scale: 2, flipY: false }, { x: 0, y: 0 });
-  const even = advanceAutoZoom(path, 0, 60);
-  let octave = 0;
-  const gaps = [12, 28, 16, 16, 40, 8, 14, 22, 18, 16, 10, 30];
-  let spent = 0;
-  while (spent < 1000) {
-    const gap = gaps[Math.floor(spent / 10) % gaps.length];
-    const step = autoZoomSteps(gap);
-    octave = advanceAutoZoom(path, octave, step).octave;
-    spent += gap;
+});
+
+test("the central feature resizes by one uniform visual ratio per displayed frame", () => {
+  const path = autoZoomPath(
+    { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false },
+    autoZoomTarget("mandelbrot", {}),
+    1e-290,
+  );
+  let octave = 40;
+  let previous = autoZoomView(path, octave);
+  for (const gap of [16.7, 80, 8.35, 32, 16.7, 120, 10]) {
+    octave = advanceAutoZoom(path, octave, autoZoomSteps(gap)).octave;
+    const view = autoZoomView(path, octave);
+    const apparentGrowth = previous.scale / view.scale;
+    const expected = AUTO_ZOOM_STEP ** Math.min(1, gap / ZOOM_FRAME_MS);
+    assert.ok(Math.abs(apparentGrowth - expected) < 1e-9, `${gap}ms frame grew ${apparentGrowth}`);
+    assert.ok(apparentGrowth <= AUTO_ZOOM_STEP + 1e-12, `${gap}ms frame jumped ${apparentGrowth}`);
+    previous = view;
   }
-  const seconds = spent / 1000;
-  assert.ok(Math.abs(octave / seconds - even.octave) < 1e-9);
 });
 
 test("the dive approaches its target at a steady rate, then only zooms", () => {
