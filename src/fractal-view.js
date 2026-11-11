@@ -239,15 +239,13 @@ export function advanceAutoZoom(path, octave, frames) {
 
 /**
  * How many deep-zoom steps a gap between displayed frames is worth.
- * One step is {@link ZOOM_FRAME_MS}, so a 30Hz frame takes two and a 120Hz frame takes half.
- * The magnification per second stays the same when the refresh speeds up or drops.
- * A gap long enough to be a paused tab is one step, so coming back does not fast-forward.
+ * One step is {@link ZOOM_FRAME_MS}, so a 120Hz frame takes half a step. A delayed frame takes
+ * no more than one: dropped time is discarded rather than appearing as a catch-up jump.
  */
 export function autoZoomSteps(gapMs) {
   const gap = Number(gapMs);
   if (!(gap > 0)) return 0;
-  if (gap >= 250) return 1;
-  return gap / ZOOM_FRAME_MS;
+  return Math.min(1, gap / ZOOM_FRAME_MS);
 }
 
 /** Pace from rest to full over the first moments, so the start is a glide rather than a lurch. */

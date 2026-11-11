@@ -2079,9 +2079,9 @@ const AUTO_FADE_MS = 1400;
 let plateSerial = 1;
 
 /**
- * One frame of deep zoom. The magnification advances by elapsed time, one half-percent step per
- * sixtieth of a second, the same pace at every depth. A dropped frame moves the same distance
- * it would have at a steady refresh, and a paused tab does not fast-forward.
+ * One frame of deep zoom. At 60Hz and below the magnification advances by one half-percent step;
+ * faster displays take a proportional fraction. A delayed frame never takes more than one step,
+ * so dropped time slows the dive instead of appearing as a visible catch-up jump.
  * The picture already on screen is what moves. A new frame is only copied in once the GPU
  * has finished it. Passing the deepest point fades back to the opening picture.
  */
