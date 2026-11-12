@@ -36,11 +36,17 @@ import {
   ITERATION_LIMIT,
   iterationCap,
   FRAME_PACE_MS,
+  GPU_ITER_MS,
   ZOOM_PLATE_MS,
   ZOOM_STRIP_MS,
   ORBIT_STEP,
   MOTION_SCALE_MIN,
   gpuMotionShare,
+  pauseRaster,
+  refineBandRows,
+  zoomPlateSize,
+  ZOOM_PLATE_EDGE_MIN,
+  ZOOM_PLATE_HARD_MS,
   motionPace,
   motionScale,
   zoomShareNext,
@@ -344,6 +350,57 @@ test("a moving picture is drawn at the share of full size that fits the frame bu
   assert.ok(Math.abs(slow - 0.5) < 1e-9);
   assert.equal(motionScale(1e6, 1e6, 14), MOTION_SCALE_MIN);
   assert.equal(motionScale(Number.NaN, 1e6, 14), 1);
+});
+
+test("a deep zoom plate stays sharp enough to read and still finishes inside its time cap", () => {
+  const width = 1800;
+  const height = 1200;
+  const cap = 2615;
+  const plate = zoomPlateSize(width, height, cap);
+  const thumb = gpuMotionShare(cap, width * height);
+  const thumbPixels = Math.round(width * thumb) * Math.round(height * thumb);
+  const pixels = plate.width * plate.height;
+  assert.ok(Math.max(plate.width, plate.height) >= ZOOM_PLATE_EDGE_MIN, `${plate.width}x${plate.height}`);
+  assert.ok(pixels >= thumbPixels * 4, `${pixels} vs ${thumbPixels}`);
+  const time = (GPU_ITER_MS * cap * pixels) / 1e6;
+  assert.ok(time <= ZOOM_PLATE_HARD_MS * 1.08, time);
+});
+
+test("a slow GPU keeps a deep zoom plate inside the hard time cap", () => {
+  const plate = zoomPlateSize(1800, 1200, 2615, 0.2);
+  const time = (0.2 * 2615 * plate.width * plate.height) / 1e6;
+  assert.ok(time <= ZOOM_PLATE_HARD_MS * 1.08, time);
+  assert.ok(plate.width < 1800);
+  assert.ok(plate.height < 1200);
+});
+
+test("a shallow zoom plate stays the size of the screen", () => {
+  assert.deepEqual(zoomPlateSize(1800, 1200, 48), { width: 1800, height: 1200 });
+});
+
+test("pausing a deep view sharpens the screen instead of the supersampled sheet", () => {
+  const screen = { width: 1600, height: 1000 };
+  const settled = { width: 3600, height: 2720 };
+  const pause = pauseRaster(screen, settled, 2615);
+  assert.equal(pause.band, true);
+  assert.equal(pause.width, screen.width);
+  assert.equal(pause.height, screen.height);
+});
+
+test("pausing a shallow view still paints the settled sheet in one pass", () => {
+  const screen = { width: 800, height: 600 };
+  const settled = { width: 1600, height: 1200 };
+  const pause = pauseRaster(screen, settled, 48);
+  assert.equal(pause.band, false);
+  assert.equal(pause.width, settled.width);
+  assert.equal(pause.height, settled.height);
+});
+
+test("a paused deep frame sharpens a band of rows instead of the whole sheet", () => {
+  const rows = refineBandRows(2000, 1000, 2615);
+  assert.ok(rows < 1000, `rows ${rows}`);
+  assert.ok(rows >= 8, `rows ${rows}`);
+  assert.equal(refineBandRows(200, 100, 48), 100);
 });
 
 test("a moving GPU frame stays full size at a shallow cap and shrinks near 2.7 million times", () => {

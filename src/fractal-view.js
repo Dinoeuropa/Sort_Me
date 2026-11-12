@@ -709,6 +709,74 @@ export function gpuMotionShare(cap, pixels, costPerMpIter = Number.NaN, budgetMs
   return motionScale(cost * iterations, Math.max(1, pixels), budgetMs);
 }
 
+/** Milliseconds one autopilot plate may aim for. It is drawn off the page, so it can outlast one refresh. */
+export const ZOOM_PLATE_BUDGET_MS = 96;
+
+/** Long edge an autopilot plate keeps when the screen is larger and the time cap still allows it. */
+export const ZOOM_PLATE_EDGE_MIN = 1280;
+
+/** GPU time an autopilot plate must not pass, even when that long edge would cost more. */
+export const ZOOM_PLATE_HARD_MS = 160;
+
+/** Milliseconds one band of a paused picture may occupy. */
+export const PAUSE_BAND_MS = 24;
+
+function measuredIterCost(costPerMpIter) {
+  return Number.isFinite(costPerMpIter) && costPerMpIter > 0 ? costPerMpIter : GPU_ITER_MS;
+}
+
+/**
+ * Pixel size of one autopilot plate.
+ * The plate is drawn off the page, so it stays sharper than a one-refresh thumbnail,
+ * and it still stops at a hard time so a deep cap does not pin the GPU.
+ */
+export function zoomPlateSize(width, height, cap, costPerMpIter = Number.NaN) {
+  const w = Math.max(1, Math.round(Number(width) || 1));
+  const h = Math.max(1, Math.round(Number(height) || 1));
+  const pixels = w * h;
+  const iterations = Math.max(1, Number(cap) || 1);
+  const cost = measuredIterCost(costPerMpIter);
+  const fit = gpuMotionShare(iterations, pixels, cost, ZOOM_PLATE_BUDGET_MS);
+  const edge = Math.max(w, h);
+  const floor = Math.min(1, ZOOM_PLATE_EDGE_MIN / edge);
+  let share = Math.min(1, Math.max(fit, floor));
+  const timeAt = (portion) => (cost * iterations * pixels * portion * portion) / 1e6;
+  if (timeAt(share) > ZOOM_PLATE_HARD_MS) share = gpuMotionShare(iterations, pixels, cost, ZOOM_PLATE_HARD_MS);
+  return {
+    width: Math.max(1, Math.round(w * share)),
+    height: Math.max(1, Math.round(h * share)),
+  };
+}
+
+/**
+ * Where a paused picture is sharpened.
+ * A settled sheet that fits one band is painted as it is. A deep sheet uses the screen
+ * and is filled a band at a time, so the page does not wait on the supersampled frame.
+ */
+export function pauseRaster(screen, settled, cap, costPerMpIter = Number.NaN) {
+  const sw = Math.max(1, Math.round(Number(screen?.width) || 1));
+  const sh = Math.max(1, Math.round(Number(screen?.height) || 1));
+  const tw = Math.max(1, Math.round(Number(settled?.width) || 1));
+  const th = Math.max(1, Math.round(Number(settled?.height) || 1));
+  const fits = gpuMotionShare(cap, tw * th, costPerMpIter, PAUSE_BAND_MS) >= 1;
+  if (fits) return { width: tw, height: th, band: false };
+  return { width: sw, height: sh, band: true };
+}
+
+/**
+ * Rows of a paused frame that fit one band.
+ * A cheap frame returns its whole height. A deep frame returns only the rows that
+ * fit the budget, so the pointer keeps moving while the picture fills in.
+ */
+export function refineBandRows(width, height, cap, costPerMpIter = Number.NaN, budgetMs = PAUSE_BAND_MS) {
+  const rows = Math.max(1, Math.round(Number(height) || 1));
+  const iterations = Math.max(1, Number(cap) || 1);
+  const cost = measuredIterCost(costPerMpIter);
+  const perRow = (cost * iterations * Math.max(1, Number(width) || 1)) / 1e6;
+  if (!(perRow > 0) || !(budgetMs > 0)) return rows;
+  return Math.max(1, Math.min(rows, Math.floor(budgetMs / perRow)));
+}
+
 /** A refresh the dive can keep. A smooth 60Hz frame is about 17ms, so it does not count as late. */
 export const FRAME_PACE_MS = 20;
 
