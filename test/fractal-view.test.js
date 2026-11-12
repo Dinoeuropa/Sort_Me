@@ -30,6 +30,7 @@ import {
   escapeMagnification,
   DEEP_ITERATION_LIMIT,
   escapeIterationCap,
+  explorerIterationCap,
   gpuDepthMode,
   scaleLog,
   ITERATION_LIMIT,
@@ -169,7 +170,8 @@ test("closer escape windows spend more iterations and ferns plot more points", (
 });
 
 test("Newton's method gets a few more steps per octave, not the escape-time hundred", () => {
-  assert.equal(escapeIterationCap("mandelbrot", 48, 2 ** 20), iterationCap(48, 2 ** 20));
+  assert.ok(escapeIterationCap("mandelbrot", 48, 2 ** 20) < iterationCap(48, 2 ** 20));
+  assert.equal(escapeIterationCap("mandelbrot", 48, 2 ** 20) % 64, 0);
   assert.ok(escapeIterationCap("mandelbrot", 48, 2 ** 200) > ITERATION_LIMIT);
   assert.ok(escapeIterationCap("mandelbrot", 48, 2 ** 200) <= DEEP_ITERATION_LIMIT);
   assert.equal(escapeIterationCap("julia", 48, 2 ** 200), ITERATION_LIMIT);
@@ -181,6 +183,17 @@ test("Newton's method gets a few more steps per octave, not the escape-time hund
   const deepest = escapeIterationCap("newton", 16, 1e28);
   assert.ok(deepest >= 330 && deepest <= 600);
   assert.ok(escapeIterationCap("newton", 40, 2) > escapeIterationCap("newton", 40, 1));
+});
+
+test("near 2.7 million times the Mandelbrot cap follows the explorer curve", () => {
+  const mag = 2.7e6;
+  const cap = escapeIterationCap("mandelbrot", 48, mag);
+  const linear = iterationCap(48, mag);
+  assert.ok(cap < linear, `${cap} should stay under the linear ${linear}`);
+  assert.ok(cap <= 1024 && cap >= 512, cap);
+  assert.equal(cap % 64, 0);
+  assert.equal(explorerIterationCap(Math.log10(mag)) % 64, 0);
+  assert.ok(escapeIterationCap("mandelbrot", 48, 2 ** 200) > ITERATION_LIMIT);
 });
 
 test("auto zoom raises iterations with the log of magnification", () => {
