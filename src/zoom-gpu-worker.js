@@ -5,6 +5,7 @@ import { ORBIT_SLICE, nextZoomStrip } from "./fractal-view.js";
 let canvas = null;
 let busy = false;
 let waiting = null;
+let generation = 0;
 // The strip that fit the last refresh. It starts short and changes by a little,
 // so one finish stays inside a frame instead of locking the whole plate.
 let strip = { rows: 0, cols: 0, cap: 0 };
@@ -31,6 +32,7 @@ async function extendDeepOrbit(paint) {
 
 async function renderFrame(message) {
   const started = performance.now();
+  const mine = message.generation;
   let gpu = 0;
   let slowest = 0;
   try {
@@ -46,6 +48,7 @@ async function renderFrame(message) {
     let y = 0;
     let plan = nextZoomStrip(width, height, paint.cap | 0, strip, stripMs);
     while (y < height) {
+      if (generation !== mine) return;
       const tall = Math.max(1, Math.min(plan.rows, height - y));
       const wide = Math.max(1, Math.min(plan.cols, width - x));
       const t0 = performance.now();
@@ -62,6 +65,20 @@ async function renderFrame(message) {
       if (gl) gl.finish();
       const band = sheet.transferToImageBitmap();
       ctx.drawImage(band, x, y);
+      if (message.stream && generation === mine) {
+        const piece = new OffscreenCanvas(wide, tall);
+        piece.getContext("2d").drawImage(band, 0, 0);
+        const live = piece.transferToImageBitmap();
+        self.postMessage({
+          type: "strip",
+          id: message.id,
+          x,
+          y,
+          width: wide,
+          height: tall,
+          bitmap: live,
+        }, [live]);
+      }
       band.close();
       const dt = performance.now() - t0;
       gpu += dt;
@@ -79,6 +96,7 @@ async function renderFrame(message) {
       }
       if (y < height) await yieldThread();
     }
+    if (generation !== mine) return;
     const bitmap = acc.transferToImageBitmap();
     const wall = performance.now() - started;
     self.postMessage({
@@ -132,6 +150,8 @@ self.onmessage = (event) => {
     return;
   }
   if (message.type !== "render" || !canvas) return;
+  generation += 1;
+  message.generation = generation;
   waiting = message;
   pump();
 };
