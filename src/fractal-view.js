@@ -121,6 +121,23 @@ export function iterationCap(baseDepth, magnification) {
  */
 const NEWTON_STEPS_PER_OCTAVE = 5;
 
+/**
+ * Iterations the shared explorer view uses once Auto iterations is on.
+ * The reference slider is 520. `log10Zoom` is log10 of the magnification.
+ * The count stays near a thousand through the millions and is rounded up to 64.
+ */
+export function explorerIterationCap(log10Zoom) {
+  const r = Math.max(1, Number(log10Zoom) || 0);
+  const ln = Math.log(r);
+  const early = 327 * Math.exp((0.353 + 0.055 * ln) * ln);
+  const late = 2600 - 28 * r + 0.6375 * r * r;
+  const t = Math.min(1, Math.max(0, (r - 20) / 25));
+  const blend = t * t * (3 - 2 * t);
+  const raw = early + (late - early) * blend;
+  const stepped = Math.ceil(raw / 64) * 64;
+  return Math.min(32768, Math.max(64, stepped));
+}
+
 export function escapeIterationCap(fractalId, baseDepth, magnification, log2mag = Number.NaN) {
   if (fractalId === "mandelbrot") {
     // A double magnification overflows to Infinity near 10^308. The caller can pass the real
@@ -130,7 +147,18 @@ export function escapeIterationCap(fractalId, baseDepth, magnification, log2mag 
     // Past a few hundred octaves the boundary needs a little more than 96 iterations per halving.
     const per = log > 400 ? 112 : 96;
     const extra = Math.max(0, Math.round(log * per));
-    return Math.min(DEEP_ITERATION_LIMIT, Math.max(1, baseDepth + extra));
+    const linear = Math.min(DEEP_ITERATION_LIMIT, Math.max(1, baseDepth + extra));
+    const log10 = log * Math.LN2 * Math.LOG10E;
+    // Through the millions the explorer curve resolves the picture with far fewer steps than
+    // 96 per octave. From 100 million× the linear climb takes back over for the seahorse.
+    if (!(log10 < 8)) return linear;
+    const deck = explorerIterationCap(log10);
+    const held = Math.max(baseDepth | 0, Math.min(linear, deck));
+    if (!(log10 > 6)) return held;
+    const mix = (log10 - 6) / 2;
+    const eased = mix * mix * (3 - 2 * mix);
+    const joined = held + (linear - held) * eased;
+    return Math.min(linear, Math.max(held, Math.ceil(joined / 64) * 64));
   }
   if (fractalId !== "newton") return iterationCap(baseDepth, magnification);
   const extra = Math.max(0, Math.round(Math.log2(Math.max(1, magnification)) * NEWTON_STEPS_PER_OCTAVE));
