@@ -72,6 +72,8 @@ import {
   wheelZoomFactor,
   zoomBounds,
   zoomEscape,
+  zoomPace,
+  colorWindowsClash,
 } from "../src/fractal-view.js";
 
 const homeEscape = { centerX: -0.75, centerY: 0, scale: 2.6, flipY: false };
@@ -366,6 +368,23 @@ test("a wheel notch is a small zoom in every delta mode", () => {
   assert.ok(wheelZoomFactor(-100000, 0) < 2);
   assert.ok(Math.abs(wheelZoomFactor(0, 0) - 1) < 1e-12);
   assert.ok(wheelZoomFactor(100, 0) < 1);
+});
+
+test("zoom in speed 50 is the normal pace, and one pace drives the wheel", () => {
+  assert.ok(Math.abs(zoomPace(50) - 1) < 1e-12);
+  assert.ok(zoomPace(100) > 1);
+  assert.ok(zoomPace(1) < 1);
+  const base = wheelZoomFactor(-100, 0);
+  assert.ok(Math.abs(wheelZoomFactor(-100, 0, zoomPace(50)) - base) < 1e-12);
+  assert.ok(wheelZoomFactor(-100, 0, zoomPace(80)) > base);
+  const gentle = wheelZoomFactor(-100, 0, zoomPace(20));
+  assert.ok(gentle > 1 && gentle < base);
+});
+
+test("a color window clash is a jump, not one eased step", () => {
+  assert.equal(colorWindowsClash(null, { floor: 0, top: 100 }), false);
+  assert.equal(colorWindowsClash({ floor: 0, top: 640 }, { floor: 2, top: 620 }), false);
+  assert.equal(colorWindowsClash({ floor: 0, top: 640 }, { floor: 80, top: 200 }), true);
 });
 
 test("easing spends part of a pending zoom and keeps the product", () => {

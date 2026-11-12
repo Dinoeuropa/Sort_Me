@@ -769,14 +769,35 @@ export function rasterSize(width, height, dpr = 1, sharp = false, longEdge = 0) 
 
 const WHEEL_GAIN = 0.0012;
 
-/** Pixel, line, and page wheel deltas become one modest zoom factor. */
-export function wheelZoomFactor(deltaY, deltaMode = 0) {
+/**
+ * Pace for a zoom-in speed from 1 to 100. 50 is the normal pace: the wheel, the plus and minus
+ * buttons, and the dive all use it, so there is not a second dive speed.
+ */
+export function zoomPace(speed) {
+  const t = Math.min(100, Math.max(1, Number(speed) || 50));
+  return Math.exp((t - 50) / 28);
+}
+
+/** Pixel, line, and page wheel deltas become one modest zoom factor. `pace` is {@link zoomPace}. */
+export function wheelZoomFactor(deltaY, deltaMode = 0, pace = 1) {
   const dy = Number(deltaY);
   if (!Number.isFinite(dy) || dy === 0) return 1;
   const mode = deltaMode | 0;
   const pixels = mode === 1 ? dy * 32 : mode === 2 ? dy * 800 : dy;
   const clamped = Math.max(-180, Math.min(180, pixels));
-  return Math.exp(-clamped * WHEEL_GAIN);
+  const gain = WHEEL_GAIN * (pace > 0 ? pace : 1);
+  return Math.exp(-clamped * gain);
+}
+
+/**
+ * True when two plates were colored on windows far enough apart that a crossfade would flash.
+ * A single eased step is not a clash.
+ */
+export function colorWindowsClash(a, b) {
+  if (!a || !b || a.top == null || b.top == null) return false;
+  const span = Math.max(1, Math.abs(a.top - a.floor));
+  if (Math.abs((a.floor || 0) - (b.floor || 0)) > span * 0.08) return true;
+  return Math.abs(a.top - b.top) > span * 0.08;
 }
 
 /** Spend part of a pending zoom. A frame grows by at most 3%, so one frame stays inside a level. */

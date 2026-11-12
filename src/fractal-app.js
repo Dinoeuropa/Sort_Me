@@ -18,6 +18,7 @@ import {
 } from "./fractals.js";
 import { framesFor, unitsPerFrame } from "./fractal-pace.js";
 import {
+  AUTO_ZOOM_STEP,
   COVER_SLACK,
   PLATE_BLEND_MS,
   PLATE_TARGET_MS,
@@ -62,7 +63,9 @@ import {
   zoomRaster,
   settledRaster,
   recursionLevel,
+  colorWindowsClash,
   wheelZoomFactor,
+  zoomPace,
   zoomBounds,
   zoomEscape,
   gpuZoomPlan,
@@ -88,6 +91,7 @@ import {
   drawPaths,
   drawPoints,
   drawTriangles,
+  ZOOM_COLOR_EASE,
   easeWindow,
   fitScale,
   paintEscape,
@@ -105,6 +109,9 @@ const depthOut = document.querySelector("#depth-out");
 const depthLabel = document.querySelector("#depth-label");
 const speedInput = document.querySelector("#speed");
 const speedOut = document.querySelector("#speed-out");
+const zoomSpeedInput = document.querySelector("#zoom-in-speed");
+const zoomSpeedOut = document.querySelector("#zoom-in-speed-out");
+const pinButton = document.querySelector("#pin-view");
 const complexityEl = document.querySelector("#complexity");
 const blurb = document.querySelector("#blurb");
 const paletteBlurb = document.querySelector("#palette-blurb");
@@ -184,6 +191,7 @@ const state = {
   flightView: null,
   autoZoom: false,
   reactive: true,
+  pinnedTarget: null,
   autoToken: 0,
   cursorParam: null,
   frozenParam: null,
@@ -379,6 +387,11 @@ function renderChrome() {
   autoZoomButton.hidden = !canAutoZoom();
   autoZoomButton.disabled = !(state.finished && !state.running && canAutoZoom());
   autoZoomButton.setAttribute("aria-pressed", String(state.autoZoom));
+  zoomSpeedOut.textContent = zoomSpeedLabel(zoomSpeedInput.value);
+  const pinned = Boolean(state.pinnedTarget);
+  pinButton.disabled = !canAutoZoom();
+  pinButton.setAttribute("aria-pressed", String(pinned));
+  pinButton.textContent = pinned ? "Pinned" : "Pin";
   modeBadge.hidden = !(canAutoZoom() && state.finished && !state.running);
   modeBadge.setAttribute("aria-pressed", String(reactive));
   modeBadge.textContent = reactive ? "reactive on" : "reactive off";
@@ -927,6 +940,32 @@ function isReactive(id = state.fractalId) {
   return canAutoZoom(id) && state.reactive && !state.autoZoom;
 }
 
+function zoomSpeedLabel(speed) {
+  const percent = (AUTO_ZOOM_STEP ** zoomPace(speed) - 1) * 100;
+  if (percent >= 10) return `${Math.round(percent)}%`;
+  const text = percent.toFixed(1);
+  return `${text}%`;
+}
+
+/** The point Autopilot plays toward. On the Mandelbrot set that is the value under the cursor. */
+function pinPoint() {
+  if (state.fractalId === "mandelbrot" && state.cursorParam && Number.isFinite(state.cursorParam.x)) {
+    return { x: state.cursorParam.x, y: state.cursorParam.y };
+  }
+  const view = state.view || state.home;
+  if (view && Number.isFinite(view.centerX) && Number.isFinite(view.centerY)) {
+    const point = { x: view.centerX, y: view.centerY };
+    if (typeof view.centerXLo === "number") point.xLo = view.centerXLo;
+    if (typeof view.centerYLo === "number") point.yLo = view.centerYLo;
+    return point;
+  }
+  const fractal = currentFractal();
+  if (fractal.kind !== "escape") return null;
+  const preset = currentPreset();
+  if (!Number.isFinite(preset.centerX) || !Number.isFinite(preset.centerY)) return null;
+  return { x: preset.centerX, y: preset.centerY };
+}
+
 function formatMag(mag) {
   let log10 = Number.NaN;
   if (Number.isFinite(mag) && mag > 0) log10 = Math.log10(mag);
@@ -1434,7 +1473,7 @@ function gpuPaletteWindow(job, width, height, cap, moving) {
     paletteFit.scene = scene;
     paletteFit.shown = paletteFit.window;
   } else if (moving) {
-    paletteFit.shown = easeWindow(paletteFit.shown, paletteFit.window);
+    paletteFit.shown = easeWindow(paletteFit.shown, paletteFit.window, ZOOM_COLOR_EASE);
   }
   return paletteFit.shown;
 }
@@ -2051,11 +2090,12 @@ function startAutoZoom() {
   state.autoDeep = null;
   state.autoZoom = true;
   const job = renderJob(state.view);
+  const pinned = Boolean(state.pinnedTarget);
   state.autoPath = autoZoomPath(
     state.view,
-    autoZoomTarget(job.fractalId, job.preset),
-    autoZoomFloor(job.fractalId, job.preset),
-    autoZoomFloorExp(job.fractalId, job.preset),
+    pinned ? { ...state.pinnedTarget } : autoZoomTarget(job.fractalId, job.preset),
+    pinned && job.fractalId === "mandelbrot" ? 1e-12 : autoZoomFloor(job.fractalId, job.preset),
+    pinned ? null : autoZoomFloorExp(job.fractalId),
   );
   state.autoOctave = 0;
   state.autoFade = null;
@@ -2092,9 +2132,12 @@ function stepAutoZoom(token) {
   state.zoomStamp = now;
   const path = state.autoPath;
   if (path && !state.autoHold && state.autoPlates.length) {
-    if (paletteFit.window) paletteFit.shown = easeWindow(paletteFit.shown, paletteFit.window);
+    if (paletteFit.window) paletteFit.shown = easeWindow(paletteFit.shown, paletteFit.window, ZOOM_COLOR_EASE);
     const next = advanceAutoZoom(path, state.autoOctave, autoZoomSteps(gap));
-    state.autoOctave = next.octave;
+    const pace = zoomPace(zoomSpeedInput.value);
+    const octave = state.autoOctave + (next.octave - state.autoOctave) * pace;
+    state.autoOctave = octave;
+    if (pace !== 1) next.done = octave >= path.maxOctave;
     if (next.done && !state.autoFade && state.autoStart) beginAutoFade();
     if (state.autoFade) {
       state.autoFade.t = Math.min(1, state.autoFade.t + 16.7 / AUTO_FADE_MS);
@@ -2152,6 +2195,7 @@ function ensureAutoPlate(token, box) {
     scaleLog(state.home || deepest) - scaleLog(deepest),
   ));
   const edge = Math.min(state.plateEdge || plateRasterEdge(cap), PLATE_EDGE_MAX);
+  const fit = zoomPalette(cap);
   const raster = rasterSize(box.width, box.height, box.dpr, true, edge);
   const view = { ...cover, flipY: Boolean(path.start.flipY) };
   const job = renderJob(view);
@@ -2167,6 +2211,8 @@ function ensureAutoPlate(token, box) {
     height: raster.height,
     cap,
     paletteId: state.paletteId,
+    floor: Number.isFinite(fit.top) ? fit.floor : null,
+    top: Number.isFinite(fit.top) ? fit.top : null,
     view,
     bitmap: true,
   }).then((result) => {
@@ -2196,7 +2242,7 @@ function adoptAutoPlate(result, token) {
     const finished = plateFrame(result.view, result.width, result.height);
     if (!plateCovers(finished, state.view, aspect, COVER_SLACK)) return;
     state.shownJob = result.jobId;
-    const plate = { canvas: snap, view: finished, born: performance.now() };
+    const plate = { canvas: snap, view: finished, born: performance.now(), color: result.color || null };
     const plates = state.autoPlates.filter((item) => scaleLess(finished, item.view));
     plates.push(plate);
     while (plates.length > AUTO_PLATES_KEPT) {
@@ -2241,7 +2287,9 @@ function drawPlateLayer(plates, view, width, height, aspect, alpha, now) {
   }
   const top = plates[index];
   const age = now - top.born;
-  const blend = age < PLATE_BLEND_MS && index > 0 ? age / PLATE_BLEND_MS : 1;
+  const under = index > 0 ? plates[index - 1] : null;
+  const clash = under && colorWindowsClash(under.color, top.color);
+  const blend = !clash && age < PLATE_BLEND_MS && index > 0 ? age / PLATE_BLEND_MS : 1;
   if (blend < 1) {
     ctx.globalAlpha = alpha;
     drawEscapePlate(plates[index - 1].canvas, plates[index - 1].view, view, width, height);
@@ -2362,7 +2410,7 @@ function onZoomGpuFrame(event) {
   state.zoomShare = 1;
   const elapsed = wall > 0 ? wall : state.zoomTook;
   state.zoomExpect = Math.max(8, elapsed);
-  placeAutoPlate(message.bitmap, job.view, job.cap);
+  placeAutoPlate(message.bitmap, job.view, job.cap, job.color);
 }
 
 /** Ask the worker for the next sharp picture, covering the zoom it will take to arrive. */
@@ -2411,7 +2459,14 @@ function queueGpuZoom(box) {
   }
   if (!paint) return;
   const id = ++state.zoomSerial;
-  state.zoomJob = { id, view: cover, width: raster.width, height: raster.height, cap };
+  state.zoomJob = {
+    id,
+    view: cover,
+    width: raster.width,
+    height: raster.height,
+    cap,
+    color: Number.isFinite(fit.top) ? { floor: fit.floor | 0, top: fit.top | 0 } : null,
+  };
   try {
     worker.postMessage({ type: "render", id, paint });
   } catch {
@@ -2419,11 +2474,11 @@ function queueGpuZoom(box) {
   }
 }
 
-function placeAutoPlate(snap, view, cap) {
+function placeAutoPlate(snap, view, cap, color = null) {
   const box = viewBox();
   const aspect = box.width / Math.max(1, box.height);
   const finished = plateFrame(view, snap.width, snap.height);
-  const plate = { canvas: snap, view: finished, born: performance.now(), pooled: true };
+  const plate = { canvas: snap, view: finished, born: performance.now(), pooled: true, color };
   if (!plateCovers(finished, state.view, aspect, COVER_SLACK)) {
     retirePlate(plate);
     return;
@@ -2552,7 +2607,7 @@ canvas.addEventListener("wheel", (event) => {
   const point = localPoint(event);
   glide.movedAt = performance.now();
   if (event.ctrlKey || Math.abs(event.deltaY) >= Math.abs(event.deltaX)) {
-    glide.factor *= wheelZoomFactor(event.deltaY, event.deltaMode);
+    glide.factor *= wheelZoomFactor(event.deltaY, event.deltaMode, zoomPace(zoomSpeedInput.value));
     glide.px = point.x;
     glide.py = point.y;
     startGlide();
@@ -2567,16 +2622,23 @@ canvas.addEventListener("wheel", (event) => {
 
 zoomInButton.addEventListener("click", () => {
   const box = viewBox();
-  queueZoom(box.width / 2, box.height / 2, 2);
+  queueZoom(box.width / 2, box.height / 2, 2 ** zoomPace(zoomSpeedInput.value));
 });
 zoomOutButton.addEventListener("click", () => {
   const box = viewBox();
-  queueZoom(box.width / 2, box.height / 2, 0.5);
+  queueZoom(box.width / 2, box.height / 2, 2 ** -zoomPace(zoomSpeedInput.value));
 });
 zoomResetButton.addEventListener("click", resetExplore);
 autoZoomButton.addEventListener("click", () => {
   if (state.autoZoom) stopAutoZoom();
   else startAutoZoom();
+});
+zoomSpeedInput.addEventListener("input", () => {
+  zoomSpeedOut.textContent = zoomSpeedLabel(zoomSpeedInput.value);
+});
+pinButton.addEventListener("click", () => {
+  state.pinnedTarget = state.pinnedTarget ? null : pinPoint();
+  renderChrome();
 });
 
 modeBadge.addEventListener("click", () => {
@@ -2593,6 +2655,7 @@ modeBadge.addEventListener("click", () => {
 
 fractalSelect.addEventListener("change", () => {
   state.fractalId = fractalSelect.value;
+  state.pinnedTarget = null;
   state.presetId = currentFractal().presets[0].id;
   const fractal = currentFractal();
   depthInput.min = String(fractal.minDepth);
