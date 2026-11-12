@@ -127,6 +127,13 @@ test("gpuDrawLimit is the smallest drawing-buffer guarantee, or null without Web
   assert.match(app, /pauseRaster\(/);
   assert.match(app, /refineBandRows\(/);
   assert.match(app, /nextZoomBandRows\(/);
+  const stop = app.slice(app.indexOf("function stopAutoZoom"), app.indexOf("function freezeCursor"));
+  assert.match(stop, /beginDeeper\(/);
+  assert.doesNotMatch(stop, /scheduleEscape/);
+  const worker = readFileSync(new URL("../src/zoom-gpu-worker.js", import.meta.url), "utf8");
+  assert.match(worker, /type: "strip"/);
+  assert.match(worker, /message\.stream/);
+  assert.match(worker, /generation/);
   assert.doesNotMatch(app, /motionPace\(state\.zoomPace/);
   assert.doesNotMatch(app, /autoZoom \? 1 : motionScale/);
   assert.match(app, /paletteProbe\.step\(\)/);

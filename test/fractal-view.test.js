@@ -44,9 +44,8 @@ import {
   gpuMotionShare,
   pauseRaster,
   refineBandRows,
+  deepenCap,
   zoomPlateSize,
-  ZOOM_PLATE_EDGE_MIN,
-  ZOOM_PLATE_HARD_MS,
   motionPace,
   motionScale,
   zoomShareNext,
@@ -352,26 +351,15 @@ test("a moving picture is drawn at the share of full size that fits the frame bu
   assert.equal(motionScale(Number.NaN, 1e6, 14), 1);
 });
 
-test("a deep zoom plate stays sharp enough to read and still finishes inside its time cap", () => {
-  const width = 1800;
-  const height = 1200;
-  const cap = 2615;
-  const plate = zoomPlateSize(width, height, cap);
-  const thumb = gpuMotionShare(cap, width * height);
-  const thumbPixels = Math.round(width * thumb) * Math.round(height * thumb);
-  const pixels = plate.width * plate.height;
-  assert.ok(Math.max(plate.width, plate.height) >= ZOOM_PLATE_EDGE_MIN, `${plate.width}x${plate.height}`);
-  assert.ok(pixels >= thumbPixels * 4, `${pixels} vs ${thumbPixels}`);
-  const time = (GPU_ITER_MS * cap * pixels) / 1e6;
-  assert.ok(time <= ZOOM_PLATE_HARD_MS * 1.08, time);
+test("a zoom plate is the screen even when the cap is deep and the GPU is slow", () => {
+  assert.deepEqual(zoomPlateSize(1800, 1200, 2615), { width: 1800, height: 1200 });
+  assert.deepEqual(zoomPlateSize(1800, 1200, 2615, 0.2), { width: 1800, height: 1200 });
 });
 
-test("a slow GPU keeps a deep zoom plate inside the hard time cap", () => {
-  const plate = zoomPlateSize(1800, 1200, 2615, 0.2);
-  const time = (0.2 * 2615 * plate.width * plate.height) / 1e6;
-  assert.ok(time <= ZOOM_PLATE_HARD_MS * 1.08, time);
-  assert.ok(plate.width < 1800);
-  assert.ok(plate.height < 1200);
+test("pausing continues the same pixels one step deeper", () => {
+  assert.equal(deepenCap(2615, 2615 + ORBIT_STEP), 2615 + ORBIT_STEP);
+  assert.equal(deepenCap(2048, 9000), 2048 + ORBIT_STEP);
+  assert.equal(deepenCap(9000, 9000), 9000);
 });
 
 test("a shallow zoom plate stays the size of the screen", () => {
