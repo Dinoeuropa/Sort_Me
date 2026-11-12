@@ -69,7 +69,7 @@ export const FRACTALS = [
     kind: "escape",
     latex: "z_{n+1}=z_n^2+c",
     blurb: "Square z and add the pixel. Points that stay bounded form the set.",
-    note: "Depth is the escape-time cap. Move the cursor to see the Julia set of that point. Deep zoom then dives into the seahorse valley.",
+    note: "Depth is the escape-time cap. Move the cursor to see the Julia set of that point. Autopilot then dives into the seahorse valley.",
     depthLabel: "Iterations",
     legend: ["Inside", "Early", "Late"],
     minDepth: 8,
