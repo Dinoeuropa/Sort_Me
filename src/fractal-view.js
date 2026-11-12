@@ -663,6 +663,24 @@ export function motionScale(msPerMegapixel, pixels, budgetMs) {
   return Math.max(MOTION_SCALE_MIN, Math.sqrt(budgetMs / full));
 }
 
+/**
+ * Milliseconds one million pixels cost for one iteration, until a GPU timer reports a real cost.
+ * At a few dozen iterations a screen still fits in a refresh. Near 2.7 million× the cap is about
+ * 2100, and the same screen would miss the refresh, so the moving frame is drawn smaller and stretched.
+ */
+export const GPU_ITER_MS = 0.05;
+
+/**
+ * Share of a moving GPU frame that fits one refresh.
+ * `costPerMpIter` is the measured milliseconds per million pixels per iteration. A missing
+ * measurement uses {@link GPU_ITER_MS}.
+ */
+export function gpuMotionShare(cap, pixels, costPerMpIter = Number.NaN, budgetMs = FRAME_PACE_MS) {
+  const iterations = Math.max(1, Number(cap) || 1);
+  const cost = Number.isFinite(costPerMpIter) && costPerMpIter > 0 ? costPerMpIter : GPU_ITER_MS;
+  return motionScale(cost * iterations, Math.max(1, pixels), budgetMs);
+}
+
 /** A refresh the dive can keep. A smooth 60Hz frame is about 17ms, so it does not count as late. */
 export const FRAME_PACE_MS = 20;
 

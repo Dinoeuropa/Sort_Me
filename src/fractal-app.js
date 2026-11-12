@@ -59,6 +59,7 @@ import {
   scaleRatio,
   pointBudget,
   gpuDepthMode,
+  gpuMotionShare,
   rasterSize,
   zoomRaster,
   settledRaster,
@@ -1599,16 +1600,21 @@ function paintGpuFrame(view, box, settle = false) {
     state.gpuPan = null;
     return false;
   }
-  const dest = settle
+  const full = settle
     ? settledRaster(box.width, box.height, box.rawDpr || box.dpr, gpuDrawLimit())
     : motionRaster(box);
+  const cap = exploredLevel();
+  const budget = settle ? 1 : gpuMotionShare(cap, full.width * full.height, gpuClock.cost);
+  const dest = budget === 1 ? full : {
+    width: Math.max(1, Math.round(full.width * budget)),
+    height: Math.max(1, Math.round(full.height * budget)),
+  };
   if (
     state.gpuPan
     && (state.gpuPan.width !== dest.width || state.gpuPan.height !== dest.height || state.gpuPan.view.scale !== view.scale || (state.gpuPan.view.scaleExp || 0) !== (view.scaleExp || 0))
   ) {
     state.gpuPan = null;
   }
-  const cap = exploredLevel();
   const depth = gpuDepthMode(view, dest.height);
   if (!depth || (depth !== "deep" && cap > GPU_ITER_LIMIT)) {
     state.gpuPan = null;
@@ -2350,8 +2356,14 @@ function displayRaster(box) {
   return { width, height };
 }
 
-function zoomJobSize(box) {
-  return displayRaster(box);
+function zoomJobSize(box, cap) {
+  const full = displayRaster(box);
+  const budget = gpuMotionShare(cap, full.width * full.height, gpuClock.cost);
+  if (budget === 1) return full;
+  return {
+    width: Math.max(1, Math.round(full.width * budget)),
+    height: Math.max(1, Math.round(full.height * budget)),
+  };
 }
 
 function retirePlate(plate) {
@@ -2427,7 +2439,6 @@ function queueGpuZoom(box) {
   const samples = [];
   for (let i = 0; i <= 4; i += 1) samples.push(autoZoomView(state.autoPath, from + ((ahead - from) * i) / 4));
   const cover = { ...coverViews(samples, aspect, plateMargin(from)), flipY: Boolean(state.autoPath.start.flipY) };
-  const raster = zoomJobSize(box);
   const deepestSample = samples[samples.length - 1];
   const wanted = escapeIterationCap(
     state.fractalId,
@@ -2435,6 +2446,7 @@ function queueGpuZoom(box) {
     scaleRatio(state.home, deepestSample),
     scaleLog(state.home) - scaleLog(deepestSample),
   );
+  const raster = zoomJobSize(box, wanted);
   const depth = gpuDepthMode(cover, raster.height);
   if (!depth || (depth !== "deep" && wanted > GPU_ITER_LIMIT)) return;
   const cap = paceZoomCap(wanted);

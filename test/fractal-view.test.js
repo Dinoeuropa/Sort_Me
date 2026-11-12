@@ -39,6 +39,7 @@ import {
   ZOOM_STRIP_MS,
   ORBIT_STEP,
   MOTION_SCALE_MIN,
+  gpuMotionShare,
   motionPace,
   motionScale,
   zoomShareNext,
@@ -330,6 +331,16 @@ test("a moving picture is drawn at the share of full size that fits the frame bu
   assert.ok(Math.abs(slow - 0.5) < 1e-9);
   assert.equal(motionScale(1e6, 1e6, 14), MOTION_SCALE_MIN);
   assert.equal(motionScale(Number.NaN, 1e6, 14), 1);
+});
+
+test("a moving GPU frame stays full size at a shallow cap and shrinks near 2.7 million times", () => {
+  const pixels = 2e6;
+  assert.equal(gpuMotionShare(48, pixels), 1);
+  const deep = gpuMotionShare(2100, pixels);
+  assert.ok(deep < 0.5, `share ${deep}`);
+  assert.ok(deep >= MOTION_SCALE_MIN);
+  assert.ok(gpuMotionShare(2100, pixels, 0.01) > deep);
+  assert.ok(gpuMotionShare(2100, pixels, 0.5) < deep);
 });
 
 test("a late zoom frame shrinks and a smooth one stays full size", () => {
