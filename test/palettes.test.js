@@ -11,6 +11,7 @@ import {
   fitTransform,
   paintEscape,
   paletteById,
+  ZOOM_COLOR_EASE,
 } from "../src/palettes.js";
 
 test("coloring programs are selectable and distinct", () => {
@@ -119,6 +120,10 @@ test("newton basins take different colors from the same palette", () => {
   assert.notDeepEqual(a, b);
   assert.notDeepEqual(b, c);
   assert.notDeepEqual(a, c);
+});
+
+test("a moving zoom eases its colors more slowly than a jump to the fitted window", () => {
+  assert.ok(ZOOM_COLOR_EASE > 0 && ZOOM_COLOR_EASE < 0.12);
 });
 
 test("paint writes one opaque pixel per sample", () => {

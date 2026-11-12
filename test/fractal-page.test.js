@@ -69,6 +69,23 @@ test("the glide control is labeled Deep zoom", () => {
   assert.doesNotMatch(readme, /auto zoom/);
 });
 
+test("play zoom and autopilot sit in the side panel, with one zoom speed", () => {
+  const controls = fractals.slice(fractals.indexOf('class="controls"'), fractals.indexOf('id="error"'));
+  assert.match(controls, /aria-label="Play zoom"/);
+  assert.match(controls, /id="zoom-in-speed"/);
+  assert.match(controls, />Zoom in speed</);
+  assert.match(controls, /aria-label="Autopilot"/);
+  assert.match(controls, /id="pin-view"/);
+  assert.match(controls, />Pin</);
+  assert.doesNotMatch(controls, /Dive speed|dive-speed|id="zoom-rate"|Hue phase|Color scale|Palette drift/);
+  assert.match(fractalApp, /zoomPace\(/);
+  assert.match(fractalApp, /pinnedTarget/);
+  assert.match(fractalApp, /advanceAutoZoom\(path, state\.autoOctave, autoZoomSteps\(gap\)\)/);
+  assert.match(fractalApp, /ZOOM_COLOR_EASE/);
+  assert.match(fractalApp, /colorWindowsClash/);
+  assert.match(css, /\.play-zoom/);
+});
+
 test("zoom in, zoom out, and auto zoom sit together as signs", () => {
   const explore = fractals.slice(fractals.indexOf('id="explore"'), fractals.indexOf('class="legend"'));
   assert.match(

@@ -63,6 +63,8 @@ export function renderEscape(request) {
     height: request.height | 0,
     cap: request.cap,
     paletteId: request.paletteId,
+    floor: Number.isFinite(request.floor) ? request.floor : null,
+    top: Number.isFinite(request.top) ? request.top : null,
     view: request.view,
     jobId: nextJobId++,
     onBand: request.onBand,
@@ -150,6 +152,8 @@ function postChunk(task, worker) {
     y0,
     rows,
     paletteId: task.paletteId,
+    floor: task.floor,
+    top: task.top,
   });
 }
 
@@ -254,6 +258,7 @@ function finish(job) {
     view: job.view,
     cap: job.cap,
     paletteId: job.paletteId,
+    color: colorOf(job),
   };
   if (active === job) active = null;
   job.settled = true;
@@ -275,7 +280,13 @@ function plateResult(job, picture) {
     view: job.view,
     cap: job.cap,
     paletteId: job.paletteId,
+    color: colorOf(job),
   };
+}
+
+function colorOf(job) {
+  if (!Number.isFinite(job.floor) || !Number.isFinite(job.top)) return null;
+  return { floor: job.floor | 0, top: job.top | 0 };
 }
 
 function startNext() {
@@ -318,6 +329,8 @@ function fallback(task) {
       y0: y,
       rows,
       paletteId: task.paletteId,
+      floor: task.floor,
+      top: task.top,
     });
     iterations.set(part.iterations, y * width);
     basins.set(part.basins, y * width);

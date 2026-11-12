@@ -73,6 +73,25 @@
             <input id="speed" type="range" min="1" max="100" value="28" />
           </div>
 
+          <section class="play-zoom" aria-label="Play zoom">
+            <h2 class="section-title">Play zoom</h2>
+            <div class="field">
+              <div class="slider-row">
+                <label for="zoom-in-speed">Zoom in speed</label>
+                <output id="zoom-in-speed-out" for="zoom-in-speed">0.5%</output>
+              </div>
+              <input id="zoom-in-speed" type="range" min="1" max="100" value="50" />
+            </div>
+          </section>
+
+          <section class="play-zoom" aria-label="Autopilot">
+            <h2 class="section-title">Autopilot</h2>
+            <div class="row">
+              <button type="button" id="pin-view" aria-pressed="false">Pin</button>
+            </div>
+            <p class="hint">Pins the point the dive plays toward.</p>
+          </section>
+
           <div class="row">
             <button type="button" id="toggle" class="primary">Draw</button>
             <button type="button" id="step">Step</button>

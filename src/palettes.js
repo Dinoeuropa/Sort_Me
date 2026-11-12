@@ -110,6 +110,12 @@ export function paletteWindow(samples, cap, weight = 1) {
 const WINDOW_EASE = 0.12;
 
 /**
+ * Slower than a settled fit. A dive that took the whole step each frame would flash brighter
+ * and darker as each new plate arrived.
+ */
+export const ZOOM_COLOR_EASE = 0.04;
+
+/**
  * The palette window a moving picture shows next: `shown` moved part of the way to the fitted
  * `target`, the floor evenly and the top geometrically, and at least one iteration a step so it
  * lands. Fits from a grid of samples can differ widely one view to the next, and a picture that
