@@ -53,20 +53,29 @@ test("the fractal page mirrors the sorting controls", () => {
   assert.doesNotMatch(fractals, /id="compare"/);
 });
 
-test("the glide control is labeled Deep zoom", () => {
-  assert.match(fractals, /id="auto-zoom"[^>]*>Deep zoom<\/button>/);
+test("the glide control is labeled Autopilot", () => {
+  assert.match(fractals, /id="auto-zoom"[^>]*>Autopilot<\/button>/);
+  assert.doesNotMatch(fractals, />Deep zoom</);
   assert.doesNotMatch(fractals, />Auto zoom</);
-  assert.match(fractalApp, /statusEl\.textContent = "Deep zoom"/);
-  assert.match(fractalApp, /`Deep zoom \$\{formatMag\(currentMagnification\(\)\)\}/);
+  assert.match(fractalApp, /statusEl\.textContent = "Autopilot"/);
+  assert.match(fractalApp, /`Autopilot \$\{formatMag\(currentMagnification\(\)\)\}/);
+  assert.doesNotMatch(fractalApp, /"Deep zoom"/);
   assert.doesNotMatch(fractalApp, /"Auto zoom"/);
-  assert.doesNotMatch(fractalApp, /`Auto zoom /);
   const fractalsJs = fs.readFileSync(new URL("../src/fractals.js", import.meta.url), "utf8");
-  assert.match(fractalsJs, /Deep zoom then dives/);
-  assert.doesNotMatch(fractalsJs, /Auto zoom then dives/);
+  assert.match(fractalsJs, /Autopilot then dives/);
+  assert.doesNotMatch(fractalsJs, /Deep zoom then dives/);
   const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.match(readme, /Deep zoom on those four/);
-  assert.doesNotMatch(readme, /Auto zoom/);
-  assert.doesNotMatch(readme, /auto zoom/);
+  assert.match(readme, /Autopilot on those four/);
+  assert.doesNotMatch(readme, /Deep zoom on those four/);
+});
+
+test("a gpu zoom job reads the palette window fitted in that function", () => {
+  const fn = fractalApp.slice(fractalApp.indexOf("function queueGpuZoom"), fractalApp.indexOf("function placeAutoPlate"));
+  const beforeTry = fn.slice(0, fn.indexOf("try {"));
+  const tryBlock = fn.slice(fn.indexOf("try {"), fn.indexOf("} catch"));
+  assert.match(beforeTry, /let fit = null/);
+  assert.doesNotMatch(tryBlock, /const fit/);
+  assert.match(fn, /color: Number\.isFinite\(fit\.top\)/);
 });
 
 test("play zoom and autopilot sit in the side panel, with one zoom speed", () => {

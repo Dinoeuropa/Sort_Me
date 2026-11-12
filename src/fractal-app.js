@@ -373,7 +373,7 @@ function renderChrome() {
   stageDraw.hidden = !canvasIsBlank();
   blankShow.setVisible(canvasIsBlank());
   dockSpeed.value = speedInput.value;
-  if (state.autoZoom) statusEl.textContent = "Deep zoom";
+  if (state.autoZoom) statusEl.textContent = "Autopilot";
   else if (state.exploring && !state.cursorRedraw) statusEl.textContent = "Zooming";
   else if (state.running) statusEl.textContent = "Drawing";
   else if (state.paused) statusEl.textContent = "Paused";
@@ -991,7 +991,7 @@ function formatComplex(x, y) {
 }
 
 function autoZoomBadge() {
-  return `Deep zoom ${formatMag(currentMagnification())} · ${exploredLevel().toLocaleString()} iterations`;
+  return `Autopilot ${formatMag(currentMagnification())} · ${exploredLevel().toLocaleString()} iterations`;
 }
 
 function formatParam() {
@@ -2440,8 +2440,9 @@ function queueGpuZoom(box) {
   const cap = paceZoomCap(wanted);
   const job = renderJob(cover);
   let paint = null;
+  let fit = null;
   try {
-    const fit = zoomPalette(cap);
+    fit = zoomPalette(cap);
     kickZoomPalette(job, raster.width, raster.height, cap, depth);
     paint = {
       fractalId: job.fractalId,
