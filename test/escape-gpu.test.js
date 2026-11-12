@@ -123,6 +123,10 @@ test("gpuDrawLimit is the smallest drawing-buffer guarantee, or null without Web
   assert.match(app, /settledRaster\([^;]*gpuDrawLimit\(\)/);
   assert.match(app, /zoomRaster\(/);
   assert.match(app, /const share = 1/);
+  assert.match(app, /zoomPlateSize\(/);
+  assert.match(app, /pauseRaster\(/);
+  assert.match(app, /refineBandRows\(/);
+  assert.match(app, /nextZoomBandRows\(/);
   assert.doesNotMatch(app, /motionPace\(state\.zoomPace/);
   assert.doesNotMatch(app, /autoZoom \? 1 : motionScale/);
   assert.match(app, /paletteProbe\.step\(\)/);

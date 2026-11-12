@@ -60,6 +60,10 @@ import {
   pointBudget,
   gpuDepthMode,
   gpuMotionShare,
+  nextZoomBandRows,
+  pauseRaster,
+  refineBandRows,
+  zoomPlateSize,
   rasterSize,
   zoomRaster,
   settledRaster,
@@ -1402,7 +1406,6 @@ let newestBand = 0;
 
 /** Milliseconds a settled band of the sharp picture may spend. */
 const BAND_BUDGET_MS = 24;
-const BAND_SHARE = 16;
 
 /** What the shader has cost lately, in milliseconds per million pixels per iteration of the cap. */
 const gpuClock = { cost: Number.NaN };
@@ -1600,10 +1603,10 @@ function paintGpuFrame(view, box, settle = false) {
     state.gpuPan = null;
     return false;
   }
-  const full = settle
-    ? settledRaster(box.width, box.height, box.rawDpr || box.dpr, gpuDrawLimit())
-    : motionRaster(box);
+  const settled = settledRaster(box.width, box.height, box.rawDpr || box.dpr, gpuDrawLimit());
   const cap = exploredLevel();
+  const pause = settle ? pauseRaster(displayRaster(box), settled, cap, gpuClock.cost) : null;
+  const full = settle ? pause : motionRaster(box);
   const budget = settle ? 1 : gpuMotionShare(cap, full.width * full.height, gpuClock.cost);
   const dest = budget === 1 ? full : {
     width: Math.max(1, Math.round(full.width * budget)),
@@ -1639,6 +1642,30 @@ function paintGpuFrame(view, box, settle = false) {
   const share = 1;
   if (settle && refine.key === key) return true;
   cancelRefine();
+  if (pause?.band) {
+    holdShownFrame(dest);
+    state.gpuKey = key;
+    state.gpuShare = 0;
+    state.gpuPan = null;
+    state.gpu = true;
+    state.gpuHold = true;
+    state.plate = null;
+    state.iterations = null;
+    state.basins = null;
+    state.raster = null;
+    state.samples = dest.width * dest.height;
+    state.shownCap = cap;
+    state.finished = true;
+    state.exploring = false;
+    if (state.flightJob) {
+      state.shownJob = Math.max(state.shownJob, state.flightJob);
+      newestBand = Math.max(newestBand, state.flightJob);
+      state.flightJob = 0;
+      state.flightView = null;
+    }
+    sharpenGpuFrame(key, dest, shared);
+    return true;
+  }
   if (!(settle && state.gpuKey === key && state.gpuShare < 1)) {
     const width = Math.max(1, Math.round(dest.width * share));
     const height = Math.max(1, Math.round(dest.height * share));
@@ -1827,6 +1854,8 @@ function paintGpuPan(view, dest, shared) {
 function sharpenGpuFrame(key, dest, shared) {
   refine.key = key;
   let y = 0;
+  let rows = Math.min(dest.height, nextZoomBandRows(dest.height, shared.cap));
+  let known = false;
   const band = () => {
     refine.raf = 0;
     if (refine.key !== key || state.gpuKey !== key || state.running || state.autoZoom) return;
@@ -1834,12 +1863,12 @@ function sharpenGpuFrame(key, dest, shared) {
       refine.key = "";
       return;
     }
-    const perRow = Number.isFinite(gpuClock.cost) ? (gpuClock.cost * shared.cap * dest.width) / 1e6 : 0;
-    // Thin strips leave a GPU mostly idle, so a band is never under a sixteenth of the frame.
-    const least = Math.ceil(dest.height / BAND_SHARE);
-    const rows = perRow > 0 ? Math.max(least, Math.floor(BAND_BUDGET_MS / perRow)) : dest.height;
-    const to = Math.min(dest.height, y + rows);
+    const remaining = dest.height - y;
+    if (known) rows = refineBandRows(dest.width, remaining, shared.cap, gpuClock.cost, BAND_BUDGET_MS);
+    const span = Math.max(1, Math.min(remaining, rows));
+    const to = y + span;
     let sheet = null;
+    const started = performance.now();
     try {
       sheet = paintGpuEscape({ ...shared, width: dest.width, height: dest.height, rows: { from: y, to } });
     } catch {
@@ -1852,6 +1881,14 @@ function sharpenGpuFrame(key, dest, shared) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.drawImage(sheet, 0, 0, dest.width, to - y, 0, y, dest.width, to - y);
+    const elapsed = performance.now() - started;
+    if (elapsed > 0 && shared.cap > 0) {
+      const sample = (elapsed * 1e6) / (span * dest.width * shared.cap);
+      if (Number.isFinite(sample) && sample > 0) {
+        gpuClock.cost = Number.isFinite(gpuClock.cost) ? gpuClock.cost * 0.5 + sample * 0.5 : sample;
+        known = true;
+      }
+    }
     y = to;
     if (y < dest.height) {
       refine.raf = requestAnimationFrame(band);
@@ -1865,7 +1902,7 @@ function sharpenGpuFrame(key, dest, shared) {
 
 /**
  * A quick plate is the moving raster and marks itself a draft, so the sharp picture follows once it
- * is on screen. Stopping a deep dive takes this road: the full raster there runs for many seconds.
+ * is on screen. Stopping a deep dive paints the screen in bands instead of one supersampled sheet.
  */
 function scheduleEscape(quick = false) {
   if (state.autoZoom) return;
@@ -2358,12 +2395,31 @@ function displayRaster(box) {
 
 function zoomJobSize(box, cap) {
   const full = displayRaster(box);
-  const budget = gpuMotionShare(cap, full.width * full.height, gpuClock.cost);
-  if (budget === 1) return full;
-  return {
-    width: Math.max(1, Math.round(full.width * budget)),
-    height: Math.max(1, Math.round(full.height * budget)),
-  };
+  return zoomPlateSize(full.width, full.height, cap, gpuClock.cost);
+}
+
+function noteGpuCost(ms, width, height, cap) {
+  if (!(ms > 0) || !(width > 0) || !(height > 0) || !(cap > 0)) return;
+  const sample = (ms * 1e6) / (width * height * cap);
+  if (!(sample > 0) || !Number.isFinite(sample)) return;
+  gpuClock.cost = Number.isFinite(gpuClock.cost) ? gpuClock.cost * 0.5 + sample * 0.5 : sample;
+}
+
+function holdShownFrame(dest) {
+  if (canvas.width === dest.width && canvas.height === dest.height) return;
+  const previous = document.createElement("canvas");
+  previous.width = canvas.width;
+  previous.height = canvas.height;
+  if (previous.width && previous.height) previous.getContext("2d").drawImage(canvas, 0, 0);
+  canvas.width = dest.width;
+  canvas.height = dest.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "low";
+  if (previous.width && previous.height) {
+    ctx.drawImage(previous, 0, 0, previous.width, previous.height, 0, 0, dest.width, dest.height);
+  }
 }
 
 function retirePlate(plate) {
@@ -2419,6 +2475,7 @@ function onZoomGpuFrame(event) {
   const took = Number(message.ms);
   const wall = Number(message.wall);
   state.zoomTook = took > 0 ? took : state.zoomTook;
+  noteGpuCost(took, job.width, job.height, job.cap);
   state.zoomShare = 1;
   const elapsed = wall > 0 ? wall : state.zoomTook;
   state.zoomExpect = Math.max(8, elapsed);
