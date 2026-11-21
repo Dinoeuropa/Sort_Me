@@ -709,15 +709,6 @@ export function gpuMotionShare(cap, pixels, costPerMpIter = Number.NaN, budgetMs
   return motionScale(cost * iterations, Math.max(1, pixels), budgetMs);
 }
 
-/** Milliseconds one autopilot plate may aim for. It is drawn off the page, so it can outlast one refresh. */
-export const ZOOM_PLATE_BUDGET_MS = 96;
-
-/** Long edge an autopilot plate keeps when the screen is larger and the time cap still allows it. */
-export const ZOOM_PLATE_EDGE_MIN = 1280;
-
-/** GPU time an autopilot plate must not pass, even when that long edge would cost more. */
-export const ZOOM_PLATE_HARD_MS = 160;
-
 /** Milliseconds one band of a paused picture may occupy. */
 export const PAUSE_BAND_MS = 24;
 
@@ -727,25 +718,26 @@ function measuredIterCost(costPerMpIter) {
 
 /**
  * Pixel size of one autopilot plate.
- * The plate is drawn off the page, so it stays sharper than a one-refresh thumbnail,
- * and it still stops at a hard time so a deep cap does not pin the GPU.
+ * The plate is the screen itself. The worker paints it in short strips, so the page stays
+ * responsive while the picture on screen is already the high-definition frame.
  */
-export function zoomPlateSize(width, height, cap, costPerMpIter = Number.NaN) {
-  const w = Math.max(1, Math.round(Number(width) || 1));
-  const h = Math.max(1, Math.round(Number(height) || 1));
-  const pixels = w * h;
-  const iterations = Math.max(1, Number(cap) || 1);
-  const cost = measuredIterCost(costPerMpIter);
-  const fit = gpuMotionShare(iterations, pixels, cost, ZOOM_PLATE_BUDGET_MS);
-  const edge = Math.max(w, h);
-  const floor = Math.min(1, ZOOM_PLATE_EDGE_MIN / edge);
-  let share = Math.min(1, Math.max(fit, floor));
-  const timeAt = (portion) => (cost * iterations * pixels * portion * portion) / 1e6;
-  if (timeAt(share) > ZOOM_PLATE_HARD_MS) share = gpuMotionShare(iterations, pixels, cost, ZOOM_PLATE_HARD_MS);
+export function zoomPlateSize(width, height) {
   return {
-    width: Math.max(1, Math.round(w * share)),
-    height: Math.max(1, Math.round(h * share)),
+    width: Math.max(1, Math.round(Number(width) || 1)),
+    height: Math.max(1, Math.round(Number(height) || 1)),
   };
+}
+
+/**
+ * The next iteration cap after a pause.
+ * One orbit step past what is already on screen, and never past `goal`.
+ * The pixels stay the same size; only the escape depth grows.
+ */
+export function deepenCap(shown, goal) {
+  const have = Math.max(0, Math.round(Number(shown) || 0));
+  const need = Math.max(have, Math.round(Number(goal) || 0));
+  if (need <= have) return have;
+  return Math.min(need, have + ORBIT_STEP);
 }
 
 /**

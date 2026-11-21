@@ -31,6 +31,7 @@ import {
   easeFactor,
   escapeSourceBlit,
   fitZoomOut,
+  deepenCap,
   escapeIterationCap,
   escapeMagnification,
   escapeWindow,
@@ -47,6 +48,7 @@ import {
   PLATE_EDGE_MAX,
   pacedOrbitCap,
   ORBIT_SLICE,
+  ORBIT_STEP,
   ZOOM_PLATE_MS,
   pickPlate,
   plateBudget,
@@ -1906,6 +1908,10 @@ function sharpenGpuFrame(key, dest, shared) {
  */
 function scheduleEscape(quick = false) {
   if (state.autoZoom) return;
+  if (state.deepen) {
+    state.deepen = null;
+    state.zoomSerial += 1;
+  }
   const targetView = pictureView() || state.view;
   if (!targetView) return;
   if (paintGpuFrame(targetView, viewBox(), true)) return;
@@ -2088,9 +2094,107 @@ function haltAutoZoom() {
 
 function stopAutoZoom() {
   const was = state.autoZoom;
+  const shown = state.shownCap;
+  const color = paletteFit.shown
+    ? { floor: paletteFit.shown.floor | 0, top: paletteFit.shown.top | 0 }
+    : null;
   haltAutoZoom();
-  if (was && state.finished && state.home && state.view) scheduleEscape(true);
+  if (was && state.finished && state.home && state.view) beginDeeper(shown, color);
   renderChrome();
+}
+
+/**
+ * Keep the high-definition frame already on screen and keep iterating those same pixels.
+ * The first finished strip is drawn at once, so pausing does not start a separate picture.
+ */
+function beginDeeper(shown, color) {
+  const view = pictureView() || state.view;
+  if (!view || !state.home) return;
+  const box = viewBox();
+  const screen = displayRaster(box);
+  const full = escapeIterationCap(
+    state.fractalId,
+    state.baseDepth || depthValue(),
+    scaleRatio(state.home, view),
+    scaleLog(state.home) - scaleLog(view),
+  );
+  state.deepen = {
+    id: 0,
+    view: { ...view },
+    color,
+    goal: Math.max(full, (shown | 0) + ORBIT_STEP),
+    cap: shown | 0,
+    width: screen.width,
+    height: screen.height,
+  };
+  requestDeeper();
+}
+
+function requestDeeper() {
+  const job = state.deepen;
+  if (!job || state.autoZoom) return;
+  const next = deepenCap(job.cap, job.goal);
+  if (!(next > job.cap)) {
+    state.deepen = null;
+    return;
+  }
+  const worker = zoomGpuWorker();
+  if (!worker) {
+    state.deepen = null;
+    return;
+  }
+  const depth = gpuDepthMode(job.view, job.height);
+  if (!depth || (depth !== "deep" && next > GPU_ITER_LIMIT)) {
+    state.deepen = null;
+    return;
+  }
+  const render = renderJob(job.view);
+  const fit = job.color;
+  const id = ++state.zoomSerial;
+  job.id = id;
+  job.cap = next;
+  try {
+    worker.postMessage({
+      type: "render",
+      id,
+      stream: true,
+      paint: {
+        fractalId: render.fractalId,
+        preset: render.preset,
+        width: job.width,
+        height: job.height,
+        cap: next,
+        paletteId: state.paletteId,
+        depth,
+        floor: fit ? fit.floor : 0,
+        top: fit ? fit.top : next,
+      },
+    });
+  } catch {
+    state.deepen = null;
+  }
+}
+
+function paintDeeperStrip(message) {
+  const job = state.deepen;
+  if (!job || message.id !== job.id || !message.bitmap) {
+    message?.bitmap?.close?.();
+    return;
+  }
+  if (canvas.width !== job.width || canvas.height !== job.height) {
+    canvas.width = job.width;
+    canvas.height = job.height;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(message.bitmap, message.x | 0, message.y | 0);
+  message.bitmap.close?.();
+  state.samples = job.width * job.height;
+  state.shownCap = job.cap;
+  state.finished = true;
+  state.gpu = true;
+  state.gpuHold = true;
 }
 
 function freezeCursor() {
@@ -2118,6 +2222,7 @@ function capturePlate(view) {
 
 function startAutoZoom() {
   if (!state.finished || state.running || !state.home || !state.view || !canAutoZoom()) return;
+  state.deepen = null;
   const hoveringMandelbrot = state.fractalId === "mandelbrot" && state.cursorParam;
   cancelGlide();
   state.frozenParam = freezeCursor();
@@ -2460,6 +2565,19 @@ function zoomGpuWorker() {
 /** A sharp frame finished off the page thread. The picture already moving is what it replaces. */
 function onZoomGpuFrame(event) {
   const message = event.data;
+  if (message?.type === "strip") {
+    paintDeeperStrip(message);
+    return;
+  }
+  if (state.deepen && message?.id === state.deepen.id) {
+    message?.bitmap?.close?.();
+    if (message.failed) {
+      state.deepen = null;
+      return;
+    }
+    requestDeeper();
+    return;
+  }
   const job = state.zoomJob;
   if (!job || message?.id !== job.id || !state.autoZoom) {
     message?.bitmap?.close?.();
